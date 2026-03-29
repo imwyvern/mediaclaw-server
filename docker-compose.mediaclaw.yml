@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: mediaclaw-mongodb
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: mediaclaw
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: mediaclaw-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: mediaclaw-minio
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      MINIO_ROOT_USER: mediaclaw
+      MINIO_ROOT_PASSWORD: mediaclaw123
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+
+  # NestJS API server (build locally)
+  api:
+    build:
+      context: ./project/aitoearn-backend
+      dockerfile: Dockerfile
+    container_name: mediaclaw-api
+    ports:
+      - '3002:3002'
+    env_file:
+      - .env
+    depends_on:
+      - mongodb
+      - redis
+      - minio
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  redis-data:
+  minio-data:
