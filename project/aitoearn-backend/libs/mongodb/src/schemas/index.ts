@@ -33,6 +33,7 @@ import {
   PointsRecord,
   PointsRecordSchema,
 } from './points-record.schema'
+import { PlatformAccount, PlatformAccountSchema } from './platform-account.schema'
 import { PublishDayInfo, PublishDayInfoSchema } from './publish-day-info.schema'
 import { PublishInfo, PublishInfoSchema } from './publish-info.schema'
 import { PublishRecord, PublishRecordSchema } from './publish-record.schema'
@@ -76,6 +77,7 @@ export * from './notification-config.schema'
 export * from './notification.schema'
 export * from './oauth2-credential.schema'
 export * from './points-record.schema'
+export * from './platform-account.schema'
 export * from './publish-day-info.schema'
 export * from './publish-info.schema'
 export * from './publish-record.schema'
@@ -95,6 +97,7 @@ export const schemas = [
   { name: CreditsBalance.name, schema: CreditsBalanceSchema },
   { name: CreditsRecord.name, schema: CreditsRecordSchema },
   { name: PointsRecord.name, schema: PointsRecordSchema },
+  { name: PlatformAccount.name, schema: PlatformAccountSchema },
   { name: AiLog.name, schema: AiLogSchema },
   { name: Blog.name, schema: BlogSchema },
   { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },

@@ -11,6 +11,7 @@ import {
   Organization, OrganizationSchema,
   MediaClawUser, MediaClawUserSchema,
   NotificationConfig, NotificationConfigSchema,
+  PlatformAccount, PlatformAccountSchema,
   Report, ReportSchema,
   VideoPack, VideoPackSchema,
   VideoTask, VideoTaskSchema,
@@ -52,6 +53,7 @@ import { MediaClawAssetModule } from './asset/asset.module'
 import { PipelineSystemModule } from './pipeline-system/pipeline-system.module'
 import { NotificationModule } from './notification/notification.module'
 import { ReportModule } from './report/report.module'
+import { PlatformAccountModule } from './platform-account/platform-account.module'
 
 @Module({
   imports: [
@@ -66,6 +68,7 @@ import { ReportModule } from './report/report.module'
       { name: CopyHistory.name, schema: CopyHistorySchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
       { name: NotificationConfig.name, schema: NotificationConfigSchema },
+      { name: PlatformAccount.name, schema: PlatformAccountSchema },
       { name: Report.name, schema: ReportSchema },
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
@@ -103,6 +106,7 @@ import { ReportModule } from './report/report.module'
     MediaClawAssetModule,
     PipelineSystemModule,
     NotificationModule,
+    PlatformAccountModule,
     ReportModule,
     WebhookModule,
     WorkerModule,
