@@ -110,17 +110,23 @@ export class VideoService {
     quality?: any
     copy?: any
   }) {
-    const update: any = { status }
-    if (data?.outputVideoUrl) update.outputVideoUrl = data.outputVideoUrl
-    if (data?.errorMessage) update.errorMessage = data.errorMessage
-    if (data?.quality) update.quality = data.quality
-    if (data?.copy) update.copy = data.copy
+    const timelineEntry = {
+      status: this.mapTimelineStatus(status),
+      rawStatus: status,
+      timestamp: new Date().toISOString(),
+    }
+
+    const updateSet: Record<string, any> = { status }
+    if (data?.outputVideoUrl) updateSet['outputVideoUrl'] = data.outputVideoUrl
+    if (data?.errorMessage) updateSet['errorMessage'] = data.errorMessage
+    if (data?.quality) updateSet['quality'] = data.quality
+    if (data?.copy) updateSet['copy'] = data.copy
 
     if (status === VideoTaskStatus.ANALYZING || status === VideoTaskStatus.EDITING) {
-      update.startedAt = new Date()
+      updateSet['startedAt'] = new Date()
     }
     if (status === VideoTaskStatus.COMPLETED || status === VideoTaskStatus.FAILED) {
-      update.completedAt = new Date()
+      updateSet['completedAt'] = new Date()
     }
 
     // If failed, refund credit
@@ -132,7 +138,14 @@ export class VideoService {
       }
     }
 
-    return this.videoTaskModel.findByIdAndUpdate(taskId, update, { new: true }).exec()
+    return this.videoTaskModel.findByIdAndUpdate(
+      taskId,
+      {
+        $set: updateSet,
+        $push: { 'metadata.timeline': timelineEntry },
+      },
+      { new: true },
+    ).exec()
   }
 
   async recordRetry(taskId: string, retryCount: number, errorMessage: string) {
@@ -166,5 +179,20 @@ export class VideoService {
       { $set: { 'copy': copy } },
       { new: true },
     ).exec()
+  }
+
+  private mapTimelineStatus(status: VideoTaskStatus) {
+    switch (status) {
+      case VideoTaskStatus.PENDING:
+        return 'queued'
+      case VideoTaskStatus.COMPLETED:
+        return 'completed'
+      case VideoTaskStatus.FAILED:
+        return 'failed'
+      case VideoTaskStatus.CANCELLED:
+        return 'cancelled'
+      default:
+        return 'processing'
+    }
   }
 }

@@ -96,6 +96,30 @@ export class BillingService {
   }
 
   /**
+   * Restore consumed credits when a task is cancelled before processing.
+   */
+  async refundCredit(userId: string, credits: number = 1): Promise<boolean> {
+    const pack = await this.videoPackModel.findOne({
+      userId,
+      status: { $in: [PackStatus.ACTIVE, PackStatus.DEPLETED] },
+    })
+    .sort({ purchasedAt: 1 })
+    .exec()
+
+    if (!pack) {
+      this.logger.warn(`No credit pack found for refund, userId=${userId}`)
+      return false
+    }
+
+    await this.videoPackModel.findByIdAndUpdate(pack._id, {
+      $inc: { remainingCredits: credits },
+      $set: { status: PackStatus.ACTIVE },
+    }).exec()
+
+    return true
+  }
+
+  /**
    * Get user's credit balance
    */
   async getBalance(userId: string) {

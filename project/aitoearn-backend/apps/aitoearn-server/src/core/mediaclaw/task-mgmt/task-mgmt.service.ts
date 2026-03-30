@@ -1,0 +1,431 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common'
+import { InjectQueue } from '@nestjs/bullmq'
+import { InjectModel } from '@nestjs/mongoose'
+import { Queue } from 'bullmq'
+import { Model, Types } from 'mongoose'
+import {
+  Brand,
+  Pipeline,
+  VideoTask,
+  VideoTaskStatus,
+  VideoTaskType,
+} from '@yikart/mongodb'
+import { BillingService } from '../billing/billing.service'
+import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData } from '../worker/worker.constants'
+
+interface CreateTaskParams {
+  requestedBy: string
+  brandId?: string
+  pipelineId?: string
+  taskType: VideoTaskType
+  sourceVideoUrl?: string
+  metadata?: Record<string, any>
+}
+
+interface TaskFilters {
+  status?: VideoTaskStatus
+  brandId?: string
+  startDate?: string
+  endDate?: string
+}
+
+interface PaginationInput {
+  page?: number
+  limit?: number
+}
+
+interface TaskTimelineEntry {
+  status: string
+  rawStatus?: string
+  timestamp: string
+  message?: string
+}
+
+@Injectable()
+export class TaskMgmtService {
+  constructor(
+    @InjectModel(VideoTask.name)
+    private readonly videoTaskModel: Model<VideoTask>,
+    @InjectModel(Brand.name)
+    private readonly brandModel: Model<Brand>,
+    @InjectModel(Pipeline.name)
+    private readonly pipelineModel: Model<Pipeline>,
+    private readonly billingService: BillingService,
+    @InjectQueue(VIDEO_WORKER_QUEUE)
+    private readonly videoWorkerQueue: Queue<VideoWorkerJobData>,
+  ) {}
+
+  async createTask(orgId: string, params: CreateTaskParams) {
+    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
+    if (!params.requestedBy?.trim()) {
+      throw new BadRequestException('requestedBy is required')
+    }
+    if (!params.taskType || !Object.values(VideoTaskType).includes(params.taskType)) {
+      throw new BadRequestException('Invalid task type')
+    }
+
+    await this.ensureBrandBelongsToOrg(params.brandId, normalizedOrgId)
+    await this.ensurePipelineBelongsToOrg(params.pipelineId, normalizedOrgId)
+
+    const taskObjectId = new Types.ObjectId()
+    const charged = await this.billingService.deductCredit(
+      params.requestedBy,
+      taskObjectId.toString(),
+      1,
+    )
+
+    if (!charged) {
+      throw new BadRequestException('Insufficient credits')
+    }
+
+    const createdAt = new Date().toISOString()
+    const timeline = [
+      this.createTimelineEntry('created', createdAt, 'Task created'),
+      this.createTimelineEntry('queued', createdAt, 'Queued for processing', VideoTaskStatus.PENDING),
+    ]
+
+    const task = await this.videoTaskModel.create({
+      _id: taskObjectId,
+      userId: params.requestedBy,
+      orgId: normalizedOrgId,
+      brandId: params.brandId ? this.toObjectId(params.brandId, 'brandId') : null,
+      pipelineId: params.pipelineId ? this.toObjectId(params.pipelineId, 'pipelineId') : null,
+      taskType: params.taskType,
+      status: VideoTaskStatus.PENDING,
+      sourceVideoUrl: params.sourceVideoUrl || '',
+      creditsConsumed: 1,
+      creditCharged: true,
+      metadata: {
+        ...(params.metadata || {}),
+        timeline,
+      },
+    })
+
+    await this.videoWorkerQueue.add(
+      'analyze-source',
+      { taskId: task._id.toString() },
+      { jobId: `${task._id.toString()}:analyze-source` },
+    )
+
+    return task
+  }
+
+  async getTask(taskId: string) {
+    const task = await this.videoTaskModel.findById(this.toObjectId(taskId, 'taskId')).exec()
+    if (!task) {
+      throw new NotFoundException('Task not found')
+    }
+    return task
+  }
+
+  async listTasks(orgId: string, filters: TaskFilters, pagination: PaginationInput) {
+    const page = this.normalizePage(pagination.page)
+    const limit = this.normalizeLimit(pagination.limit)
+    const skip = (page - 1) * limit
+    const query = this.buildTaskQuery(orgId, filters)
+
+    const [items, total] = await Promise.all([
+      this.videoTaskModel
+        .find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.videoTaskModel.countDocuments(query),
+    ])
+
+    return {
+      items: items.map(task => ({
+        id: task._id.toString(),
+        orgId: task.orgId?.toString() || null,
+        userId: task.userId,
+        brandId: task.brandId?.toString() || null,
+        pipelineId: task.pipelineId?.toString() || null,
+        taskType: task.taskType,
+        status: task.status,
+        sourceVideoUrl: task.sourceVideoUrl,
+        outputVideoUrl: task.outputVideoUrl,
+        retryCount: task.retryCount,
+        errorMessage: task.errorMessage,
+        createdAt: task.createdAt,
+        startedAt: task.startedAt,
+        completedAt: task.completedAt,
+      })),
+      total,
+      page,
+      limit,
+    }
+  }
+
+  async cancelTask(taskId: string) {
+    const task = await this.getTask(taskId)
+    if (task.status !== VideoTaskStatus.PENDING) {
+      throw new BadRequestException('Only pending tasks can be cancelled')
+    }
+
+    await this.removeQueuedJobs(task._id.toString())
+
+    if (task.creditCharged) {
+      await this.billingService.refundCredit(task.userId, task.creditsConsumed || 1)
+    }
+
+    const updated = await this.videoTaskModel.findByIdAndUpdate(
+      task._id,
+      {
+        $set: {
+          status: VideoTaskStatus.CANCELLED,
+          creditCharged: false,
+          completedAt: new Date(),
+          'metadata.creditRefundedAt': new Date().toISOString(),
+        },
+        $push: {
+          'metadata.timeline': this.createTimelineEntry(
+            'cancelled',
+            new Date().toISOString(),
+            'Task cancelled by user',
+            VideoTaskStatus.CANCELLED,
+          ),
+        },
+      },
+      { new: true },
+    ).exec()
+
+    return updated
+  }
+
+  async retryTask(taskId: string) {
+    const task = await this.getTask(taskId)
+    if (task.status !== VideoTaskStatus.FAILED) {
+      throw new BadRequestException('Only failed tasks can be retried')
+    }
+
+    const updated = await this.videoTaskModel.findByIdAndUpdate(
+      task._id,
+      {
+        $set: {
+          status: VideoTaskStatus.PENDING,
+          startedAt: null,
+          completedAt: null,
+          errorMessage: '',
+        },
+        $push: {
+          'metadata.timeline': {
+            $each: [
+              this.createTimelineEntry(
+                'retry_requested',
+                new Date().toISOString(),
+                'Retry requested by user',
+              ),
+              this.createTimelineEntry(
+                'queued',
+                new Date().toISOString(),
+                'Queued for retry',
+                VideoTaskStatus.PENDING,
+              ),
+            ],
+          },
+        },
+      },
+      { new: true },
+    ).exec()
+
+    await this.videoWorkerQueue.add(
+      'analyze-source',
+      { taskId: task._id.toString() },
+      { jobId: `${task._id.toString()}:analyze-source:retry:${Date.now()}` },
+    )
+
+    return updated
+  }
+
+  async batchDownload(taskIds: string[]) {
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      throw new BadRequestException('taskIds is required')
+    }
+
+    const objectIds = taskIds.map(taskId => this.toObjectId(taskId, 'taskId'))
+    const tasks = await this.videoTaskModel.find({ _id: { $in: objectIds } }).lean().exec()
+
+    return tasks.map(task => ({
+      taskId: task._id.toString(),
+      status: task.status,
+      downloadUrl: task.outputVideoUrl
+        ? `${task.outputVideoUrl}${task.outputVideoUrl.includes('?') ? '&' : '?'}download=1`
+        : null,
+    }))
+  }
+
+  async getTaskTimeline(taskId: string) {
+    const task = await this.videoTaskModel.findById(this.toObjectId(taskId, 'taskId')).lean().exec()
+    if (!task) {
+      throw new NotFoundException('Task not found')
+    }
+
+    return {
+      taskId: task._id.toString(),
+      timeline: this.normalizeTimeline(task),
+    }
+  }
+
+  private buildTaskQuery(orgId: string, filters: TaskFilters) {
+    const query: Record<string, any> = {
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }
+
+    if (filters.status) {
+      query['status'] = filters.status
+    }
+
+    if (filters.brandId) {
+      query['brandId'] = this.toObjectId(filters.brandId, 'brandId')
+    }
+
+    if (filters.startDate || filters.endDate) {
+      query['createdAt'] = {}
+      if (filters.startDate) {
+        query['createdAt']['$gte'] = new Date(filters.startDate)
+      }
+      if (filters.endDate) {
+        query['createdAt']['$lte'] = new Date(filters.endDate)
+      }
+    }
+
+    return query
+  }
+
+  private normalizeTimeline(task: any): TaskTimelineEntry[] {
+    const fromMetadata = Array.isArray(task.metadata?.timeline)
+      ? task.metadata.timeline
+      : []
+
+    if (fromMetadata.length > 0) {
+      return fromMetadata
+        .map((entry: any) => ({
+          status: entry.status,
+          rawStatus: entry.rawStatus,
+          timestamp: entry.timestamp,
+          message: entry.message,
+        }))
+        .sort((left: TaskTimelineEntry, right: TaskTimelineEntry) =>
+          new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
+        )
+    }
+
+    const fallback: TaskTimelineEntry[] = [
+      this.createTimelineEntry('created', new Date(task.createdAt).toISOString(), 'Task created'),
+    ]
+
+    if (task.status === VideoTaskStatus.PENDING) {
+      fallback.push(
+        this.createTimelineEntry('queued', new Date(task.createdAt).toISOString(), 'Queued for processing', task.status),
+      )
+    }
+    if (task.startedAt) {
+      fallback.push(
+        this.createTimelineEntry('processing', new Date(task.startedAt).toISOString(), 'Task processing', task.status),
+      )
+    }
+    if (task.completedAt) {
+      fallback.push(
+        this.createTimelineEntry(
+          this.mapTerminalTimelineStatus(task.status),
+          new Date(task.completedAt).toISOString(),
+          'Task finished',
+          task.status,
+        ),
+      )
+    }
+
+    return fallback
+  }
+
+  private mapTerminalTimelineStatus(status: VideoTaskStatus) {
+    switch (status) {
+      case VideoTaskStatus.COMPLETED:
+        return 'completed'
+      case VideoTaskStatus.FAILED:
+        return 'failed'
+      case VideoTaskStatus.CANCELLED:
+        return 'cancelled'
+      default:
+        return 'processing'
+    }
+  }
+
+  private createTimelineEntry(
+    status: string,
+    timestamp: string,
+    message: string,
+    rawStatus?: VideoTaskStatus,
+  ): TaskTimelineEntry {
+    return {
+      status,
+      rawStatus,
+      timestamp,
+      message,
+    }
+  }
+
+  private normalizePage(page?: number) {
+    return Math.max(1, Math.trunc(Number(page) || 1))
+  }
+
+  private normalizeLimit(limit?: number) {
+    return Math.max(1, Math.min(Math.trunc(Number(limit) || 20), 100))
+  }
+
+  private toObjectId(value: string, field: string) {
+    if (!Types.ObjectId.isValid(value)) {
+      throw new BadRequestException(`${field} is invalid`)
+    }
+
+    return new Types.ObjectId(value)
+  }
+
+  private async ensureBrandBelongsToOrg(brandId: string | undefined, orgId: Types.ObjectId) {
+    if (!brandId) {
+      return
+    }
+
+    const brand = await this.brandModel.exists({
+      _id: this.toObjectId(brandId, 'brandId'),
+      orgId,
+      isActive: true,
+    })
+
+    if (!brand) {
+      throw new NotFoundException('Brand not found in organization')
+    }
+  }
+
+  private async ensurePipelineBelongsToOrg(pipelineId: string | undefined, orgId: Types.ObjectId) {
+    if (!pipelineId) {
+      return
+    }
+
+    const pipeline = await this.pipelineModel.exists({
+      _id: this.toObjectId(pipelineId, 'pipelineId'),
+      orgId,
+    })
+
+    if (!pipeline) {
+      throw new NotFoundException('Pipeline not found in organization')
+    }
+  }
+
+  private async removeQueuedJobs(taskId: string) {
+    await Promise.all(
+      VIDEO_WORKER_STEPS.map(async step => {
+        const job = await this.videoWorkerQueue.getJob(`${taskId}:${step}`)
+        if (job) {
+          await job.remove()
+        }
+      }),
+    )
+  }
+}

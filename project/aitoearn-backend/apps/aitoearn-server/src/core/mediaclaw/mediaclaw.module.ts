@@ -41,6 +41,7 @@ import { CrawlerModule } from './crawler/crawler.module'
 import { DataDashboardModule } from './data-dashboard/data-dashboard.module'
 import { DiscoveryModule } from './discovery/discovery.module'
 import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
+import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
 
 @Module({
   imports: [
@@ -82,6 +83,7 @@ import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
     DataDashboardModule,
     DiscoveryModule,
     ClientMgmtModule,
+    TaskMgmtModule,
     WebhookModule,
     WorkerModule,
   ],
