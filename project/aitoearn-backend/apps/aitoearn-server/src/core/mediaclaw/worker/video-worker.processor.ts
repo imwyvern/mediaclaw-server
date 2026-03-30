@@ -2,6 +2,7 @@ import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullm
 import { Injectable, Logger } from '@nestjs/common'
 import { Queue, Job } from 'bullmq'
 import { VideoTaskStatus } from '@yikart/mongodb'
+import { CopyService } from '../copy/copy.service'
 import { VideoService } from '../video/video.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from './worker.constants'
 
@@ -21,6 +22,7 @@ export class VideoWorkerProcessor extends WorkerHost {
     @InjectQueue(VIDEO_WORKER_QUEUE)
     private readonly workerQueue: Queue<VideoWorkerJobData>,
     private readonly videoService: VideoService,
+    private readonly copyService: CopyService,
   ) {
     super()
   }
@@ -64,15 +66,15 @@ export class VideoWorkerProcessor extends WorkerHost {
         case 'generate-copy':
           await this.videoService.updateStatus(taskId, VideoTaskStatus.GENERATING_COPY)
           await this.sleep()
+          const copy = await this.copyService.generateCopy(
+            task.brandId?.toString(),
+            task.outputVideoUrl || task.sourceVideoUrl,
+            task.metadata,
+          )
           await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
             outputVideoUrl: task.outputVideoUrl || `${task.sourceVideoUrl}?processed=${taskId}`,
             quality: task.quality,
-            copy: {
-              title: `MediaClaw 视频任务 ${taskId}`,
-              subtitle: '待接入品牌文案引擎',
-              hashtags: ['#MediaClaw', '#VideoWorkflow'],
-              commentGuide: '占位文案，后续由 Copy Engine 替换。',
-            },
+            copy,
           })
           this.logger.log(`Video task completed: ${taskId}`)
           return

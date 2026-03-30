@@ -22,6 +22,7 @@ import { PaymentModule } from './payment/payment.module'
 import { PipelineModule } from './pipeline/pipeline.module'
 import { McAccountModule } from './account/account.module'
 import { WorkerModule } from './worker/worker.module'
+import { CopyModule } from './copy/copy.module'
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { WorkerModule } from './worker/worker.module'
     PaymentModule,
     PipelineModule,
     McAccountModule,
+    CopyModule,
     WorkerModule,
   ],
   exports: [MongooseModule],
