@@ -14,6 +14,7 @@
     "@nestjs/platform-express": "^11.1.6",
     "@nestjs/schedule": "^6.0.0",
     "@nestjs/swagger": "^11.2.0",
+    "@nestjs/terminus": "^11.0.0",
     "@volcengine/openapi": "^1.32.0",
     "@yikart/aitoearn-ai-client": "workspace:*",
     "@yikart/aitoearn-auth": "workspace:*",

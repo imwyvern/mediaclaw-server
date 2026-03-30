@@ -17,6 +17,7 @@ export class AuditInterceptor implements NestInterceptor {
     const request = context.switchToHttp().getRequest()
     const response = context.switchToHttp().getResponse()
     const method = request.method?.toUpperCase()
+    const startedAt = Date.now()
 
     if (!['POST', 'PATCH', 'DELETE'].includes(method)) {
       return next.handle()
@@ -46,6 +47,7 @@ export class AuditInterceptor implements NestInterceptor {
             query: this.sanitizeRecord(request.query || {}),
             body: this.sanitizeRecord(request.body || {}),
             statusCode: response.statusCode,
+            durationMs: Date.now() - startedAt,
           },
           ipAddress: request.ip || request.headers['x-forwarded-for'] || '',
           userAgent: request.headers['user-agent'] || '',

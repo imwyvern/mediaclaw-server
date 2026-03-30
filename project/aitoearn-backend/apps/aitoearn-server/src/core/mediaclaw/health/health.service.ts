@@ -85,6 +85,12 @@ export class HealthService {
     }
   }
 
+  listAgentHeartbeats() {
+    return Array.from(this.agentHeartbeatMap.values()).sort((left, right) =>
+      new Date(right.lastHeartbeatAt).getTime() - new Date(left.lastHeartbeatAt).getTime(),
+    )
+  }
+
   private async getPendingTasks(capabilities: string[]): Promise<PendingQueueTask[]> {
     const states = ['waiting', 'prioritized', 'delayed'] as const
     const groups = await Promise.all(
