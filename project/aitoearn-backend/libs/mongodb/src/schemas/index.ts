@@ -12,6 +12,7 @@ import { ContentGenerationTask, ContentGenerationTaskSchema } from './content-ge
 import { Campaign, CampaignSchema } from './campaign.schema'
 import { CopyHistory, CopyHistorySchema } from './copy-history.schema'
 import { Competitor, CompetitorSchema } from './competitor.schema'
+import { DistributionRule, DistributionRuleSchema } from './distribution-rule.schema'
 import {
   CreditsBalance,
   CreditsBalanceSchema,
@@ -68,6 +69,7 @@ export * from './competitor.schema'
 export * from './copy-history.schema'
 export * from './credits-balance.schema'
 export * from './credits-record.schema'
+export * from './distribution-rule.schema'
 export * from './engagement.task.schema'
 export * from './interaction-record.schema'
 export * from './material-adaptation.schema'
@@ -109,6 +111,7 @@ export const schemas = [
   { name: Campaign.name, schema: CampaignSchema },
   { name: Competitor.name, schema: CompetitorSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },
+  { name: DistributionRule.name, schema: DistributionRuleSchema },
   { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
   { name: NotificationConfig.name, schema: NotificationConfigSchema },
   { name: Notification.name, schema: NotificationSchema },
