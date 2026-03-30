@@ -35,6 +35,7 @@ import { AuditModule } from './audit/audit.module'
 import { CampaignModule } from './campaign/campaign.module'
 import { WebhookModule } from './webhook/webhook.module'
 import { AcquisitionModule } from './acquisition/acquisition.module'
+import { CrawlerModule } from './crawler/crawler.module'
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { AcquisitionModule } from './acquisition/acquisition.module'
     AuditModule,
     CampaignModule,
     AcquisitionModule,
+    CrawlerModule,
     WebhookModule,
     WorkerModule,
   ],
