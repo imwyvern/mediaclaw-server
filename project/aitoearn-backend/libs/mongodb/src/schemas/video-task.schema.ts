@@ -10,6 +10,7 @@ export enum VideoTaskStatus {
   EDITING = 'editing',
   RENDERING = 'rendering',
   QUALITY_CHECK = 'quality_check',
+  GENERATING_COPY = 'generating_copy',
   COMPLETED = 'completed',
   FAILED = 'failed',
   CANCELLED = 'cancelled',

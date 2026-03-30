@@ -1,8 +1,11 @@
+import { InjectQueue } from '@nestjs/bullmq'
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model, Types } from 'mongoose'
+import { Queue } from 'bullmq'
 import { VideoTask, VideoTaskStatus, VideoTaskType } from '@yikart/mongodb'
 import { BillingService } from '../billing/billing.service'
+import { VIDEO_WORKER_QUEUE, VideoWorkerJobData } from '../worker/worker.constants'
 
 @Injectable()
 export class VideoService {
@@ -11,6 +14,8 @@ export class VideoService {
   constructor(
     @InjectModel(VideoTask.name) private readonly videoTaskModel: Model<VideoTask>,
     private readonly billingService: BillingService,
+    @InjectQueue(VIDEO_WORKER_QUEUE)
+    private readonly videoWorkerQueue: Queue<VideoWorkerJobData>,
   ) {}
 
   /**
@@ -48,8 +53,11 @@ export class VideoService {
       metadata: data.metadata || {},
     })
 
-    // TODO: Add to BullMQ queue for processing
-    // await this.videoQueue.add('process-video', { taskId: task._id })
+    await this.videoWorkerQueue.add(
+      'analyze-source',
+      { taskId: task._id.toString() },
+      { jobId: `${task._id.toString()}:analyze-source` },
+    )
 
     this.logger.log(`Video task created: ${task._id}, type: ${data.taskType}`)
     return task
@@ -125,6 +133,17 @@ export class VideoService {
     }
 
     return this.videoTaskModel.findByIdAndUpdate(taskId, update, { new: true }).exec()
+  }
+
+  async recordRetry(taskId: string, retryCount: number, errorMessage: string) {
+    return this.videoTaskModel.findByIdAndUpdate(
+      taskId,
+      {
+        retryCount,
+        errorMessage,
+      },
+      { new: true },
+    ).exec()
   }
 
   /**
