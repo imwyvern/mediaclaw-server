@@ -27,6 +27,7 @@ import { MaterialTask, MaterialTaskSchema } from './material-task.schema'
 import { Material, MaterialSchema } from './material.schema'
 import { MediaGroup, MediaGroupSchema } from './media-group.schema'
 import { Media, MediaSchema } from './media.schema'
+import { NotificationConfig, NotificationConfigSchema } from './notification-config.schema'
 import { Notification, NotificationSchema } from './notification.schema'
 import {
   PointsRecord,
@@ -70,6 +71,7 @@ export * from './material-task.schema'
 export * from './material.schema'
 export * from './media-group.schema'
 export * from './media.schema'
+export * from './notification-config.schema'
 export * from './notification.schema'
 export * from './oauth2-credential.schema'
 export * from './points-record.schema'
@@ -98,6 +100,7 @@ export const schemas = [
   { name: Competitor.name, schema: CompetitorSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },
   { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
+  { name: NotificationConfig.name, schema: NotificationConfigSchema },
   { name: Notification.name, schema: NotificationSchema },
   { name: Account.name, schema: AccountSchema },
   { name: ApiKey.name, schema: ApiKeySchema },
