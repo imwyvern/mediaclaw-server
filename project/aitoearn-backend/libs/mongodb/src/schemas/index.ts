@@ -6,6 +6,7 @@ import { AuditLog, AuditLogSchema } from './audit-log.schema'
 import { Asset, AssetSchema } from './asset.schema'
 import { Blog, BlogSchema } from './blog.schema'
 import { BrandAssetVersion, BrandAssetVersionSchema } from './brand-asset-version.schema'
+import { PipelineTemplate, PipelineTemplateSchema } from './pipeline-template.schema'
 import { ContentGenerationTask, ContentGenerationTaskSchema } from './content-generation-task.schema'
 import { Campaign, CampaignSchema } from './campaign.schema'
 import { CopyHistory, CopyHistorySchema } from './copy-history.schema'
@@ -83,6 +84,7 @@ export * from './user-notification-control.schema'
 export * from './user.schema'
 export * from './viral-content.schema'
 export * from './webhook.schema'
+export * from './pipeline-template.schema'
 
 export const schemas = [
   { name: User.name, schema: UserSchema },
@@ -95,6 +97,7 @@ export const schemas = [
   { name: Campaign.name, schema: CampaignSchema },
   { name: Competitor.name, schema: CompetitorSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },
+  { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
   { name: Notification.name, schema: NotificationSchema },
   { name: Account.name, schema: AccountSchema },
   { name: ApiKey.name, schema: ApiKeySchema },

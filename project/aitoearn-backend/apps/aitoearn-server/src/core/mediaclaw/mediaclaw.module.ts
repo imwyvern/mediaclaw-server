@@ -13,6 +13,7 @@ import {
   VideoPack, VideoPackSchema,
   VideoTask, VideoTaskSchema,
   Pipeline, PipelineSchema,
+  PipelineTemplate, PipelineTemplateSchema,
   PaymentOrder, PaymentOrderSchema,
   Subscription, SubscriptionSchema,
   Invoice, InvoiceSchema,
@@ -46,6 +47,7 @@ import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
 import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
 import { CompetitorModule } from './competitor/competitor.module'
 import { MediaClawAssetModule } from './asset/asset.module'
+import { PipelineSystemModule } from './pipeline-system/pipeline-system.module'
 
 @Module({
   imports: [
@@ -62,6 +64,7 @@ import { MediaClawAssetModule } from './asset/asset.module'
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: Pipeline.name, schema: PipelineSchema },
+      { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
       { name: PaymentOrder.name, schema: PaymentOrderSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
       { name: Invoice.name, schema: InvoiceSchema },
@@ -92,6 +95,7 @@ import { MediaClawAssetModule } from './asset/asset.module'
     TaskMgmtModule,
     CompetitorModule,
     MediaClawAssetModule,
+    PipelineSystemModule,
     WebhookModule,
     WorkerModule,
   ],
