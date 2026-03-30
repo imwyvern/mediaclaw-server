@@ -3,10 +3,12 @@ import { InjectQueue } from '@nestjs/bullmq'
 import { Injectable } from '@nestjs/common'
 import { InjectConnection, InjectModel } from '@nestjs/mongoose'
 import {
+  DiskHealthIndicator,
   HealthCheckError,
   HealthCheckResult,
   HealthCheckService,
   HealthIndicatorResult,
+  MemoryHealthIndicator,
 } from '@nestjs/terminus'
 import { Queue } from 'bullmq'
 import { Connection, Model } from 'mongoose'
@@ -19,6 +21,8 @@ export class MediaClawHealthCheckService {
   constructor(
     private readonly healthCheckService: HealthCheckService,
     private readonly healthService: HealthService,
+    private readonly diskHealthIndicator: DiskHealthIndicator,
+    private readonly memoryHealthIndicator: MemoryHealthIndicator,
     @InjectConnection()
     private readonly mongooseConnection: Connection,
     @InjectModel(AuditLog.name)
@@ -51,7 +55,7 @@ export class MediaClawHealthCheckService {
           response: pong,
         }
       }),
-      async () => this.runIndicator('queue', async () => {
+      async () => this.runIndicator('bullmq', async () => {
         const counts = await this.videoWorkerQueue.getJobCounts(
           'waiting',
           'active',
@@ -67,22 +71,18 @@ export class MediaClawHealthCheckService {
             + (counts['active'] || 0)
             + (counts['delayed'] || 0)
             + (counts['prioritized'] || 0),
+          queueName: VIDEO_WORKER_QUEUE,
           counts,
         }
       }),
-      async () => this.runIndicator('disk', async () => {
-        const stats = await statfs(process.cwd())
-        const total = Number(stats.bsize) * Number(stats.blocks)
-        const free = Number(stats.bsize) * Number(stats.bavail)
-        const used = Math.max(0, total - free)
-
-        return {
-          totalBytes: total,
-          freeBytes: free,
-          usedBytes: used,
-          usageRatio: total > 0 ? Number((used / total).toFixed(4)) : 0,
-        }
+      async () => this.diskHealthIndicator.checkStorage('disk_storage', {
+        path: process.cwd(),
+        thresholdPercent: 0.9,
       }),
+      async () => this.memoryHealthIndicator.checkHeap(
+        'memory_heap',
+        this.getHeapThreshold(),
+      ),
     ])
   }
 
@@ -269,5 +269,10 @@ export class MediaClawHealthCheckService {
         },
       })
     }
+  }
+
+  private getHeapThreshold() {
+    const value = Number(process.env['MEDIACLAW_HEAP_HEALTH_LIMIT_MB'] || 768)
+    return Math.max(value, 128) * 1024 * 1024
   }
 }

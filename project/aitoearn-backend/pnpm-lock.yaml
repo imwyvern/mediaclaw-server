@@ -289,6 +289,12 @@ importers:
 
   apps/aitoearn-server:
     dependencies:
+      '@bull-board/api':
+        specifier: ^6.20.6
+        version: 6.20.6(@bull-board/ui@6.20.6)
+      '@bull-board/express':
+        specifier: ^6.20.6
+        version: 6.20.6
       '@modelcontextprotocol/sdk':
         specifier: ^1.25.2
         version: 1.25.3(@cfworker/json-schema@4.1.1)(hono@4.11.7)(zod@4.3.6)
@@ -1942,6 +1948,17 @@ packages:
 
   '@borewit/text-codec@0.2.1':
     resolution: {integrity: sha512-k7vvKPbf7J2fZ5klGRD9AeKfUvojuZIQ3BT5u7Jfv+puwXkUBUT5PVyMDfJZpy30CBDXGMgw7fguK/lpOMBvgw==}
+
+  '@bull-board/api@6.20.6':
+    resolution: {integrity: sha512-B/9OlKWJ/He421Lyuc7htMpKN4R8hcNu5uoIRiyh9y9J0kMOfxfs82GKXdfR9R0595LvAcCOSvjn8EtWHXesTA==}
+    peerDependencies:
+      '@bull-board/ui': 6.20.6
+
+  '@bull-board/express@6.20.6':
+    resolution: {integrity: sha512-QBOjhi3jR4qIJvLCo++DdL0CyG4umiFXBCPJYr74DmRN41m27rDS3NSf7ceHdbQr9Ol8mw3xbVqGLn50x3QdWQ==}
+
+  '@bull-board/ui@6.20.6':
+    resolution: {integrity: sha512-nEXRgMHHd48ssINgvDqT7b4p/+57XRf3CUcTGQ7UIJb4F7n/kRRj8+ZQvQmMFsYGdNmbNU2eNheQ05vXSYiqdQ==}
 
   '@cfworker/json-schema@4.1.1':
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
@@ -8215,6 +8232,9 @@ packages:
     resolution: {integrity: sha512-1qny3OExCf0UvUV/5wpYKf2YwPcOqXzkwKKSmKHiE6ZMQs5heeE/c8eXK+PNllPvmjgAbfnsbpkGZWy8cBpn9w==}
     engines: {node: '>=4'}
 
+  redis-info@3.1.0:
+    resolution: {integrity: sha512-ER4L9Sh/vm63DkIE0bkSjxluQlioBiBgf5w1UuldaW/3vPcecdljVDisZhmnCMvsxHNiARTTDDHGg9cGwTfrKg==}
+
   redis-parser@3.0.0:
     resolution: {integrity: sha512-DJnGAeenTdpMEH6uAJRK/uiyEIH9WVsUmoLwzudwGJUwZPp80PDBWPHXSAGNPwNvIXAbe7MSUB1zQFugFml66A==}
     engines: {node: '>=4'}
@@ -11042,6 +11062,24 @@ snapshots:
   '@bcoe/v8-coverage@1.0.2': {}
 
   '@borewit/text-codec@0.2.1': {}
+
+  '@bull-board/api@6.20.6(@bull-board/ui@6.20.6)':
+    dependencies:
+      '@bull-board/ui': 6.20.6
+      redis-info: 3.1.0
+
+  '@bull-board/express@6.20.6':
+    dependencies:
+      '@bull-board/api': 6.20.6(@bull-board/ui@6.20.6)
+      '@bull-board/ui': 6.20.6
+      ejs: 3.1.10
+      express: 5.2.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@bull-board/ui@6.20.6':
+    dependencies:
+      '@bull-board/api': 6.20.6(@bull-board/ui@6.20.6)
 
   '@cfworker/json-schema@4.1.1': {}
 
@@ -18943,6 +18981,10 @@ snapshots:
   real-require@0.2.0: {}
 
   redis-errors@1.2.0: {}
+
+  redis-info@3.1.0:
+    dependencies:
+      lodash: 4.17.23
 
   redis-parser@3.0.0:
     dependencies:

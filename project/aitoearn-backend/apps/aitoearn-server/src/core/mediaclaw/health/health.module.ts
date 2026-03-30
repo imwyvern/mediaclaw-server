@@ -11,6 +11,8 @@ import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthController } from './health.controller'
 import { HealthService } from './health.service'
+import { QueueDashboardAuthService } from './queue-dashboard-auth.service'
+import { QueueDashboardService } from './queue-dashboard.service'
 
 @Module({
   imports: [
@@ -22,6 +24,11 @@ import { HealthService } from './health.service'
     ]),
   ],
   controllers: [HealthController],
-  providers: [HealthService, MediaClawHealthCheckService],
+  providers: [
+    HealthService,
+    MediaClawHealthCheckService,
+    QueueDashboardAuthService,
+    QueueDashboardService,
+  ],
 })
 export class HealthModule {}

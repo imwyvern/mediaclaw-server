@@ -1,4 +1,5 @@
 import { Body, Get, Post } from '@nestjs/common'
+import { HealthCheck } from '@nestjs/terminus'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawHealthCheckService } from './health-check.service'
@@ -34,6 +35,8 @@ export class HealthController {
     return this.healthService.heartbeat(user, body)
   }
 
+  @Public()
+  @HealthCheck()
   @Get('health/system')
   async getSystemHealth() {
     return this.mediaClawHealthCheckService.getSystemHealth()

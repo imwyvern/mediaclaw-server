@@ -1,0 +1,16 @@
+FROM node:20-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Base image for MediaClaw worker containers that need FFmpeg and CJK fonts.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    ffmpeg \
+    fontconfig \
+    libfreetype6 \
+    fonts-noto-cjk \
+  && fc-cache -f \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
