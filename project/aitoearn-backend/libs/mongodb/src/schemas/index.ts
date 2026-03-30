@@ -5,6 +5,7 @@ import { ApiKey, ApiKeySchema } from './api-key.schema'
 import { Asset, AssetSchema } from './asset.schema'
 import { Blog, BlogSchema } from './blog.schema'
 import { ContentGenerationTask, ContentGenerationTaskSchema } from './content-generation-task.schema'
+import { Campaign, CampaignSchema } from './campaign.schema'
 import {
   CreditsBalance,
   CreditsBalanceSchema,
@@ -46,6 +47,7 @@ export * from './ai-log.schema'
 export * from './api-key.schema'
 export * from './asset.schema'
 export * from './blog.schema'
+export * from './campaign.schema'
 export * from './content-generation-task.schema'
 export * from './credits-balance.schema'
 export * from './credits-record.schema'
@@ -77,6 +79,7 @@ export const schemas = [
   { name: PointsRecord.name, schema: PointsRecordSchema },
   { name: AiLog.name, schema: AiLogSchema },
   { name: Blog.name, schema: BlogSchema },
+  { name: Campaign.name, schema: CampaignSchema },
   { name: Notification.name, schema: NotificationSchema },
   { name: Account.name, schema: AccountSchema },
   { name: ApiKey.name, schema: ApiKeySchema },

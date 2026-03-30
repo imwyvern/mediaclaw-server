@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose'
 import {
   ApiKey, ApiKeySchema,
   Brand, BrandSchema,
+  Campaign, CampaignSchema,
   Organization, OrganizationSchema,
   MediaClawUser, MediaClawUserSchema,
   VideoPack, VideoPackSchema,
@@ -28,6 +29,7 @@ import { MediaClawApiKeyModule } from './apikey/apikey.module'
 import { DistributionModule } from './distribution/distribution.module'
 import { SkillModule } from './skill/skill.module'
 import { AnalyticsModule } from './analytics/analytics.module'
+import { CampaignModule } from './campaign/campaign.module'
 
 @Module({
   imports: [
@@ -35,6 +37,7 @@ import { AnalyticsModule } from './analytics/analytics.module'
       { name: Organization.name, schema: OrganizationSchema },
       { name: Brand.name, schema: BrandSchema },
       { name: ApiKey.name, schema: ApiKeySchema },
+      { name: Campaign.name, schema: CampaignSchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
@@ -57,6 +60,7 @@ import { AnalyticsModule } from './analytics/analytics.module'
     MediaClawApiKeyModule,
     SkillModule,
     AnalyticsModule,
+    CampaignModule,
     WorkerModule,
   ],
   exports: [MongooseModule],
