@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Post } from '@nestjs/common'
+import { Body, Get, Post } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthService } from './health.service'
 
-@Controller('api/v1')
+@MediaClawApiController('api/v1')
 export class HealthController {
   constructor(
     private readonly healthService: HealthService,

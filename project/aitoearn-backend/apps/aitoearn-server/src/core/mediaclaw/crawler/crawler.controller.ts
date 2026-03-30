@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common'
+import { Body, Get, Param, Post } from '@nestjs/common'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { CrawlerService } from './crawler.service'
 
-@Controller('api/v1/crawler')
+@MediaClawApiController('api/v1/crawler')
 export class CrawlerController {
   constructor(private readonly crawlerService: CrawlerService) {}
 

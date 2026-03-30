@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common'
+import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { NotificationChannel, NotificationEvent } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { NotificationService } from './notification.service'
 
-@Controller('api/v1/notifications')
+@MediaClawApiController('api/v1/notifications')
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 

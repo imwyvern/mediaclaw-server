@@ -1,6 +1,7 @@
 import { AccountGroup, AccountGroupSchema } from './account-group.schema'
 import { Account, AccountSchema } from './account.schema'
 import { AiLog, AiLogSchema } from './ai-log.schema'
+import { ApiUsage, ApiUsageSchema } from './api-usage.schema'
 import { ApiKey, ApiKeySchema } from './api-key.schema'
 import { AuditLog, AuditLogSchema } from './audit-log.schema'
 import { Asset, AssetSchema } from './asset.schema'
@@ -55,6 +56,7 @@ import { Webhook, WebhookSchema } from './webhook.schema'
 export * from './account-group.schema'
 export * from './account.schema'
 export * from './ai-log.schema'
+export * from './api-usage.schema'
 export * from './api-key.schema'
 export * from './audit-log.schema'
 export * from './asset.schema'
@@ -101,6 +103,7 @@ export const schemas = [
   { name: PointsRecord.name, schema: PointsRecordSchema },
   { name: PlatformAccount.name, schema: PlatformAccountSchema },
   { name: AiLog.name, schema: AiLogSchema },
+  { name: ApiUsage.name, schema: ApiUsageSchema },
   { name: Blog.name, schema: BlogSchema },
   { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },
   { name: Campaign.name, schema: CampaignSchema },

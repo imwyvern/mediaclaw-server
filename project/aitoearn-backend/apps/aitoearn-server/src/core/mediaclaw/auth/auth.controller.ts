@@ -1,8 +1,9 @@
-import { Body, Controller, Post, Query } from '@nestjs/common'
+import { Body, Post, Query } from '@nestjs/common'
 import { Public } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { McAuthService } from './auth.service'
 
-@Controller('api/v1/auth')
+@MediaClawApiController('api/v1/auth')
 export class McAuthController {
   constructor(private readonly authService: McAuthService) {}
 

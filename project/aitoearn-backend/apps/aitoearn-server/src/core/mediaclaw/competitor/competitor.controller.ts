@@ -1,6 +1,5 @@
 import {
   Body,
-  Controller,
   Delete,
   Get,
   Param,
@@ -8,9 +7,10 @@ import {
   Query,
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { CompetitorService } from './competitor.service'
 
-@Controller('api/v1/competitors')
+@MediaClawApiController('api/v1/competitors')
 export class CompetitorController {
   constructor(private readonly competitorService: CompetitorService) {}
 

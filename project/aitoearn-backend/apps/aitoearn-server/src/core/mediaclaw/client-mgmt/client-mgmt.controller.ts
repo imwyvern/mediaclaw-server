@@ -1,6 +1,5 @@
 import {
   Body,
-  Controller,
   Delete,
   Get,
   Param,
@@ -10,12 +9,13 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { UserRole, OrgStatus, OrgType } from '@yikart/mongodb'
-import { ClientMgmtService } from './client-mgmt.service'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
+import { ClientMgmtService } from './client-mgmt.service'
 
 @UseGuards(PermissionGuard)
 @Roles(UserRole.ADMIN)
-@Controller('api/v1/admin/orgs')
+@MediaClawApiController('api/v1/admin/orgs')
 export class ClientMgmtController {
   constructor(private readonly clientMgmtService: ClientMgmtService) {}
 

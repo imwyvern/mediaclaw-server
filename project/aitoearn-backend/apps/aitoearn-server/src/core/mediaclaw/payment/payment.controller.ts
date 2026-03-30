@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import { Body, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { PaymentChannel } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PaymentService } from './payment.service'
 
-@Controller('api/v1/payment')
+@MediaClawApiController('api/v1/payment')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 

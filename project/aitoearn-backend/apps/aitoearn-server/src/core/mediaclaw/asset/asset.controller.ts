@@ -1,6 +1,5 @@
 import {
   Body,
-  Controller,
   Delete,
   Get,
   Param,
@@ -13,9 +12,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { BrandAssetType } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { AssetService } from './asset.service'
 
-@Controller('api/v1/assets')
+@MediaClawApiController('api/v1/assets')
 export class AssetController {
   constructor(private readonly assetService: AssetService) {}
 

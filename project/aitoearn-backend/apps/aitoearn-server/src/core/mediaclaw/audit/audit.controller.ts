@@ -1,8 +1,9 @@
-import { Controller, Get, Query } from '@nestjs/common'
+import { Get, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { AuditService } from './audit.service'
 
-@Controller('api/v1/audit-logs')
+@MediaClawApiController('api/v1/audit-logs')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 

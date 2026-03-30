@@ -1,6 +1,5 @@
 import {
   Body,
-  Controller,
   Get,
   Param,
   Post,
@@ -8,9 +7,10 @@ import {
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { VideoTaskStatus, VideoTaskType } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { TaskMgmtService } from './task-mgmt.service'
 
-@Controller('api/v1/tasks')
+@MediaClawApiController('api/v1/tasks')
 export class TaskMgmtController {
   constructor(private readonly taskMgmtService: TaskMgmtService) {}
 

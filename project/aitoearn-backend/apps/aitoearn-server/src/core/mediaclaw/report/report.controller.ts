@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common'
+import { Body, Delete, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { ReportType } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { ReportService } from './report.service'
 
-@Controller('api/v1/reports')
+@MediaClawApiController('api/v1/reports')
 export class ReportController {
   constructor(private readonly reportService: ReportService) {}
 

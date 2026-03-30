@@ -1,8 +1,9 @@
-import { Controller, Get, Query } from '@nestjs/common'
+import { Get, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { DataDashboardService } from './data-dashboard.service'
 
-@Controller('api/v1/data')
+@MediaClawApiController('api/v1/data')
 export class DataDashboardController {
   constructor(private readonly dataDashboardService: DataDashboardService) {}
 

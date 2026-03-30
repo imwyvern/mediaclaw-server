@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common'
+import { Body, Delete, Get, Param, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawApiKeyService } from './apikey.service'
 
-@Controller('api/v1/apikey')
+@MediaClawApiController('api/v1/apikey')
 export class MediaClawApiKeyController {
   constructor(private readonly apiKeyService: MediaClawApiKeyService) {}
 

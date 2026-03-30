@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common'
+import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PipelineService } from './pipeline.service'
 
-@Controller('api/v1/pipeline')
+@MediaClawApiController('api/v1/pipeline')
 export class PipelineController {
   constructor(private readonly pipelineService: PipelineService) {}
 

@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common'
+import { Body, Get, Patch } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { McAccountService } from './account.service'
 
-@Controller('api/v1/account')
+@MediaClawApiController('api/v1/account')
 export class McAccountController {
   constructor(private readonly accountService: McAccountService) {}
 

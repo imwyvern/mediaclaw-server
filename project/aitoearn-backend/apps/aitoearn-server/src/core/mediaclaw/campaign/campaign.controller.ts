@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { CampaignStatus } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { CampaignService } from './campaign.service'
 
-@Controller('api/v1/campaign')
+@MediaClawApiController('api/v1/campaign')
 export class CampaignController {
   constructor(private readonly campaignService: CampaignService) {}
 

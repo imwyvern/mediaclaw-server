@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { VideoTaskStatus, VideoTaskType } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { VideoService } from './video.service'
 
-@Controller('api/v1/content')
+@MediaClawApiController('api/v1/content')
 export class VideoController {
   constructor(private readonly videoService: VideoService) {}
 

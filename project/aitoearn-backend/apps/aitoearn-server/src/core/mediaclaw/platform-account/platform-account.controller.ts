@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common'
+import { Body, Delete, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { PlatformAccountPlatform } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PlatformAccountService } from './platform-account.service'
 
-@Controller('api/v1/platform-accounts')
+@MediaClawApiController('api/v1/platform-accounts')
 export class PlatformAccountController {
   constructor(private readonly platformAccountService: PlatformAccountService) {}
 

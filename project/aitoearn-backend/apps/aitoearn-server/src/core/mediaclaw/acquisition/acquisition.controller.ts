@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import { Body, Get, Param, Post, Query } from '@nestjs/common'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { TikHubService } from './tikhub.service'
 
-@Controller('api/v1/acquisition')
+@MediaClawApiController('api/v1/acquisition')
 export class AcquisitionController {
   constructor(private readonly tikHubService: TikHubService) {}
 

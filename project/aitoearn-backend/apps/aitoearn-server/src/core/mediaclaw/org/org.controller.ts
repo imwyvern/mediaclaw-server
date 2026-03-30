@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common'
+import { Body, Get, Param, Patch, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { OrgService } from './org.service'
 
-@Controller('api/v1/org')
+@MediaClawApiController('api/v1/org')
 export class OrgController {
   constructor(private readonly orgService: OrgService) {}
 

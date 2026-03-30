@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { MediaClawApiKeyGuard } from '../apikey/apikey.guard'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { SkillService } from './skill.service'
 
 @Public()
 @UseGuards(MediaClawApiKeyGuard)
-@Controller('api/v1/skill')
+@MediaClawApiController('api/v1/skill')
 export class SkillController {
   constructor(private readonly skillService: SkillService) {}
 

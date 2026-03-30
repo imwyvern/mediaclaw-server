@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
   ApiKey, ApiKeySchema,
+  ApiUsage, ApiUsageSchema,
   AuditLog, AuditLogSchema,
   Brand, BrandSchema,
   BrandAssetVersion, BrandAssetVersionSchema,
@@ -56,6 +57,7 @@ import { NotificationModule } from './notification/notification.module'
 import { ReportModule } from './report/report.module'
 import { PlatformAccountModule } from './platform-account/platform-account.module'
 import { MarketplaceModule } from './marketplace/marketplace.module'
+import { UsageModule } from './usage/usage.module'
 
 @Module({
   imports: [
@@ -64,6 +66,7 @@ import { MarketplaceModule } from './marketplace/marketplace.module'
       { name: Brand.name, schema: BrandSchema },
       { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },
       { name: ApiKey.name, schema: ApiKeySchema },
+      { name: ApiUsage.name, schema: ApiUsageSchema },
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: Campaign.name, schema: CampaignSchema },
       { name: Competitor.name, schema: CompetitorSchema },
@@ -112,6 +115,7 @@ import { MarketplaceModule } from './marketplace/marketplace.module'
     NotificationModule,
     PlatformAccountModule,
     ReportModule,
+    UsageModule,
     WebhookModule,
     WorkerModule,
   ],

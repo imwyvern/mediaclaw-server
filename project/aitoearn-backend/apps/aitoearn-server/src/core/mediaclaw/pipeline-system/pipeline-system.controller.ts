@@ -1,6 +1,5 @@
 import {
   Body,
-  Controller,
   Get,
   Param,
   Post,
@@ -8,9 +7,10 @@ import {
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { PipelineType } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PipelineSystemService } from './pipeline-system.service'
 
-@Controller('api/v1/pipelines')
+@MediaClawApiController('api/v1/pipelines')
 export class PipelineSystemController {
   constructor(private readonly pipelineSystemService: PipelineSystemService) {}
 

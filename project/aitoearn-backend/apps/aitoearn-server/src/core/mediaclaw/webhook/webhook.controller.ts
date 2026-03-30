@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common'
+import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { WebhookService } from './webhook.service'
 
-@Controller('api/v1/webhook')
+@MediaClawApiController('api/v1/webhook')
 export class WebhookController {
   constructor(private readonly webhookService: WebhookService) {}
 

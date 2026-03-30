@@ -1,7 +1,8 @@
-import { Body, Controller, Post } from '@nestjs/common'
+import { Body, Post } from '@nestjs/common'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { CopyEngineService } from './copy-engine.service'
 
-@Controller('api/v1/copy')
+@MediaClawApiController('api/v1/copy')
 export class CopyController {
   constructor(private readonly copyEngineService: CopyEngineService) {}
 
