@@ -49,6 +49,7 @@ import { CrawlerModule } from './crawler/crawler.module'
 import { DataDashboardModule } from './data-dashboard/data-dashboard.module'
 import { DiscoveryModule } from './discovery/discovery.module'
 import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
+import { ContentMgmtModule } from './content-mgmt/content-mgmt.module'
 import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
 import { CompetitorModule } from './competitor/competitor.module'
 import { MediaClawAssetModule } from './asset/asset.module'
@@ -107,6 +108,7 @@ import { UsageModule } from './usage/usage.module'
     DataDashboardModule,
     DiscoveryModule,
     ClientMgmtModule,
+    ContentMgmtModule,
     TaskMgmtModule,
     CompetitorModule,
     MediaClawAssetModule,
