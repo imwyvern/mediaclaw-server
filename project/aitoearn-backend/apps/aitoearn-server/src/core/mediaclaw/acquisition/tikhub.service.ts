@@ -349,7 +349,7 @@ export class TikHubService {
 
   private getHeaders() {
     return {
-      Authorization: `Bearer ${process.env['TIKHUB_API_KEY'] || ''}`,
+      'Authorization': `Bearer ${process.env['TIKHUB_API_KEY'] || ''}`,
       'Content-Type': 'application/json',
     }
   }

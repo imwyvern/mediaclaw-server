@@ -1,7 +1,7 @@
 import type { Request } from 'express'
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common'
-import { verify } from 'jsonwebtoken'
 import { UserRole } from '@yikart/mongodb'
+import { verify } from 'jsonwebtoken'
 
 export interface QueueDashboardJwtPayload {
   id: string
@@ -27,7 +27,8 @@ export class QueueDashboardAuthService {
     let payload: string | QueueDashboardJwtPayload
     try {
       payload = verify(token, this.jwtSecret) as string | QueueDashboardJwtPayload
-    } catch {
+    }
+    catch {
       throw new UnauthorizedException('Invalid bearer token')
     }
 

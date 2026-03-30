@@ -1,0 +1,10 @@
+.git
+.github
+.nx
+.vscode
+coverage
+dist
+tmp
+node_modules
+**/node_modules
+**/.DS_Store

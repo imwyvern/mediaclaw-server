@@ -1,66 +1,90 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
-  ApiKey, ApiKeySchema,
-  ApiUsage, ApiUsageSchema,
-  AuditLog, AuditLogSchema,
-  Brand, BrandSchema,
-  BrandAssetVersion, BrandAssetVersionSchema,
-  Campaign, CampaignSchema,
-  ClawHostInstance, ClawHostInstanceSchema,
-  Competitor, CompetitorSchema,
-  CopyHistory, CopyHistorySchema,
-  Organization, OrganizationSchema,
-  MediaClawUser, MediaClawUserSchema,
-  MarketplaceTemplate, MarketplaceTemplateSchema,
-  NotificationConfig, NotificationConfigSchema,
-  PlatformAccount, PlatformAccountSchema,
-  Report, ReportSchema,
-  VideoPack, VideoPackSchema,
-  VideoTask, VideoTaskSchema,
-  Pipeline, PipelineSchema,
-  PipelineTemplate, PipelineTemplateSchema,
-  PaymentOrder, PaymentOrderSchema,
-  Subscription, SubscriptionSchema,
-  Invoice, InvoiceSchema,
-  Webhook, WebhookSchema,
-  ViralContent, ViralContentSchema,
+  ApiKey,
+  ApiKeySchema,
+  ApiUsage,
+  ApiUsageSchema,
+  AuditLog,
+  AuditLogSchema,
+  Brand,
+  BrandAssetVersion,
+  BrandAssetVersionSchema,
+  BrandSchema,
+  Campaign,
+  CampaignSchema,
+  ClawHostInstance,
+  ClawHostInstanceSchema,
+  Competitor,
+  CompetitorSchema,
+  CopyHistory,
+  CopyHistorySchema,
+  Invoice,
+  InvoiceSchema,
+  MarketplaceTemplate,
+  MarketplaceTemplateSchema,
+  MediaClawUser,
+  MediaClawUserSchema,
+  NotificationConfig,
+  NotificationConfigSchema,
+  Organization,
+  OrganizationSchema,
+  PaymentOrder,
+  PaymentOrderSchema,
+  Pipeline,
+  PipelineSchema,
+  PipelineTemplate,
+  PipelineTemplateSchema,
+  PlatformAccount,
+  PlatformAccountSchema,
+  Report,
+  ReportSchema,
+  Subscription,
+  SubscriptionSchema,
+  VideoPack,
+  VideoPackSchema,
+  VideoTask,
+  VideoTaskSchema,
+  ViralContent,
+  ViralContentSchema,
+  Webhook,
+  WebhookSchema,
 } from '@yikart/mongodb'
 
-import { BrandModule } from './brand/brand.module'
-import { OrgModule } from './org/org.module'
-import { BillingModule } from './billing/billing.module'
-import { HealthModule } from './health/health.module'
-import { McAuthModule } from './auth/auth.module'
-import { VideoModule } from './video/video.module'
-import { PaymentModule } from './payment/payment.module'
-import { PipelineModule } from './pipeline/pipeline.module'
 import { McAccountModule } from './account/account.module'
-import { WorkerModule } from './worker/worker.module'
-import { CopyModule } from './copy/copy.module'
-import { MediaClawApiKeyModule } from './apikey/apikey.module'
-import { DistributionModule } from './distribution/distribution.module'
-import { SkillModule } from './skill/skill.module'
-import { AnalyticsModule } from './analytics/analytics.module'
-import { AuditModule } from './audit/audit.module'
-import { CampaignModule } from './campaign/campaign.module'
-import { WebhookModule } from './webhook/webhook.module'
 import { AcquisitionModule } from './acquisition/acquisition.module'
+import { AnalyticsModule } from './analytics/analytics.module'
+import { MediaClawApiKeyModule } from './apikey/apikey.module'
+import { MediaClawAssetModule } from './asset/asset.module'
+import { AuditModule } from './audit/audit.module'
+import { McAuthModule } from './auth/auth.module'
+import { BillingModule } from './billing/billing.module'
+import { BrandModule } from './brand/brand.module'
+import { CampaignModule } from './campaign/campaign.module'
+import { ClawHostModule } from './clawhost/clawhost.module'
+import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
+import { CompetitorModule } from './competitor/competitor.module'
+import { ContentMgmtModule } from './content-mgmt/content-mgmt.module'
+import { CopyModule } from './copy/copy.module'
 import { CrawlerModule } from './crawler/crawler.module'
 import { DataDashboardModule } from './data-dashboard/data-dashboard.module'
 import { DiscoveryModule } from './discovery/discovery.module'
-import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
-import { ContentMgmtModule } from './content-mgmt/content-mgmt.module'
-import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
-import { CompetitorModule } from './competitor/competitor.module'
-import { MediaClawAssetModule } from './asset/asset.module'
-import { PipelineSystemModule } from './pipeline-system/pipeline-system.module'
-import { NotificationModule } from './notification/notification.module'
-import { ReportModule } from './report/report.module'
-import { PlatformAccountModule } from './platform-account/platform-account.module'
+import { DistributionModule } from './distribution/distribution.module'
+import { HealthModule } from './health/health.module'
 import { MarketplaceModule } from './marketplace/marketplace.module'
+import { NotificationModule } from './notification/notification.module'
+import { OrgModule } from './org/org.module'
+import { PaymentModule } from './payment/payment.module'
+import { PipelineSystemModule } from './pipeline-system/pipeline-system.module'
+import { PipelineModule } from './pipeline/pipeline.module'
+import { PlatformAccountModule } from './platform-account/platform-account.module'
+import { ReportModule } from './report/report.module'
+import { SkillModule } from './skill/skill.module'
+import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
 import { UsageModule } from './usage/usage.module'
-import { ClawHostModule } from './clawhost/clawhost.module'
+import { VideoModule } from './video/video.module'
+import { WebhookModule } from './webhook/webhook.module'
+import { WorkerModule } from './worker/worker.module'
 
 const workerModuleImports = process.env['MEDIACLAW_ENABLE_WORKER'] === 'false'
   ? []

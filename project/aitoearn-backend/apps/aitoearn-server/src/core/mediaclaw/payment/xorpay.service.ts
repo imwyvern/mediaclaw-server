@@ -1,5 +1,5 @@
+import type { PaymentProductDefinition } from './payment-products'
 import { createHash } from 'node:crypto'
-import { Cron, CronExpression } from '@nestjs/schedule'
 import {
   BadRequestException,
   Injectable,
@@ -7,8 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import axios from 'axios'
-import { Model, Types } from 'mongoose'
+import { Cron, CronExpression } from '@nestjs/schedule'
 import {
   PackStatus,
   PaymentMethod,
@@ -17,11 +16,13 @@ import {
   PaymentStatus,
   VideoPack,
 } from '@yikart/mongodb'
+import axios from 'axios'
+import { Model, Types } from 'mongoose'
 import { DistributionService } from '../distribution/distribution.service'
 import {
   getPaymentProduct,
   listPaymentProducts,
-  type PaymentProductDefinition,
+
 } from './payment-products'
 
 export interface CreateXorPayOrderParams {
@@ -115,7 +116,8 @@ export class XorPayService {
         ...order.toObject(),
         callbackData,
       })
-    } catch (error) {
+    }
+    catch (error) {
       await this.orderModel.findByIdAndUpdate(order._id, {
         $set: {
           status: PaymentStatus.FAILED,
@@ -484,7 +486,7 @@ export class XorPayService {
     throw new BadRequestException('callback amount is invalid')
   }
 
-  private toOrderResponse(order: Partial<PaymentOrder> & { _id?: any; callbackData?: Record<string, any> }) {
+  private toOrderResponse(order: Partial<PaymentOrder> & { _id?: any, callbackData?: Record<string, any> }) {
     return {
       id: order._id?.toString?.() || undefined,
       orderId: order.orderId,

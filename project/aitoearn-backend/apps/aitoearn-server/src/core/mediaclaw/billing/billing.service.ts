@@ -1,8 +1,7 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
+import { PackStatus, PaymentOrder, VideoPack } from '@yikart/mongodb'
 import { Model } from 'mongoose'
-import { VideoPack, PackStatus } from '@yikart/mongodb'
-import { PaymentOrder } from '@yikart/mongodb'
 
 @Injectable()
 export class BillingService {
@@ -22,7 +21,8 @@ export class BillingService {
       packType: 'trial_free',
     }).exec()
 
-    if (existing) return existing
+    if (existing)
+      return existing
 
     return this.videoPackModel.create({
       userId,
@@ -40,7 +40,7 @@ export class BillingService {
    * FIFO credit deduction: consume from oldest active pack first
    * Returns true if deduction succeeded
    */
-  async deductCredit(userId: string, taskId: string, credits: number = 1): Promise<boolean> {
+  async deductCredit(userId: string, taskId: string, credits = 1): Promise<boolean> {
     // Idempotent: check if already charged for this task
     const existingCharge = await this.videoPackModel.findOne({
       userId,
@@ -64,8 +64,8 @@ export class BillingService {
         { expiresAt: { $gt: now } },
       ],
     })
-    .sort({ purchasedAt: 1 }) // FIFO: oldest first
-    .exec()
+      .sort({ purchasedAt: 1 }) // FIFO: oldest first
+      .exec()
 
     if (!pack) {
       return false // No credits available
@@ -83,7 +83,8 @@ export class BillingService {
       { new: true },
     ).exec()
 
-    if (!result) return false
+    if (!result)
+      return false
 
     // Mark depleted
     if (result.remainingCredits <= 0) {
@@ -98,13 +99,13 @@ export class BillingService {
   /**
    * Restore consumed credits when a task is cancelled before processing.
    */
-  async refundCredit(userId: string, credits: number = 1): Promise<boolean> {
+  async refundCredit(userId: string, credits = 1): Promise<boolean> {
     const pack = await this.videoPackModel.findOne({
       userId,
       status: { $in: [PackStatus.ACTIVE, PackStatus.DEPLETED] },
     })
-    .sort({ purchasedAt: 1 })
-    .exec()
+      .sort({ purchasedAt: 1 })
+      .exec()
 
     if (!pack) {
       this.logger.warn(`No credit pack found for refund, userId=${userId}`)

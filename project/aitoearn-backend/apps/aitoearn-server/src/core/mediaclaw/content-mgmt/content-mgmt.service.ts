@@ -4,8 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import { Organization, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface ContentFilters {
   status?: VideoTaskStatus
@@ -53,7 +53,7 @@ export class ContentMgmtService {
       task._id,
       {
         $set: {
-          copy: nextCopy,
+          'copy': nextCopy,
           'metadata.contentManagement.lastEditedAt': new Date().toISOString(),
         },
       },

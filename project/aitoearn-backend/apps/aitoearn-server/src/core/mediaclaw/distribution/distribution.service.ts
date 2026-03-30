@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import {
   DistributionRule,
   DistributionRuleType,
@@ -13,6 +12,7 @@ import {
   VideoTask,
   VideoTaskStatus,
 } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 import { WebhookService } from '../webhook/webhook.service'
 
 export enum DistributionPublishStatus {
@@ -346,7 +346,7 @@ export class DistributionService {
 
   private buildRulePayload(
     data: Partial<DistributionRulePayload>,
-    partial: boolean = false,
+    partial = false,
   ) {
     const payload: Record<string, unknown> = {}
 
@@ -581,8 +581,8 @@ export class DistributionService {
   }
 
   private toRuleResponse(rule: {
-    _id?: { toString(): string }
-    orgId?: { toString(): string } | null
+    _id?: { toString: () => string }
+    orgId?: { toString: () => string } | null
     name: string
     type: DistributionRuleType
     rules?: DistributionRuleEntryPayload[]

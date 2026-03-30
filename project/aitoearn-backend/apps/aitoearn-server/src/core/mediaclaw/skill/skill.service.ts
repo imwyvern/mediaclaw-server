@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import { Brand, Pipeline, PipelineStatus, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface SkillScope {
   orgId: string
@@ -159,20 +159,20 @@ export class SkillService {
       status: VideoTaskStatus.COMPLETED,
       $and: [scopeFilter, deliveryFilter],
     })
-    .sort({ completedAt: -1, createdAt: -1 })
-    .lean()
-    .exec()
-    .then(tasks => tasks.map(task => ({
-      taskId: task._id?.toString(),
-      brandId: task.brandId?.toString() || null,
-      pipelineId: task.pipelineId?.toString() || null,
-      outputVideoUrl: task.outputVideoUrl,
-      copy: task.copy,
-      completedAt: task.completedAt,
-      delivery: task.metadata?.['delivery'] || {
-        status: 'pending',
-      },
-    })))
+      .sort({ completedAt: -1, createdAt: -1 })
+      .lean()
+      .exec()
+      .then(tasks => tasks.map(task => ({
+        taskId: task._id?.toString(),
+        brandId: task.brandId?.toString() || null,
+        pipelineId: task.pipelineId?.toString() || null,
+        outputVideoUrl: task.outputVideoUrl,
+        copy: task.copy,
+        completedAt: task.completedAt,
+        delivery: task.metadata?.['delivery'] || {
+          status: 'pending',
+        },
+      })))
   }
 
   async confirmDelivery(agentId: string, taskId: string, scope: SkillScope) {

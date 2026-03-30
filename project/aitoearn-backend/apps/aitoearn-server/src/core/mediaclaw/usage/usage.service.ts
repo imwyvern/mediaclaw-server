@@ -4,13 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import {
   ApiUsage,
   Organization,
   Subscription,
   SubscriptionStatus,
 } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface UsagePeriodInput {
   startDate?: string
@@ -96,7 +96,7 @@ export class UsageService {
       ? Number((weightedDuration / totalRequests).toFixed(2))
       : 0
 
-    const endpointMap = new Map<string, { requestCount: number; weightedDuration: number }>()
+    const endpointMap = new Map<string, { requestCount: number, weightedDuration: number }>()
     const methodMap = new Map<string, number>()
     const dailyMap = new Map<string, number>()
 

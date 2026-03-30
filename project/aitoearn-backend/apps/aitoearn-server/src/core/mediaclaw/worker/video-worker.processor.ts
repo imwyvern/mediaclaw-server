@@ -1,7 +1,7 @@
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq'
 import { Injectable, Logger } from '@nestjs/common'
-import { Queue, Job } from 'bullmq'
 import { VideoTaskStatus } from '@yikart/mongodb'
+import { Job, Queue } from 'bullmq'
 import { CopyService } from '../copy/copy.service'
 import { DistributionService } from '../distribution/distribution.service'
 import { VideoService } from '../video/video.service'
@@ -65,7 +65,7 @@ export class VideoWorkerProcessor extends WorkerHost {
             },
           })
           break
-        case 'generate-copy':
+        case 'generate-copy': {
           await this.videoService.updateStatus(taskId, VideoTaskStatus.GENERATING_COPY)
           await this.sleep()
           const copy = await this.copyService.generateCopy(
@@ -86,6 +86,7 @@ export class VideoWorkerProcessor extends WorkerHost {
           }
           this.logger.log(`Video task completed: ${taskId}`)
           return
+        }
         default:
           this.logger.warn(`Unknown worker step received: ${job.name}`)
           return
@@ -97,7 +98,8 @@ export class VideoWorkerProcessor extends WorkerHost {
       }
 
       await this.workerQueue.add(nextStep, { taskId }, { jobId: `${taskId}:${nextStep}` })
-    } catch (error) {
+    }
+    catch (error) {
       const attemptsMade = job.attemptsMade + 1
       const maxAttempts = job.opts.attempts ?? 1
       const message = error instanceof Error ? error.message : 'Unknown worker error'

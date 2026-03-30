@@ -4,12 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import {
   Brand,
   BrandAssetType,
   BrandAssetVersion,
 } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface AssetUploadInput {
   fileUrl?: string
@@ -202,7 +202,7 @@ export class AssetService {
   }
 
   private buildFallbackFileUrl(brandId: string, type: BrandAssetType, version: number, fileName: string) {
-    const safeName = fileName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase() || 'asset'
+    const safeName = fileName.replace(/\s+/g, '-').replace(/[^\w.-]/g, '').toLowerCase() || 'asset'
     return `brand-assets/${brandId}/${type}/v${version}/${Date.now()}-${safeName}`
   }
 

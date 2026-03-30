@@ -4,12 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import {
   Brand,
   Invoice,
-  MediaClawUser,
   McUserType,
+  MediaClawUser,
   Organization,
   OrgStatus,
   OrgType,
@@ -19,6 +18,7 @@ import {
   VideoTask,
   VideoTaskStatus,
 } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface OrgFilters {
   status?: OrgStatus
@@ -29,11 +29,6 @@ interface OrgFilters {
 interface PaginationInput {
   page?: number
   limit?: number
-}
-
-interface InviteMemberInput {
-  phone: string
-  role?: UserRole
 }
 
 @Injectable()

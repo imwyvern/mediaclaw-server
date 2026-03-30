@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
+import { MediaClawUser, PackStatus, VideoPack, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
 import { Model } from 'mongoose'
-import { MediaClawUser, VideoPack, VideoTask, PackStatus, VideoTaskStatus } from '@yikart/mongodb'
 
 @Injectable()
 export class McAccountService {
@@ -16,7 +16,8 @@ export class McAccountService {
    */
   async getInfo(userId: string) {
     const user = await this.userModel.findById(userId).exec()
-    if (!user) throw new NotFoundException('User not found')
+    if (!user)
+      throw new NotFoundException('User not found')
 
     return {
       id: user._id,
@@ -75,7 +76,7 @@ export class McAccountService {
   /**
    * Update user profile
    */
-  async updateProfile(userId: string, data: { name?: string; avatarUrl?: string; email?: string }) {
+  async updateProfile(userId: string, data: { name?: string, avatarUrl?: string, email?: string }) {
     return this.userModel.findByIdAndUpdate(userId, data, { new: true }).exec()
   }
 }

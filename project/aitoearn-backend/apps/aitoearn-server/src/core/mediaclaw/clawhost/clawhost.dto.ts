@@ -1,3 +1,4 @@
+import { ClawHostInstanceStatus } from '@yikart/mongodb'
 import { Type } from 'class-transformer'
 import {
   IsEnum,
@@ -10,7 +11,6 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator'
-import { ClawHostInstanceStatus } from '@yikart/mongodb'
 
 export class ClawHostInstanceConfigDto {
   @IsString()

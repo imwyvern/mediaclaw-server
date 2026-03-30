@@ -128,7 +128,7 @@ jobs:
         if: steps.parse-manual.outputs.manual_apps == ''
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: pnpm
 
       - name: Cache node_modules
@@ -300,7 +300,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: pnpm
 
       - name: Cache node_modules
@@ -334,6 +334,7 @@ jobs:
           pnpm nx run ${{ matrix.app }}:build
 
       - name: Prepare Docker context
+        if: matrix.app != 'aitoearn-server'
         run: pnpm nx run ${{ matrix.app }}:docker-context
 
       - name: Set up flyctl
@@ -358,6 +359,23 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
+        if: matrix.app == 'aitoearn-server'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.FLY_REGISTRY }}/${{ matrix.image }}
+            ${{ env.DOCKER_REGISTRY }}/${{ matrix.image }}
+          push: true
+          cache-from: |
+            type=gha,scope=${{ matrix.app }}
+          cache-to: |
+            type=gha,mode=max,scope=${{ matrix.app }}
+
+      - name: Build Docker image
+        if: matrix.app != 'aitoearn-server'
         uses: docker/build-push-action@v6
         with:
           context: ./tmp/docker-context

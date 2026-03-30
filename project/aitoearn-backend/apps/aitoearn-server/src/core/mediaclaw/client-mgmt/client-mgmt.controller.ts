@@ -8,7 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common'
-import { UserRole, OrgStatus, OrgType } from '@yikart/mongodb'
+import { OrgStatus, OrgType, UserRole } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
 import { ClientMgmtService } from './client-mgmt.service'
@@ -30,8 +30,8 @@ export class ClientMgmtController {
     return this.clientMgmtService.listOrgs(
       { status, type, keyword },
       {
-        page: page ? parseInt(page, 10) : 1,
-        limit: limit ? parseInt(limit, 10) : 20,
+        page: page ? Number.parseInt(page, 10) : 1,
+        limit: limit ? Number.parseInt(limit, 10) : 20,
       },
     )
   }

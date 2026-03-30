@@ -28,7 +28,7 @@ export class ClawHostController {
 
   @Post('instances')
   async createInstance(
-    @GetToken() user: { orgId?: string; id: string },
+    @GetToken() user: { orgId?: string, id: string },
     @Body() body: CreateClawHostInstanceDto,
   ) {
     return this.clawHostService.createInstance(

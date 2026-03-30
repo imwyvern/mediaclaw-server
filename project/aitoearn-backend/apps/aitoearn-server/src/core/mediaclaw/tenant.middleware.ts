@@ -1,10 +1,10 @@
 import { Injectable, NestMiddleware } from '@nestjs/common'
-import { Request, Response, NextFunction } from 'express'
+import { NextFunction, Request, Response } from 'express'
 
 /**
  * TenantMiddleware extracts orgId from the JWT payload
  * and attaches it to the request for downstream use.
- * 
+ *
  * All queries should use req.orgId for tenant isolation.
  */
 @Injectable()

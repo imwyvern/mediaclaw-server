@@ -1,16 +1,15 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
-import { InjectModel } from '@nestjs/mongoose'
 import { JwtService } from '@nestjs/jwt'
+import { InjectModel } from '@nestjs/mongoose'
+import { McUserType, MediaClawUser, UserRole, VideoPack } from '@yikart/mongodb'
 import { Model } from 'mongoose'
-import { McUserType, MediaClawUser, UserRole } from '@yikart/mongodb'
-import { VideoPack } from '@yikart/mongodb'
 
 @Injectable()
 export class McAuthService {
   private readonly logger = new Logger(McAuthService.name)
 
   // In-memory OTP store (TODO: move to Redis for production)
-  private otpStore = new Map<string, { code: string; expiresAt: number }>()
+  private otpStore = new Map<string, { code: string, expiresAt: number }>()
 
   constructor(
     @InjectModel(MediaClawUser.name) private readonly userModel: Model<MediaClawUser>,
@@ -92,7 +91,8 @@ export class McAuthService {
       })
 
       this.logger.log(`New user registered: ${phone}, trial pack created`)
-    } else {
+    }
+    else {
       const updatedUser = await this.userModel.findByIdAndUpdate(user._id, {
         lastLoginAt: new Date(),
       }, { new: true }).exec()
@@ -108,7 +108,7 @@ export class McAuthService {
   /**
    * WeChat OAuth callback
    */
-  async wechatCallback(code: string) {
+  async wechatCallback(_code: string) {
     // TODO: Implement WeChat OAuth flow
     // 1. Exchange code for access_token + openid
     // 2. Get user info
@@ -132,7 +132,8 @@ export class McAuthService {
       return {
         ...tokens,
       }
-    } catch {
+    }
+    catch {
       throw new BadRequestException('Invalid refresh token')
     }
   }

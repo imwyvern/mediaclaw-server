@@ -13,7 +13,7 @@ export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles)
 /**
  * PermissionGuard checks if the user's role matches
  * the required roles for the endpoint.
- * 
+ *
  * Usage: @Roles('admin', 'editor') on controller method
  */
 @Injectable()

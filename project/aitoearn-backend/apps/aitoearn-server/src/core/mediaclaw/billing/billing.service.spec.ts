@@ -1,5 +1,5 @@
-import { vi } from 'vitest'
 import { PackStatus } from '@yikart/mongodb'
+import { vi } from 'vitest'
 import { BillingService } from './billing.service'
 
 vi.mock('@yikart/mongodb', () => {
@@ -29,7 +29,7 @@ function createQuery<T>(value: T) {
   return query
 }
 
-describe('BillingService', () => {
+describe('billingService', () => {
   let service: BillingService
   let videoPackModel: Record<string, any>
   let paymentOrderModel: Record<string, any>

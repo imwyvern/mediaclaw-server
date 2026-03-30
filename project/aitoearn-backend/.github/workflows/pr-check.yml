@@ -64,7 +64,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: pnpm
 
       - name: Cache node_modules
@@ -138,4 +138,3 @@ jobs:
           echo "✅ 未检测到变更，跳过检查"
           echo "### ✅ 无变更" >> $GITHUB_STEP_SUMMARY
           echo "未检测到需要检查的项目变更" >> $GITHUB_STEP_SUMMARY
-

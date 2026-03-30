@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, PipelineStage, Types } from 'mongoose'
 import { Organization, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
+import { Model, PipelineStage, Types } from 'mongoose'
 
 interface DateRangeInput {
   startDate?: string
@@ -151,7 +151,7 @@ export class DataDashboardService {
     const hashtags = this.pickTopHashtags(tasks)
     const scenes = [...new Set(
       tasks
-        .map(task => {
+        .map((task) => {
           const scene = task.metadata?.['scene'] || task.metadata?.['campaign']
           return typeof scene === 'string' ? scene.trim() : ''
         })

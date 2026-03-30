@@ -18,6 +18,7 @@ import { ChannelModule } from './core/channel/channel.module'
 import { ContentModule } from './core/content/content.module'
 import { CreditsModule } from './core/credits/credits.module'
 import { InternalModule } from './core/internal/internal.module'
+import { MediaClawModule } from './core/mediaclaw/mediaclaw.module'
 import { NotificationModule } from './core/notification/notification.module'
 import { PublishModule } from './core/publish-record/publish-record.module'
 import { RelayModule } from './core/relay/relay.module'
@@ -25,7 +26,6 @@ import { ShortLinkModule } from './core/short-link/short-link.module'
 import { ToolsModule } from './core/tools/tools.module'
 import { UnifiedMcpModule } from './core/unified-mcp/unified-mcp.module'
 import { UserModule } from './core/user/user.module'
-import { MediaClawModule } from './core/mediaclaw/mediaclaw.module'
 
 @Module({
   imports: [

@@ -7,8 +7,7 @@ import { HttpException, Injectable, Logger, OnApplicationBootstrap } from '@nest
 import { HttpAdapterHost } from '@nestjs/core'
 import { Queue } from 'bullmq'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData } from '../worker/worker.constants'
-import { QueueDashboardJwtPayload } from './queue-dashboard-auth.service'
-import { QueueDashboardAuthService } from './queue-dashboard-auth.service'
+import { QueueDashboardAuthService, QueueDashboardJwtPayload } from './queue-dashboard-auth.service'
 
 type QueueDashboardRequest = Request & {
   user?: QueueDashboardJwtPayload
@@ -47,7 +46,8 @@ export class QueueDashboardService implements OnApplicationBootstrap {
         try {
           ;(request as QueueDashboardRequest).user = this.queueDashboardAuthService.authorize(request)
           next()
-        } catch (error) {
+        }
+        catch (error) {
           this.handleAuthorizationError(error, response)
         }
       },

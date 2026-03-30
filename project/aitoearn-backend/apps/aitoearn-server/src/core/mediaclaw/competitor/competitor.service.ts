@@ -4,8 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import { Competitor, ViralContent } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 @Injectable()
 export class CompetitorService {
@@ -157,7 +157,8 @@ export class CompetitorService {
 
     try {
       pathname = new URL(accountUrl).pathname
-    } catch {
+    }
+    catch {
       pathname = accountUrl
     }
 
@@ -181,9 +182,9 @@ export class CompetitorService {
       '7d': 7,
       '14d': 14,
       '30d': 30,
-      weekly: 7,
-      monthly: 30,
-      quarterly: 90,
+      'weekly': 7,
+      'monthly': 30,
+      'quarterly': 90,
     }
 
     const days = periodMap[normalized] || Number.parseInt(normalized, 10) || 7

@@ -4,7 +4,6 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.production.yml"
 ENV_FILE="${ROOT_DIR}/.env.production"
-CONTEXT_OUTPUT="${ROOT_DIR}/tmp/docker-context/aitoearn-server"
 REMOTE="${DEPLOY_GIT_REMOTE:-origin}"
 BRANCH="${DEPLOY_GIT_BRANCH:-$(git -C "${ROOT_DIR}" branch --show-current)}"
 ROLLBACK_OVERRIDE=""
@@ -88,7 +87,6 @@ trap rollback ERR
 trap cleanup EXIT
 
 require_cmd git
-require_cmd node
 require_cmd docker
 require_cmd curl
 
@@ -129,9 +127,6 @@ fi
 log "pulling latest code from ${REMOTE}/${BRANCH}"
 git -C "${ROOT_DIR}" fetch "${REMOTE}" "${BRANCH}"
 git -C "${ROOT_DIR}" pull --ff-only "${REMOTE}" "${BRANCH}"
-
-log "preparing docker context"
-node "${ROOT_DIR}/scripts/build-docker.mjs" aitoearn-server --output "${CONTEXT_OUTPUT}" --context-only
 
 log "validating compose configuration"
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" config -q

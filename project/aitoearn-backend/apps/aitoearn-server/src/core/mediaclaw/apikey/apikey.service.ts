@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import { ApiKey } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface CreateApiKeyInput {
   name: string
@@ -61,8 +61,8 @@ export class MediaClawApiKeyService {
       userId,
       isActive: true,
     })
-    .sort({ createdAt: -1 })
-    .exec()
+      .sort({ createdAt: -1 })
+      .exec()
   }
 
   async revoke(id: string, userId: string) {

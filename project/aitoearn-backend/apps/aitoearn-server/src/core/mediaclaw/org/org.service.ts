@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model } from 'mongoose'
 import { Organization } from '@yikart/mongodb'
+import { Model } from 'mongoose'
 
 @Injectable()
 export class OrgService {
@@ -15,7 +15,8 @@ export class OrgService {
 
   async findById(id: string) {
     const org = await this.orgModel.findById(id).exec()
-    if (!org) throw new NotFoundException('Organization not found')
+    if (!org)
+      throw new NotFoundException('Organization not found')
     return org
   }
 

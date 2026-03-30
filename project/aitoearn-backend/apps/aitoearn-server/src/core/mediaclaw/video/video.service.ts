@@ -1,9 +1,9 @@
 import { InjectQueue } from '@nestjs/bullmq'
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
-import { Queue } from 'bullmq'
 import { VideoTask, VideoTaskStatus, VideoTaskType } from '@yikart/mongodb'
+import { Queue } from 'bullmq'
+import { Model, Types } from 'mongoose'
 import { BillingService } from '../billing/billing.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData } from '../worker/worker.constants'
 
@@ -73,8 +73,10 @@ export class VideoService {
     limit?: number
   }) {
     const query: any = { userId }
-    if (filters?.status) query.status = filters.status
-    if (filters?.brandId) query.brandId = new Types.ObjectId(filters.brandId)
+    if (filters?.status)
+      query.status = filters.status
+    if (filters?.brandId)
+      query.brandId = new Types.ObjectId(filters.brandId)
 
     const page = filters?.page || 1
     const limit = filters?.limit || 20
@@ -97,7 +99,8 @@ export class VideoService {
    */
   async getTask(taskId: string) {
     const task = await this.videoTaskModel.findById(taskId).exec()
-    if (!task) throw new NotFoundException('Video task not found')
+    if (!task)
+      throw new NotFoundException('Video task not found')
     return task
   }
 
@@ -117,10 +120,14 @@ export class VideoService {
     }
 
     const updateSet: Record<string, any> = { status }
-    if (data?.outputVideoUrl) updateSet['outputVideoUrl'] = data.outputVideoUrl
-    if (data?.errorMessage) updateSet['errorMessage'] = data.errorMessage
-    if (data?.quality) updateSet['quality'] = data.quality
-    if (data?.copy) updateSet['copy'] = data.copy
+    if (data?.outputVideoUrl)
+      updateSet['outputVideoUrl'] = data.outputVideoUrl
+    if (data?.errorMessage)
+      updateSet['errorMessage'] = data.errorMessage
+    if (data?.quality)
+      updateSet['quality'] = data.quality
+    if (data?.copy)
+      updateSet['copy'] = data.copy
 
     if (status === VideoTaskStatus.ANALYZING || status === VideoTaskStatus.EDITING) {
       updateSet['startedAt'] = new Date()
@@ -173,10 +180,10 @@ export class VideoService {
   /**
    * Edit copy for a completed video
    */
-  async editCopy(taskId: string, copy: { title?: string; subtitle?: string; hashtags?: string[]; commentGuide?: string }) {
+  async editCopy(taskId: string, copy: { title?: string, subtitle?: string, hashtags?: string[], commentGuide?: string }) {
     return this.videoTaskModel.findByIdAndUpdate(
       taskId,
-      { $set: { 'copy': copy } },
+      { $set: { copy } },
       { new: true },
     ).exec()
   }

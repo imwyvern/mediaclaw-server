@@ -25,10 +25,10 @@ export class AssetController {
     @GetToken() user: any,
     @UploadedFile() file:
       | {
-          originalname?: string
-          size?: number
-          mimetype?: string
-        }
+        originalname?: string
+        size?: number
+        mimetype?: string
+      }
       | undefined,
     @Body() body: {
       brandId: string

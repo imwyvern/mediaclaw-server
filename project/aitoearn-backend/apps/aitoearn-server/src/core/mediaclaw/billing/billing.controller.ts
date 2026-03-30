@@ -20,8 +20,8 @@ export class BillingController {
   ) {
     return this.billingService.getOrders(
       user.id,
-      page ? parseInt(page) : 1,
-      limit ? parseInt(limit) : 20,
+      page ? Number.parseInt(page) : 1,
+      limit ? Number.parseInt(limit) : 20,
     )
   }
 }

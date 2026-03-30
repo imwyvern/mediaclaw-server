@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
+import { Pipeline, PipelineStatus } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
-import { Pipeline, PipelineStatus, PipelineType } from '@yikart/mongodb'
 
 @Injectable()
 export class PipelineService {
@@ -29,7 +29,8 @@ export class PipelineService {
 
   async findById(id: string) {
     const pipeline = await this.pipelineModel.findById(id).exec()
-    if (!pipeline) throw new NotFoundException('Pipeline not found')
+    if (!pipeline)
+      throw new NotFoundException('Pipeline not found')
     return pipeline
   }
 

@@ -1,12 +1,10 @@
+import { InjectQueue } from '@nestjs/bullmq'
 import {
   BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { InjectQueue } from '@nestjs/bullmq'
 import { InjectModel } from '@nestjs/mongoose'
-import { Queue } from 'bullmq'
-import { Model, Types } from 'mongoose'
 import {
   Brand,
   Pipeline,
@@ -14,6 +12,8 @@ import {
   VideoTaskStatus,
   VideoTaskType,
 } from '@yikart/mongodb'
+import { Queue } from 'bullmq'
+import { Model, Types } from 'mongoose'
 import { BillingService } from '../billing/billing.service'
 import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData } from '../worker/worker.constants'
 
@@ -178,9 +178,9 @@ export class TaskMgmtService {
       task._id,
       {
         $set: {
-          status: VideoTaskStatus.CANCELLED,
-          creditCharged: false,
-          completedAt: new Date(),
+          'status': VideoTaskStatus.CANCELLED,
+          'creditCharged': false,
+          'completedAt': new Date(),
           'metadata.creditRefundedAt': new Date().toISOString(),
         },
         $push: {
@@ -420,7 +420,7 @@ export class TaskMgmtService {
 
   private async removeQueuedJobs(taskId: string) {
     await Promise.all(
-      VIDEO_WORKER_STEPS.map(async step => {
+      VIDEO_WORKER_STEPS.map(async (step) => {
         const job = await this.videoWorkerQueue.getJob(`${taskId}:${step}`)
         if (job) {
           await job.remove()

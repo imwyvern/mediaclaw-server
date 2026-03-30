@@ -1,4 +1,3 @@
-import { Cron } from '@nestjs/schedule'
 import {
   BadRequestException,
   Injectable,
@@ -6,14 +5,15 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model } from 'mongoose'
+import { Cron } from '@nestjs/schedule'
 import {
   ClawHostHealthStatus,
+  ClawHostInstalledSkill,
   ClawHostInstance,
   ClawHostInstanceConfig,
   ClawHostInstanceStatus,
-  ClawHostInstalledSkill,
 } from '@yikart/mongodb'
+import { Model } from 'mongoose'
 
 interface ListInstancesFilters {
   orgId?: string
@@ -191,7 +191,7 @@ export class ClawHostService {
     }
 
     const instances = await this.clawHostInstanceModel.find({
-      status: ClawHostInstanceStatus.RUNNING,
+      'status': ClawHostInstanceStatus.RUNNING,
       'skills.skillId': skillId,
     }).exec()
 
@@ -301,7 +301,7 @@ export class ClawHostService {
     }
   }
 
-  async getInstanceLogs(instanceId: string, lines: number = 100) {
+  async getInstanceLogs(instanceId: string, lines = 100) {
     const instance = await this.getInstanceOrThrow(instanceId)
     const normalizedLines = Math.min(Math.max(lines, 1), 500)
     const now = new Date()

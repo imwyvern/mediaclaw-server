@@ -1,12 +1,10 @@
+import { InjectQueue } from '@nestjs/bullmq'
 import {
   BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { InjectQueue } from '@nestjs/bullmq'
 import { InjectModel } from '@nestjs/mongoose'
-import { Queue } from 'bullmq'
-import { Model, Types } from 'mongoose'
 import {
   Brand,
   Pipeline,
@@ -17,6 +15,8 @@ import {
   VideoTaskStatus,
   VideoTaskType,
 } from '@yikart/mongodb'
+import { Queue } from 'bullmq'
+import { Model, Types } from 'mongoose'
 import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData } from '../worker/worker.constants'
 
 interface PipelineTemplateStepInput {

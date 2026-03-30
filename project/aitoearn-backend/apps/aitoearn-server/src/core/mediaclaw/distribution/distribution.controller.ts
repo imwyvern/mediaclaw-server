@@ -1,13 +1,14 @@
+import type { DistributionRulePayload, DistributionTargetInput } from './distribution.service'
 import { Body, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { DistributionRuleType } from '@yikart/mongodb'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import {
   DistributionPublishStatus,
+
   DistributionService,
-  type DistributionRulePayload,
-  type DistributionTargetInput,
+
 } from './distribution.service'
-import { MediaClawApiController } from '../mediaclaw-api.decorator'
 
 @MediaClawApiController('api/v1/distribution')
 export class DistributionController {
@@ -15,7 +16,7 @@ export class DistributionController {
 
   @Post()
   async createRule(
-    @GetToken() user: { orgId?: string; id?: string },
+    @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: DistributionRulePayload & {
       orgId?: string
@@ -29,7 +30,7 @@ export class DistributionController {
 
   @Get()
   async listRules(
-    @GetToken() user: { orgId?: string; id?: string },
+    @GetToken() user: { orgId?: string, id?: string },
     @Query('orgId') orgId?: string,
   ) {
     return this.distributionService.listRules(orgId || user.orgId || user.id || '')
@@ -50,7 +51,7 @@ export class DistributionController {
 
   @Post('evaluate')
   async evaluateRules(
-    @GetToken() user: { orgId?: string; id?: string },
+    @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: {
       orgId?: string
@@ -65,7 +66,7 @@ export class DistributionController {
 
   @Post('push')
   async distribute(
-    @GetToken() user: { orgId?: string; id?: string },
+    @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: {
       orgId?: string

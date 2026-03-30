@@ -10,7 +10,7 @@ export class ContentMgmtController {
 
   @Put('style-preferences')
   async setStylePreferences(
-    @GetToken() user: { orgId?: string; id?: string },
+    @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: {
       orgId?: string
@@ -25,7 +25,7 @@ export class ContentMgmtController {
 
   @Get('style-preferences')
   async getStylePreferences(
-    @GetToken() user: { orgId?: string; id?: string },
+    @GetToken() user: { orgId?: string, id?: string },
     @Query('orgId') orgId?: string,
   ) {
     return this.contentMgmtService.getStylePreferences(orgId || user.orgId || user.id || '')
@@ -33,7 +33,7 @@ export class ContentMgmtController {
 
   @Get()
   async listContent(
-    @GetToken() user: { orgId?: string; id?: string },
+    @GetToken() user: { orgId?: string, id?: string },
     @Query('orgId') orgId?: string,
     @Query('status') status?: VideoTaskStatus,
     @Query('publishStatus') publishStatus?: string,
@@ -47,8 +47,8 @@ export class ContentMgmtController {
       orgId || user.orgId || user.id || '',
       { status, publishStatus, brandId, startDate, endDate },
       {
-        page: page ? parseInt(page, 10) : 1,
-        limit: limit ? parseInt(limit, 10) : 20,
+        page: page ? Number.parseInt(page, 10) : 1,
+        limit: limit ? Number.parseInt(limit, 10) : 20,
       },
     )
   }
@@ -70,7 +70,7 @@ export class ContentMgmtController {
 
   @Post('export')
   async exportContent(
-    @GetToken() user: { orgId?: string; id?: string },
+    @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: {
       orgId?: string

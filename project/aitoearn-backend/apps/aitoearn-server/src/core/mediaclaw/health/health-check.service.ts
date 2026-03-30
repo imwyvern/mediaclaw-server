@@ -1,4 +1,3 @@
-import { statfs } from 'node:fs/promises'
 import { InjectQueue } from '@nestjs/bullmq'
 import { Injectable } from '@nestjs/common'
 import { InjectConnection, InjectModel } from '@nestjs/mongoose'
@@ -10,9 +9,9 @@ import {
   HealthIndicatorResult,
   MemoryHealthIndicator,
 } from '@nestjs/terminus'
+import { AuditLog, BrandAssetVersion } from '@yikart/mongodb'
 import { Queue } from 'bullmq'
 import { Connection, Model } from 'mongoose'
-import { AuditLog, BrandAssetVersion } from '@yikart/mongodb'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData } from '../worker/worker.constants'
 import { HealthService } from './health.service'
 
@@ -261,7 +260,8 @@ export class MediaClawHealthCheckService {
           ...(await action()),
         },
       }
-    } catch (error) {
+    }
+    catch (error) {
       throw new HealthCheckError(`${name} check failed`, {
         [name]: {
           status: 'down' as const,

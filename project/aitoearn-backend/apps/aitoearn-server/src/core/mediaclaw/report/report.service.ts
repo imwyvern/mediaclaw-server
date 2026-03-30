@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import {
   Brand,
   Campaign,
@@ -17,6 +16,7 @@ import {
   VideoTask,
   VideoTaskStatus,
 } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface ReportPeriodInput {
   start: string
@@ -174,7 +174,7 @@ export class ReportService {
   private async buildMetrics(
     orgId: Types.ObjectId,
     type: ReportType,
-    period: { start: Date; end: Date },
+    period: { start: Date, end: Date },
   ) {
     const baseQuery = {
       orgId,
@@ -300,10 +300,10 @@ export class ReportService {
   }
 
   private toResponse(report: {
-    _id: { toString(): string }
-    orgId: { toString(): string }
+    _id: { toString: () => string }
+    orgId: { toString: () => string }
     type: ReportType
-    period: { start: Date; end: Date }
+    period: { start: Date, end: Date }
     metrics: Record<string, any>
     fileUrl: string
     status: ReportStatus

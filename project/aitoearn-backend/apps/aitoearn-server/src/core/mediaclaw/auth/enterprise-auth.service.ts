@@ -5,19 +5,19 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import {
   BillingMode,
   McUserType,
   MediaClawUser,
+  Organization,
   OrgStatus,
   OrgType,
-  Organization,
   Subscription,
   SubscriptionPlan,
   SubscriptionStatus,
   UserRole,
 } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 import { McAuthService } from './auth.service'
 
 interface EnterpriseInviteRecord {
@@ -234,7 +234,7 @@ export class EnterpriseAuthService {
       ]),
     )
 
-    return organizations.map(org => {
+    return organizations.map((org) => {
       const membership = membershipMap.get(org._id.toString())
       return {
         id: org._id.toString(),
@@ -308,7 +308,7 @@ export class EnterpriseAuthService {
 
   private mergeMemberships(
     memberships: Array<{
-      orgId: { toString(): string }
+      orgId: { toString: () => string }
       role: UserRole
       joinedAt: Date
     }>,
@@ -365,7 +365,7 @@ export class EnterpriseAuthService {
   }
 
   private toOrgResponse(organization: {
-    _id: { toString(): string }
+    _id: { toString: () => string }
     name: string
     type: OrgType
     status: OrgStatus
@@ -393,8 +393,8 @@ export class EnterpriseAuthService {
   }
 
   private toSubscriptionResponse(subscription: {
-    _id: { toString(): string }
-    orgId: { toString(): string }
+    _id: { toString: () => string }
+    orgId: { toString: () => string }
     plan: SubscriptionPlan
     status: SubscriptionStatus
     billingMode: BillingMode

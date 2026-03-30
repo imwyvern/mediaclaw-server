@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, PipelineStage, Types } from 'mongoose'
 import { VideoTask, VideoTaskStatus } from '@yikart/mongodb'
+import { Model, PipelineStage, Types } from 'mongoose'
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly'
 
@@ -178,11 +178,10 @@ export class AnalyticsService {
         },
       },
       { $sort: { periodStart: 1 } },
-    ]).exec()
-      .then(items => items.map(item => ({
-        ...item,
-        successRate: this.round(item.successRate),
-      })))
+    ]).exec().then(items => items.map(item => ({
+      ...item,
+      successRate: this.round(item.successRate),
+    })))
   }
 
   async getTopContent(orgId: string, limit = 10) {
@@ -224,18 +223,17 @@ export class AnalyticsService {
       },
       { $sort: { engagementScore: -1, completedAt: -1 } },
       { $limit: normalizedLimit },
-    ]).exec()
-      .then(items => items.map(item => ({
-        taskId: item.taskId.toString(),
-        brandId: item.brandId?.toString() || null,
-        pipelineId: item.pipelineId?.toString() || null,
-        outputVideoUrl: item.outputVideoUrl,
-        views: item.views,
-        likes: item.likes,
-        comments: item.comments,
-        engagementScore: item.engagementScore,
-        completedAt: item.completedAt,
-      })))
+    ]).exec().then(items => items.map(item => ({
+      taskId: item.taskId.toString(),
+      brandId: item.brandId?.toString() || null,
+      pipelineId: item.pipelineId?.toString() || null,
+      outputVideoUrl: item.outputVideoUrl,
+      views: item.views,
+      likes: item.likes,
+      comments: item.comments,
+      engagementScore: item.engagementScore,
+      completedAt: item.completedAt,
+    })))
   }
 
   private normalizePeriod(period: TrendPeriod) {

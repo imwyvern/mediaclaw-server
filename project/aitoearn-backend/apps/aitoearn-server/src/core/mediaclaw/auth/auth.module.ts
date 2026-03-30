@@ -12,8 +12,8 @@ import {
   VideoPackSchema,
 } from '@yikart/mongodb'
 import { McAuthController } from './auth.controller'
-import { EnterpriseAuthService } from './enterprise-auth.service'
 import { McAuthService } from './auth.service'
+import { EnterpriseAuthService } from './enterprise-auth.service'
 
 @Module({
   imports: [

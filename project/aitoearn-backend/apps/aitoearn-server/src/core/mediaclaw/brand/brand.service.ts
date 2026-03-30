@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import { Brand } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 @Injectable()
 export class BrandService {
@@ -25,7 +25,8 @@ export class BrandService {
 
   async findById(id: string) {
     const brand = await this.brandModel.findById(id).exec()
-    if (!brand) throw new NotFoundException('Brand not found')
+    if (!brand)
+      throw new NotFoundException('Brand not found')
     return brand
   }
 
@@ -45,8 +46,10 @@ export class BrandService {
     referenceImages?: string[]
   }) {
     const update: any = {}
-    if (assets.logoUrl) update.logoUrl = assets.logoUrl
-    if (assets.referenceImages) update['visualIdentity.referenceImages'] = assets.referenceImages
+    if (assets.logoUrl)
+      update.logoUrl = assets.logoUrl
+    if (assets.referenceImages)
+      update['visualIdentity.referenceImages'] = assets.referenceImages
     return this.brandModel.findByIdAndUpdate(id, { $set: update }, { new: true }).exec()
   }
 

@@ -5,13 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import {
   PlatformAccount,
   PlatformAccountPlatform,
   PlatformAccountStatus,
   PublishRecord,
 } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface PaginationInput {
   page?: number
@@ -203,8 +203,8 @@ export class PlatformAccountService {
   }
 
   private toResponse(account: {
-    _id: { toString(): string }
-    orgId: { toString(): string }
+    _id: { toString: () => string }
+    orgId: { toString: () => string }
     platform: PlatformAccountPlatform
     accountId: string
     accountName: string

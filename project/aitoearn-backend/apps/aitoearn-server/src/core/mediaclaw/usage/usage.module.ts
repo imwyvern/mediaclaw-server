@@ -8,9 +8,9 @@ import {
   Subscription,
   SubscriptionSchema,
 } from '@yikart/mongodb'
+import { UsageTrackingInterceptor } from './usage-tracking.interceptor'
 import { UsageController } from './usage.controller'
 import { UsageService } from './usage.service'
-import { UsageTrackingInterceptor } from './usage-tracking.interceptor'
 
 @Global()
 @Module({

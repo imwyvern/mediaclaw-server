@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import { Brand, CopyHistory } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 export interface GeneratedCopy {
   title: string

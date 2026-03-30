@@ -2,10 +2,8 @@ services:
   api:
     image: ${MEDIACLAW_API_IMAGE:-mediaclaw/aitoearn-api}:${IMAGE_TAG:-latest}
     build:
-      context: ./tmp/docker-context/aitoearn-server
+      context: .
       dockerfile: Dockerfile
-      args:
-        APP_NAME: aitoearn-server
     env_file:
       - .env.production
     environment:
@@ -19,7 +17,7 @@ services:
     command:
       - sh
       - -lc
-      - mkdir -p /var/log/mediaclaw && exec node apps/$${APP_NAME}/src/main.js -c config.js >> /var/log/mediaclaw/api.log 2>&1
+      - mkdir -p /var/log/mediaclaw && exec node dist/apps/aitoearn-server/main.js >> /var/log/mediaclaw/api.log 2>&1
     restart: unless-stopped
     depends_on:
       mongodb:
@@ -46,10 +44,8 @@ services:
   worker:
     image: ${MEDIACLAW_WORKER_IMAGE:-mediaclaw/aitoearn-worker}:${IMAGE_TAG:-latest}
     build:
-      context: ./tmp/docker-context/aitoearn-server
+      context: .
       dockerfile: Dockerfile
-      args:
-        APP_NAME: aitoearn-server
     env_file:
       - .env.production
     environment:
@@ -63,7 +59,7 @@ services:
     command:
       - sh
       - -lc
-      - mkdir -p /var/log/mediaclaw && exec node apps/$${APP_NAME}/src/main.js -c config.js >> /var/log/mediaclaw/worker.log 2>&1
+      - mkdir -p /var/log/mediaclaw && exec node dist/apps/aitoearn-server/main.js >> /var/log/mediaclaw/worker.log 2>&1
     restart: unless-stopped
     depends_on:
       mongodb:

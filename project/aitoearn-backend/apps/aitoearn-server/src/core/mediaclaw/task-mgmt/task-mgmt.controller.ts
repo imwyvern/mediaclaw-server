@@ -62,8 +62,8 @@ export class TaskMgmtController {
       orgId || user.orgId,
       { status, brandId, startDate, endDate },
       {
-        page: page ? parseInt(page, 10) : 1,
-        limit: limit ? parseInt(limit, 10) : 20,
+        page: page ? Number.parseInt(page, 10) : 1,
+        limit: limit ? Number.parseInt(limit, 10) : 20,
       },
     )
   }

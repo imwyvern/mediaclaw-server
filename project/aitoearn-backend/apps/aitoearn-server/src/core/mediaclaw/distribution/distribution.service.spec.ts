@@ -1,9 +1,9 @@
-import { Types } from 'mongoose'
-import { vi } from 'vitest'
 import {
   DistributionRuleType,
   VideoTaskStatus,
 } from '@yikart/mongodb'
+import { Types } from 'mongoose'
+import { vi } from 'vitest'
 import {
   DistributionPublishStatus,
   DistributionService,
@@ -50,7 +50,7 @@ function createQuery<T>(value: T) {
   return query
 }
 
-describe('DistributionService', () => {
+describe('distributionService', () => {
   let service: DistributionService
   let distributionRuleModel: Record<string, any>
   let videoTaskModel: Record<string, any>

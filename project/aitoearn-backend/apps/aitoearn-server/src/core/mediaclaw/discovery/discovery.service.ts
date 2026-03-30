@@ -1,8 +1,8 @@
-import { Cron, CronExpression } from '@nestjs/schedule'
-import { InjectModel } from '@nestjs/mongoose'
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
-import { Model, Types } from 'mongoose'
+import { InjectModel } from '@nestjs/mongoose'
+import { Cron, CronExpression } from '@nestjs/schedule'
 import { VideoTask, ViralContent, ViralContentRemixStatus } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface ViralMetricsInput {
   views?: number
@@ -54,7 +54,7 @@ export class DiscoveryService {
     const excludedTaskIds = new Set(orgTaskIds)
 
     const pool = p90Candidates
-      .filter(item => {
+      .filter((item) => {
         if (item.remixStatus !== ViralContentRemixStatus.PENDING) {
           return false
         }

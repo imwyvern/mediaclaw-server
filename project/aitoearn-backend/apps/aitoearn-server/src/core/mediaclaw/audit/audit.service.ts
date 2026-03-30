@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import { AuditLog } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface AuditEvent {
   orgId: string

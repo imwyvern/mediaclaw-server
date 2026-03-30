@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto'
-import { Types } from 'mongoose'
-import { vi } from 'vitest'
 import {
   PackStatus,
   PaymentMethod,
   PaymentProductType,
   PaymentStatus,
 } from '@yikart/mongodb'
+import { Types } from 'mongoose'
+import { vi } from 'vitest'
 import { XorPayService } from './xorpay.service'
 
 const { axiosPost } = vi.hoisted(() => ({
@@ -114,7 +114,7 @@ function buildSignature(payload: Record<string, unknown>, secret: string) {
   return createHash('md5').update(`${serialized}${secret}`).digest('hex')
 }
 
-describe('XorPayService', () => {
+describe('xorPayService', () => {
   let service: XorPayService
   let orderModel: Record<string, any>
   let videoPackModel: Record<string, any>

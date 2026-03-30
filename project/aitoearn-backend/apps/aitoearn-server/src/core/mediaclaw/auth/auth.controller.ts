@@ -2,8 +2,8 @@ import { Body, Get, Post, Query } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { UserRole } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
-import { EnterpriseAuthService } from './enterprise-auth.service'
 import { McAuthService } from './auth.service'
+import { EnterpriseAuthService } from './enterprise-auth.service'
 
 @MediaClawApiController('api/v1/auth')
 export class McAuthController {
@@ -20,7 +20,7 @@ export class McAuthController {
 
   @Public()
   @Post('sms/verify')
-  async verifySms(@Body() body: { phone: string; code: string }) {
+  async verifySms(@Body() body: { phone: string, code: string }) {
     return this.authService.verifySmsCode(body.phone, body.code)
   }
 

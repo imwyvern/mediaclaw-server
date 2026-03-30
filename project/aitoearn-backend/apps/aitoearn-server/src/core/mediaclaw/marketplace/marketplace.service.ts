@@ -4,12 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, SortOrder, Types } from 'mongoose'
 import {
   MarketplaceCurrency,
   MarketplaceTemplate,
   PipelineTemplate,
 } from '@yikart/mongodb'
+import { Model, SortOrder, Types } from 'mongoose'
 
 interface MarketplaceFilters {
   search?: string
@@ -282,9 +282,9 @@ export class MarketplaceService {
   }
 
   private toResponse(template: {
-    _id: { toString(): string }
-    pipelineTemplateId: { toString(): string }
-    authorOrgId: { toString(): string }
+    _id: { toString: () => string }
+    pipelineTemplateId: { toString: () => string }
+    authorOrgId: { toString: () => string }
     title: string
     description: string
     thumbnailUrl: string
@@ -297,14 +297,14 @@ export class MarketplaceService {
     isApproved: boolean
     isFeatured: boolean
     reviews?: Array<{
-      orgId: { toString(): string }
+      orgId: { toString: () => string }
       rating: number
       review: string
       createdAt: Date
       updatedAt: Date
     }>
     purchaseHistory?: Array<{
-      orgId: { toString(): string }
+      orgId: { toString: () => string }
       purchasedAt: Date
     }>
     createdAt?: Date

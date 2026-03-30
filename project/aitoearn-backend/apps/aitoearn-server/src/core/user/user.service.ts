@@ -12,7 +12,7 @@ import { ReportLocationDto, UpdateUserInfoDto } from './user.dto'
 @Injectable()
 export class UserService {
   logger = new Logger(UserService.name)
-  // eslint-disable-next-line ts/no-explicit-any
+
   private oauth2Client: any
 
   constructor(
@@ -308,7 +308,7 @@ export class UserService {
 
   async setAiConfigItem(userId: string, type: 'image' | 'edit' | 'video' | 'agent', value: {
     defaultModel: string
-    // eslint-disable-next-line ts/no-explicit-any
+
     option?: Record<string, any>
   }): Promise<boolean> {
     const res = await this.userRepository.updateAiConfigItemById(userId, type, value)

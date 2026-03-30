@@ -30,8 +30,8 @@ export class VideoController {
     return this.videoService.listTasks(user.id, {
       status,
       brandId,
-      page: page ? parseInt(page) : 1,
-      limit: limit ? parseInt(limit) : 20,
+      page: page ? Number.parseInt(page) : 1,
+      limit: limit ? Number.parseInt(limit) : 20,
     })
   }
 

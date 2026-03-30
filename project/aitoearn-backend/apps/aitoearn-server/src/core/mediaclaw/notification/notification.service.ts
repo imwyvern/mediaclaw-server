@@ -1,11 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
 import {
   NotificationChannel,
   NotificationConfig,
   NotificationEvent,
 } from '@yikart/mongodb'
+import { Model, Types } from 'mongoose'
 
 interface NotificationConfigInput {
   channel: NotificationChannel
@@ -165,8 +165,8 @@ export class NotificationService {
   }
 
   private toResponse(config: {
-    _id: { toString(): string }
-    orgId: { toString(): string }
+    _id: { toString: () => string }
+    orgId: { toString: () => string }
     channel: NotificationChannel
     events: NotificationEvent[]
     config?: Record<string, any>
