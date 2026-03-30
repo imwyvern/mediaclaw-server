@@ -2,6 +2,7 @@ import { AccountGroup, AccountGroupSchema } from './account-group.schema'
 import { Account, AccountSchema } from './account.schema'
 import { AiLog, AiLogSchema } from './ai-log.schema'
 import { ApiKey, ApiKeySchema } from './api-key.schema'
+import { AuditLog, AuditLogSchema } from './audit-log.schema'
 import { Asset, AssetSchema } from './asset.schema'
 import { Blog, BlogSchema } from './blog.schema'
 import { ContentGenerationTask, ContentGenerationTaskSchema } from './content-generation-task.schema'
@@ -45,6 +46,7 @@ export * from './account-group.schema'
 export * from './account.schema'
 export * from './ai-log.schema'
 export * from './api-key.schema'
+export * from './audit-log.schema'
 export * from './asset.schema'
 export * from './blog.schema'
 export * from './campaign.schema'
@@ -83,6 +85,7 @@ export const schemas = [
   { name: Notification.name, schema: NotificationSchema },
   { name: Account.name, schema: AccountSchema },
   { name: ApiKey.name, schema: ApiKeySchema },
+  { name: AuditLog.name, schema: AuditLogSchema },
   { name: AccountGroup.name, schema: AccountGroupSchema },
   { name: MediaGroup.name, schema: MediaGroupSchema },
   { name: Media.name, schema: MediaSchema },

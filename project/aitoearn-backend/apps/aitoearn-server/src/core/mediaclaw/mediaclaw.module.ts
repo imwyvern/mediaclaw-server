@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
   ApiKey, ApiKeySchema,
+  AuditLog, AuditLogSchema,
   Brand, BrandSchema,
   Campaign, CampaignSchema,
   Organization, OrganizationSchema,
@@ -29,6 +30,7 @@ import { MediaClawApiKeyModule } from './apikey/apikey.module'
 import { DistributionModule } from './distribution/distribution.module'
 import { SkillModule } from './skill/skill.module'
 import { AnalyticsModule } from './analytics/analytics.module'
+import { AuditModule } from './audit/audit.module'
 import { CampaignModule } from './campaign/campaign.module'
 
 @Module({
@@ -37,6 +39,7 @@ import { CampaignModule } from './campaign/campaign.module'
       { name: Organization.name, schema: OrganizationSchema },
       { name: Brand.name, schema: BrandSchema },
       { name: ApiKey.name, schema: ApiKeySchema },
+      { name: AuditLog.name, schema: AuditLogSchema },
       { name: Campaign.name, schema: CampaignSchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
       { name: VideoPack.name, schema: VideoPackSchema },
@@ -60,6 +63,7 @@ import { CampaignModule } from './campaign/campaign.module'
     MediaClawApiKeyModule,
     SkillModule,
     AnalyticsModule,
+    AuditModule,
     CampaignModule,
     WorkerModule,
   ],
