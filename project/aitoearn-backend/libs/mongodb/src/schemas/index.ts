@@ -37,6 +37,7 @@ import { PublishDayInfo, PublishDayInfoSchema } from './publish-day-info.schema'
 import { PublishInfo, PublishInfoSchema } from './publish-info.schema'
 import { PublishRecord, PublishRecordSchema } from './publish-record.schema'
 import { QrCodeArtImage, QrCodeArtImageSchema } from './qr-code-art-image.schema'
+import { Report, ReportSchema } from './report.schema'
 import { ReplyCommentRecord, ReplyCommentRecordSchema } from './reply-comment-record.schema'
 import { ViralContent, ViralContentSchema } from './viral-content.schema'
 import {
@@ -80,6 +81,7 @@ export * from './publish-info.schema'
 export * from './publish-record.schema'
 export * from './publishing-task-meta.schema'
 export * from './qr-code-art-image.schema'
+export * from './report.schema'
 export * from './reply-comment-record.schema'
 export * from './timestamp.schema'
 export * from './user-notification-control.schema'
@@ -120,6 +122,7 @@ export const schemas = [
   { name: Asset.name, schema: AssetSchema },
   { name: Webhook.name, schema: WebhookSchema },
   { name: QrCodeArtImage.name, schema: QrCodeArtImageSchema },
+  { name: Report.name, schema: ReportSchema },
   { name: EngagementTask.name, schema: EngagementTaskSchema },
   { name: EngagementSubTask.name, schema: EngagementSubTaskSchema },
   { name: InteractionRecord.name, schema: InteractionRecordSchema },

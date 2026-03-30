@@ -11,6 +11,7 @@ import {
   Organization, OrganizationSchema,
   MediaClawUser, MediaClawUserSchema,
   NotificationConfig, NotificationConfigSchema,
+  Report, ReportSchema,
   VideoPack, VideoPackSchema,
   VideoTask, VideoTaskSchema,
   Pipeline, PipelineSchema,
@@ -50,6 +51,7 @@ import { CompetitorModule } from './competitor/competitor.module'
 import { MediaClawAssetModule } from './asset/asset.module'
 import { PipelineSystemModule } from './pipeline-system/pipeline-system.module'
 import { NotificationModule } from './notification/notification.module'
+import { ReportModule } from './report/report.module'
 
 @Module({
   imports: [
@@ -64,6 +66,7 @@ import { NotificationModule } from './notification/notification.module'
       { name: CopyHistory.name, schema: CopyHistorySchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
       { name: NotificationConfig.name, schema: NotificationConfigSchema },
+      { name: Report.name, schema: ReportSchema },
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: Pipeline.name, schema: PipelineSchema },
@@ -100,6 +103,7 @@ import { NotificationModule } from './notification/notification.module'
     MediaClawAssetModule,
     PipelineSystemModule,
     NotificationModule,
+    ReportModule,
     WebhookModule,
     WorkerModule,
   ],
