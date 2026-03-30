@@ -27,6 +27,7 @@ import { CopyModule } from './copy/copy.module'
 import { MediaClawApiKeyModule } from './apikey/apikey.module'
 import { DistributionModule } from './distribution/distribution.module'
 import { SkillModule } from './skill/skill.module'
+import { AnalyticsModule } from './analytics/analytics.module'
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { SkillModule } from './skill/skill.module'
     DistributionModule,
     MediaClawApiKeyModule,
     SkillModule,
+    AnalyticsModule,
     WorkerModule,
   ],
   exports: [MongooseModule],
