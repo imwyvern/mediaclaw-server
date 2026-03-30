@@ -5,6 +5,7 @@ import { ApiKey, ApiKeySchema } from './api-key.schema'
 import { AuditLog, AuditLogSchema } from './audit-log.schema'
 import { Asset, AssetSchema } from './asset.schema'
 import { Blog, BlogSchema } from './blog.schema'
+import { BrandAssetVersion, BrandAssetVersionSchema } from './brand-asset-version.schema'
 import { ContentGenerationTask, ContentGenerationTaskSchema } from './content-generation-task.schema'
 import { Campaign, CampaignSchema } from './campaign.schema'
 import { CopyHistory, CopyHistorySchema } from './copy-history.schema'
@@ -53,6 +54,7 @@ export * from './api-key.schema'
 export * from './audit-log.schema'
 export * from './asset.schema'
 export * from './blog.schema'
+export * from './brand-asset-version.schema'
 export * from './campaign.schema'
 export * from './content-generation-task.schema'
 export * from './competitor.schema'
@@ -89,6 +91,7 @@ export const schemas = [
   { name: PointsRecord.name, schema: PointsRecordSchema },
   { name: AiLog.name, schema: AiLogSchema },
   { name: Blog.name, schema: BlogSchema },
+  { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },
   { name: Campaign.name, schema: CampaignSchema },
   { name: Competitor.name, schema: CompetitorSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },

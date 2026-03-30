@@ -4,6 +4,7 @@ import {
   ApiKey, ApiKeySchema,
   AuditLog, AuditLogSchema,
   Brand, BrandSchema,
+  BrandAssetVersion, BrandAssetVersionSchema,
   Campaign, CampaignSchema,
   Competitor, CompetitorSchema,
   CopyHistory, CopyHistorySchema,
@@ -44,12 +45,14 @@ import { DiscoveryModule } from './discovery/discovery.module'
 import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
 import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
 import { CompetitorModule } from './competitor/competitor.module'
+import { MediaClawAssetModule } from './asset/asset.module'
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Organization.name, schema: OrganizationSchema },
       { name: Brand.name, schema: BrandSchema },
+      { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },
       { name: ApiKey.name, schema: ApiKeySchema },
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: Campaign.name, schema: CampaignSchema },
@@ -88,6 +91,7 @@ import { CompetitorModule } from './competitor/competitor.module'
     ClientMgmtModule,
     TaskMgmtModule,
     CompetitorModule,
+    MediaClawAssetModule,
     WebhookModule,
     WorkerModule,
   ],
