@@ -7,6 +7,7 @@ import {
   Brand, BrandSchema,
   BrandAssetVersion, BrandAssetVersionSchema,
   Campaign, CampaignSchema,
+  ClawHostInstance, ClawHostInstanceSchema,
   Competitor, CompetitorSchema,
   CopyHistory, CopyHistorySchema,
   Organization, OrganizationSchema,
@@ -59,6 +60,7 @@ import { ReportModule } from './report/report.module'
 import { PlatformAccountModule } from './platform-account/platform-account.module'
 import { MarketplaceModule } from './marketplace/marketplace.module'
 import { UsageModule } from './usage/usage.module'
+import { ClawHostModule } from './clawhost/clawhost.module'
 
 @Module({
   imports: [
@@ -70,6 +72,7 @@ import { UsageModule } from './usage/usage.module'
       { name: ApiUsage.name, schema: ApiUsageSchema },
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: Campaign.name, schema: CampaignSchema },
+      { name: ClawHostInstance.name, schema: ClawHostInstanceSchema },
       { name: Competitor.name, schema: CompetitorSchema },
       { name: CopyHistory.name, schema: CopyHistorySchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
@@ -118,6 +121,7 @@ import { UsageModule } from './usage/usage.module'
     PlatformAccountModule,
     ReportModule,
     UsageModule,
+    ClawHostModule,
     WebhookModule,
     WorkerModule,
   ],

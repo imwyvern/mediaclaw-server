@@ -10,6 +10,7 @@ import { BrandAssetVersion, BrandAssetVersionSchema } from './brand-asset-versio
 import { PipelineTemplate, PipelineTemplateSchema } from './pipeline-template.schema'
 import { ContentGenerationTask, ContentGenerationTaskSchema } from './content-generation-task.schema'
 import { Campaign, CampaignSchema } from './campaign.schema'
+import { ClawHostInstance, ClawHostInstanceSchema } from './clawhost-instance.schema'
 import { CopyHistory, CopyHistorySchema } from './copy-history.schema'
 import { Competitor, CompetitorSchema } from './competitor.schema'
 import { DistributionRule, DistributionRuleSchema } from './distribution-rule.schema'
@@ -65,6 +66,7 @@ export * from './asset.schema'
 export * from './blog.schema'
 export * from './brand-asset-version.schema'
 export * from './campaign.schema'
+export * from './clawhost-instance.schema'
 export * from './content-generation-task.schema'
 export * from './competitor.schema'
 export * from './copy-history.schema'
@@ -110,6 +112,7 @@ export const schemas = [
   { name: Blog.name, schema: BlogSchema },
   { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },
   { name: Campaign.name, schema: CampaignSchema },
+  { name: ClawHostInstance.name, schema: ClawHostInstanceSchema },
   { name: Competitor.name, schema: CompetitorSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },
   { name: DistributionRule.name, schema: DistributionRuleSchema },
