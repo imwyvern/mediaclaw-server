@@ -7,6 +7,7 @@ import {
   VideoPack, PackType, PackStatus,
 } from '@yikart/mongodb'
 import { BillingService } from '../billing/billing.service'
+import { DistributionService } from '../distribution/distribution.service'
 
 // Product catalog: individual video packs
 const PRODUCTS = {
@@ -24,6 +25,7 @@ export class PaymentService {
     @InjectModel(PaymentOrder.name) private readonly orderModel: Model<PaymentOrder>,
     @InjectModel(VideoPack.name) private readonly videoPackModel: Model<VideoPack>,
     private readonly billingService: BillingService,
+    private readonly distributionService: DistributionService,
   ) {}
 
   /**
@@ -116,12 +118,12 @@ export class PaymentService {
     }
 
     // Update order status
-    await this.orderModel.findByIdAndUpdate(order._id, {
+    const paidOrder = await this.orderModel.findByIdAndUpdate(order._id, {
       status: PaymentStatus.PAID,
       paidAt: new Date(),
       xorpayTradeNo: data.aoid,
       callbackData: data,
-    })
+    }, { new: true }).exec()
 
     // Create video pack
     const product = PRODUCTS[order.productId as keyof typeof PRODUCTS]
@@ -140,6 +142,10 @@ export class PaymentService {
       })
 
       this.logger.log(`Video pack created for user ${order.userId}: ${product.credits} credits`)
+    }
+
+    if (paidOrder) {
+      await this.distributionService.notifyPaymentSuccess(paidOrder)
     }
 
     return { success: true }

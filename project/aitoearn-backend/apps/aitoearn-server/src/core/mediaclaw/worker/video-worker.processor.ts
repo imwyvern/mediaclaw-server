@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { Queue, Job } from 'bullmq'
 import { VideoTaskStatus } from '@yikart/mongodb'
 import { CopyService } from '../copy/copy.service'
+import { DistributionService } from '../distribution/distribution.service'
 import { VideoService } from '../video/video.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from './worker.constants'
 
@@ -23,6 +24,7 @@ export class VideoWorkerProcessor extends WorkerHost {
     private readonly workerQueue: Queue<VideoWorkerJobData>,
     private readonly videoService: VideoService,
     private readonly copyService: CopyService,
+    private readonly distributionService: DistributionService,
   ) {
     super()
   }
@@ -71,11 +73,14 @@ export class VideoWorkerProcessor extends WorkerHost {
             task.outputVideoUrl || task.sourceVideoUrl,
             task.metadata,
           )
-          await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
+          const completedTask = await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
             outputVideoUrl: task.outputVideoUrl || `${task.sourceVideoUrl}?processed=${taskId}`,
             quality: task.quality,
             copy,
           })
+          if (completedTask) {
+            await this.distributionService.notifyTaskComplete(completedTask)
+          }
           this.logger.log(`Video task completed: ${taskId}`)
           return
         default:

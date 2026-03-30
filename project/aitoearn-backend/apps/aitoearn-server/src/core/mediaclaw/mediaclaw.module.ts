@@ -25,6 +25,7 @@ import { McAccountModule } from './account/account.module'
 import { WorkerModule } from './worker/worker.module'
 import { CopyModule } from './copy/copy.module'
 import { MediaClawApiKeyModule } from './apikey/apikey.module'
+import { DistributionModule } from './distribution/distribution.module'
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { MediaClawApiKeyModule } from './apikey/apikey.module'
     PipelineModule,
     McAccountModule,
     CopyModule,
+    DistributionModule,
     MediaClawApiKeyModule,
     WorkerModule,
   ],
