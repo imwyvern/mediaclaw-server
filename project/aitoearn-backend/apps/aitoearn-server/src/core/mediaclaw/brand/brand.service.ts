@@ -17,7 +17,10 @@ export class BrandService {
   }
 
   async findByOrg(orgId: string) {
-    return this.brandModel.find({ orgId: new Types.ObjectId(orgId) }).exec()
+    return this.brandModel.find({
+      orgId: new Types.ObjectId(orgId),
+      isActive: true,
+    }).exec()
   }
 
   async findById(id: string) {
@@ -32,5 +35,33 @@ export class BrandService {
 
   async delete(id: string) {
     return this.brandModel.findByIdAndUpdate(id, { isActive: false }, { new: true }).exec()
+  }
+
+  /**
+   * Upload brand assets (logo, reference images)
+   */
+  async updateAssets(id: string, assets: {
+    logoUrl?: string
+    referenceImages?: string[]
+  }) {
+    const update: any = {}
+    if (assets.logoUrl) update.logoUrl = assets.logoUrl
+    if (assets.referenceImages) update['visualIdentity.referenceImages'] = assets.referenceImages
+    return this.brandModel.findByIdAndUpdate(id, { $set: update }, { new: true }).exec()
+  }
+
+  /**
+   * Update video style preferences
+   */
+  async updateVideoStyle(id: string, style: {
+    preferredDuration?: number
+    aspectRatio?: string
+    subtitleStyle?: Record<string, any>
+  }) {
+    return this.brandModel.findByIdAndUpdate(
+      id,
+      { $set: { videoStyle: style } },
+      { new: true },
+    ).exec()
   }
 }

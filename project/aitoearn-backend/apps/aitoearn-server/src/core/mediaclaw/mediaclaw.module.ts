@@ -20,6 +20,7 @@ import { McAuthModule } from './auth/auth.module'
 import { VideoModule } from './video/video.module'
 import { PaymentModule } from './payment/payment.module'
 import { PipelineModule } from './pipeline/pipeline.module'
+import { McAccountModule } from './account/account.module'
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { PipelineModule } from './pipeline/pipeline.module'
     VideoModule,
     PaymentModule,
     PipelineModule,
+    McAccountModule,
   ],
   exports: [MongooseModule],
 })

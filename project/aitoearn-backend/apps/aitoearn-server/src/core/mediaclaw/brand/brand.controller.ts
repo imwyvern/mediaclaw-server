@@ -26,6 +26,16 @@ export class BrandController {
     return this.brandService.update(id, body)
   }
 
+  @Patch(':id/assets')
+  async updateAssets(@Param('id') id: string, @Body() body: any) {
+    return this.brandService.updateAssets(id, body)
+  }
+
+  @Patch(':id/video-style')
+  async updateVideoStyle(@Param('id') id: string, @Body() body: any) {
+    return this.brandService.updateVideoStyle(id, body)
+  }
+
   @Delete(':id')
   async remove(@Param('id') id: string) {
     return this.brandService.delete(id)
