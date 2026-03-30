@@ -79,9 +79,28 @@ export class AuditInterceptor implements NestInterceptor {
     for (const [key, rawValue] of Object.entries(value)) {
       sanitized[key] = redactedKeys.has(key)
         ? '[REDACTED]'
-        : rawValue
+        : this.sanitizeValue(rawValue)
     }
 
     return sanitized
+  }
+
+  private sanitizeValue(value: unknown): unknown {
+    if (typeof value === 'string') {
+      return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+    }
+
+    if (Array.isArray(value)) {
+      return value.map(item => this.sanitizeValue(item))
+    }
+
+    if (value && typeof value === 'object') {
+      return this.sanitizeRecord(value as Record<string, any>)
+    }
+
+    return value
   }
 }
