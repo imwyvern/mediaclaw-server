@@ -322,20 +322,22 @@ export class DistributionService {
   async notifyPaymentSuccess(order: PaymentOrder) {
     this.logger.log({
       message: 'MediaClaw payment success notification queued',
-      orderNo: order.orderNo,
+      orderId: order.orderId,
       userId: order.userId,
       orgId: order.orgId?.toString() || null,
-      amountCents: order.amountCents,
+      amount: order.amount,
+      currency: order.currency,
       status: order.status,
-      channel: 'stub',
+      paymentMethod: order.paymentMethod,
       target: order.callbackData?.['webhookUrl'] || order.callbackData?.['imGroupId'] || null,
     })
 
     await this.webhookService.trigger('payment.success', {
-      orderNo: order.orderNo,
+      orderId: order.orderId,
       userId: order.userId,
       orgId: order.orgId?.toString() || null,
-      amountCents: order.amountCents,
+      amount: order.amount,
+      currency: order.currency,
       status: order.status,
       paidAt: order.paidAt,
       callbackData: order.callbackData,

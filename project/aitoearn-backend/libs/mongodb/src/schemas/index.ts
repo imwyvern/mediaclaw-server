@@ -32,6 +32,7 @@ import { MediaGroup, MediaGroupSchema } from './media-group.schema'
 import { Media, MediaSchema } from './media.schema'
 import { NotificationConfig, NotificationConfigSchema } from './notification-config.schema'
 import { Notification, NotificationSchema } from './notification.schema'
+import { PaymentOrder, PaymentOrderSchema } from './payment-order.schema'
 import {
   PointsRecord,
   PointsRecordSchema,
@@ -115,6 +116,7 @@ export const schemas = [
   { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
   { name: NotificationConfig.name, schema: NotificationConfigSchema },
   { name: Notification.name, schema: NotificationSchema },
+  { name: PaymentOrder.name, schema: PaymentOrderSchema },
   { name: Account.name, schema: AccountSchema },
   { name: ApiKey.name, schema: ApiKeySchema },
   { name: AuditLog.name, schema: AuditLogSchema },

@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Model, Types } from 'mongoose'
+import { Model } from 'mongoose'
 import { VideoPack, PackStatus } from '@yikart/mongodb'
-import { PaymentOrder, PaymentStatus } from '@yikart/mongodb'
+import { PaymentOrder } from '@yikart/mongodb'
 
 @Injectable()
 export class BillingService {
