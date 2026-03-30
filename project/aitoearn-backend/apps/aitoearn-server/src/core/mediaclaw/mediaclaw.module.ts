@@ -40,6 +40,7 @@ import { AcquisitionModule } from './acquisition/acquisition.module'
 import { CrawlerModule } from './crawler/crawler.module'
 import { DataDashboardModule } from './data-dashboard/data-dashboard.module'
 import { DiscoveryModule } from './discovery/discovery.module'
+import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { DiscoveryModule } from './discovery/discovery.module'
     CrawlerModule,
     DataDashboardModule,
     DiscoveryModule,
+    ClientMgmtModule,
     WebhookModule,
     WorkerModule,
   ],
