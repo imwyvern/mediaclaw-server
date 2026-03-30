@@ -25,6 +25,7 @@ import { MaterialAdaptation, MaterialAdaptationSchema } from './material-adaptat
 import { MaterialGroup, MaterialGroupSchema } from './material-group.schema'
 import { MaterialTask, MaterialTaskSchema } from './material-task.schema'
 import { Material, MaterialSchema } from './material.schema'
+import { MarketplaceTemplate, MarketplaceTemplateSchema } from './marketplace-template.schema'
 import { MediaGroup, MediaGroupSchema } from './media-group.schema'
 import { Media, MediaSchema } from './media.schema'
 import { NotificationConfig, NotificationConfigSchema } from './notification-config.schema'
@@ -71,6 +72,7 @@ export * from './material-adaptation.schema'
 export * from './material-group.schema'
 export * from './material-task.schema'
 export * from './material.schema'
+export * from './marketplace-template.schema'
 export * from './media-group.schema'
 export * from './media.schema'
 export * from './notification-config.schema'
@@ -117,6 +119,7 @@ export const schemas = [
   { name: MaterialAdaptation.name, schema: MaterialAdaptationSchema },
   { name: MaterialGroup.name, schema: MaterialGroupSchema },
   { name: MaterialTask.name, schema: MaterialTaskSchema },
+  { name: MarketplaceTemplate.name, schema: MarketplaceTemplateSchema },
   { name: PublishDayInfo.name, schema: PublishDayInfoSchema },
   { name: PublishInfo.name, schema: PublishInfoSchema },
   { name: PublishRecord.name, schema: PublishRecordSchema },

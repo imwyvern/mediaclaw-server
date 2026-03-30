@@ -10,6 +10,7 @@ import {
   CopyHistory, CopyHistorySchema,
   Organization, OrganizationSchema,
   MediaClawUser, MediaClawUserSchema,
+  MarketplaceTemplate, MarketplaceTemplateSchema,
   NotificationConfig, NotificationConfigSchema,
   PlatformAccount, PlatformAccountSchema,
   Report, ReportSchema,
@@ -54,6 +55,7 @@ import { PipelineSystemModule } from './pipeline-system/pipeline-system.module'
 import { NotificationModule } from './notification/notification.module'
 import { ReportModule } from './report/report.module'
 import { PlatformAccountModule } from './platform-account/platform-account.module'
+import { MarketplaceModule } from './marketplace/marketplace.module'
 
 @Module({
   imports: [
@@ -67,6 +69,7 @@ import { PlatformAccountModule } from './platform-account/platform-account.modul
       { name: Competitor.name, schema: CompetitorSchema },
       { name: CopyHistory.name, schema: CopyHistorySchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
+      { name: MarketplaceTemplate.name, schema: MarketplaceTemplateSchema },
       { name: NotificationConfig.name, schema: NotificationConfigSchema },
       { name: PlatformAccount.name, schema: PlatformAccountSchema },
       { name: Report.name, schema: ReportSchema },
@@ -105,6 +108,7 @@ import { PlatformAccountModule } from './platform-account/platform-account.modul
     CompetitorModule,
     MediaClawAssetModule,
     PipelineSystemModule,
+    MarketplaceModule,
     NotificationModule,
     PlatformAccountModule,
     ReportModule,
