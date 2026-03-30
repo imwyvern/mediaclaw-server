@@ -7,58 +7,28 @@ import {
 } from '@yikart/mongodb'
 import { Types } from 'mongoose'
 import { vi } from 'vitest'
+import { describeModuleSpec } from '../testing/module-spec.factory'
+import { PaymentModule } from './payment.module'
+import { XorPayController } from './xorpay.controller'
 import { XorPayService } from './xorpay.service'
 
 const { axiosPost } = vi.hoisted(() => ({
   axiosPost: vi.fn(),
 }))
 
-vi.mock('@yikart/mongodb', () => {
-  class PaymentOrder {}
-  class VideoPack {}
-
-  return {
-    PackStatus: {
-      ACTIVE: 'active',
-      DEPLETED: 'depleted',
-      EXPIRED: 'expired',
-      REFUNDED: 'refunded',
-    },
-    PackType: {
-      SINGLE: 'single',
-      PACK_10: 'pack_10',
-      PACK_30: 'pack_30',
-      PACK_100: 'pack_100',
-      TRIAL_FREE: 'trial_free',
-      ENTERPRISE_MONTHLY: 'enterprise_monthly',
-    },
-    PaymentMethod: {
-      WECHAT_NATIVE: 'wechat_native',
-      WECHAT_JSAPI: 'wechat_jsapi',
-      ALIPAY: 'alipay',
-    },
-    PaymentProductType: {
-      VIDEO_PACK: 'video_pack',
-      SUBSCRIPTION: 'subscription',
-      ADDON: 'addon',
-    },
-    PaymentStatus: {
-      PENDING: 'pending',
-      PAID: 'paid',
-      FAILED: 'failed',
-      REFUNDED: 'refunded',
-      EXPIRED: 'expired',
-    },
-    PaymentOrder,
-    VideoPack,
-  }
-})
-
 vi.mock('axios', () => ({
   default: {
     post: axiosPost,
   },
 }))
+
+describeModuleSpec<XorPayService>({
+  suiteName: 'PaymentModule',
+  module: PaymentModule,
+  service: XorPayService,
+  controller: XorPayController,
+  keyMethods: ['getProducts', 'createOrder', 'handleCallback', 'cancelExpiredOrders'],
+})
 
 function createQuery<T>(value: T) {
   const query = {

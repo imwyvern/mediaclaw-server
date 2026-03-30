@@ -4,37 +4,20 @@ import {
 } from '@yikart/mongodb'
 import { Types } from 'mongoose'
 import { vi } from 'vitest'
+import { describeModuleSpec } from '../testing/module-spec.factory'
+import { DistributionController } from './distribution.controller'
+import { DistributionModule } from './distribution.module'
 import {
   DistributionPublishStatus,
   DistributionService,
 } from './distribution.service'
 
-vi.mock('@yikart/mongodb', () => {
-  class DistributionRule {}
-  class PaymentOrder {}
-  class VideoTask {}
-
-  return {
-    DistributionRule,
-    DistributionRuleType: {
-      BY_EMPLOYEE: 'by-employee',
-      BY_PLATFORM: 'by-platform',
-      BY_DIMENSION: 'by-dimension',
-    },
-    PaymentOrder,
-    VideoTask,
-    VideoTaskStatus: {
-      PENDING: 'pending',
-      ANALYZING: 'analyzing',
-      EDITING: 'editing',
-      RENDERING: 'rendering',
-      QUALITY_CHECK: 'quality_check',
-      GENERATING_COPY: 'generating_copy',
-      COMPLETED: 'completed',
-      FAILED: 'failed',
-      CANCELLED: 'cancelled',
-    },
-  }
+describeModuleSpec<DistributionService>({
+  suiteName: 'DistributionModule',
+  module: DistributionModule,
+  service: DistributionService,
+  controller: DistributionController,
+  keyMethods: ['listRules', 'evaluateRules', 'distribute'],
 })
 
 function createQuery<T>(value: T) {

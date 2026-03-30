@@ -1,21 +1,16 @@
 import { PackStatus } from '@yikart/mongodb'
 import { vi } from 'vitest'
+import { describeModuleSpec } from '../testing/module-spec.factory'
+import { BillingController } from './billing.controller'
+import { BillingModule } from './billing.module'
 import { BillingService } from './billing.service'
 
-vi.mock('@yikart/mongodb', () => {
-  class PaymentOrder {}
-  class VideoPack {}
-
-  return {
-    PackStatus: {
-      ACTIVE: 'active',
-      DEPLETED: 'depleted',
-      EXPIRED: 'expired',
-      REFUNDED: 'refunded',
-    },
-    PaymentOrder,
-    VideoPack,
-  }
+describeModuleSpec<BillingService>({
+  suiteName: 'BillingModule',
+  module: BillingModule,
+  service: BillingService,
+  controller: BillingController,
+  keyMethods: ['createTrialPack', 'deductCredit', 'getBalance'],
 })
 
 function createQuery<T>(value: T) {

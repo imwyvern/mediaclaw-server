@@ -1,0 +1,237 @@
+name: MediaClaw Module CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/aitoearn-server/src/core/mediaclaw/**'
+  pull_request:
+    paths:
+      - 'apps/aitoearn-server/src/core/mediaclaw/**'
+
+permissions:
+  contents: read
+
+env:
+  NX_NO_CLOUD: true
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.changes.outputs.modules }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed MediaClaw modules
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ALL_MODULES=(
+            account
+            acquisition
+            analytics
+            apikey
+            asset
+            audit
+            auth
+            billing
+            brand
+            campaign
+            clawhost
+            client-mgmt
+            competitor
+            content-mgmt
+            copy
+            crawler
+            data-dashboard
+            discovery
+            distribution
+            health
+            marketplace
+            notification
+            org
+            payment
+            pipeline
+            pipeline-system
+            platform-account
+            report
+            skill
+            task-mgmt
+            usage
+            video
+            webhook
+            worker
+          )
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+          fi
+
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            BASE_SHA="$(git rev-list --max-parents=0 HEAD | tail -1)"
+          fi
+
+          CHANGED_FILES="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" -- apps/aitoearn-server/src/core/mediaclaw/)"
+          echo "Changed files:"
+          echo "${CHANGED_FILES:-<none>}"
+
+          if [[ -z "${CHANGED_FILES}" ]]; then
+            echo "modules=[]" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          declare -A CHANGED_MODULES=()
+          RUN_ALL=false
+
+          while IFS= read -r file; do
+            [[ -z "${file}" ]] && continue
+            relative_path="${file#apps/aitoearn-server/src/core/mediaclaw/}"
+
+            if [[ "${relative_path}" != */* ]]; then
+              RUN_ALL=true
+              break
+            fi
+
+            module_name="${relative_path%%/*}"
+            if [[ "${module_name}" == "testing" ]]; then
+              RUN_ALL=true
+              break
+            fi
+
+            CHANGED_MODULES["${module_name}"]=1
+          done <<< "${CHANGED_FILES}"
+
+          if [[ "${RUN_ALL}" == "true" ]]; then
+            MODULES_JSON="$(printf '%s\n' "${ALL_MODULES[@]}" | jq -R . | jq -s -c .)"
+          else
+            MODULES_JSON="$(
+              printf '%s\n' "${!CHANGED_MODULES[@]}" \
+                | sort \
+                | jq -R . \
+                | jq -s -c .
+            )"
+          fi
+
+          echo "modules=${MODULES_JSON}" >> "${GITHUB_OUTPUT}"
+          echo "Detected modules: ${MODULES_JSON}"
+
+  test-module:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.modules != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.detect-changes.outputs.modules) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test ${{ matrix.module }}
+        run: pnpm exec vitest run --config apps/aitoearn-server/vitest.config.mts "src/core/mediaclaw/${{ matrix.module }}/"
+
+      - name: Module build check
+        run: pnpm nx build aitoearn-server --skip-nx-cache
+
+  all-modules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint all
+        run: pnpm nx lint aitoearn-server --skip-nx-cache
+
+      - name: Build all
+        run: pnpm nx build aitoearn-server --skip-nx-cache
+
+      - name: Test all modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODULES=(
+            account
+            acquisition
+            analytics
+            apikey
+            asset
+            audit
+            auth
+            billing
+            brand
+            campaign
+            clawhost
+            client-mgmt
+            competitor
+            content-mgmt
+            copy
+            crawler
+            data-dashboard
+            discovery
+            distribution
+            health
+            marketplace
+            notification
+            org
+            payment
+            pipeline
+            pipeline-system
+            platform-account
+            report
+            skill
+            task-mgmt
+            usage
+            video
+            webhook
+            worker
+          )
+
+          for module in "${MODULES[@]}"; do
+            echo "=== Testing ${module} ==="
+            pnpm exec vitest run --config apps/aitoearn-server/vitest.config.mts "src/core/mediaclaw/${module}/"
+            echo
+          done
+
+      - name: Summary
+        run: echo "All 34 MediaClaw modules tested individually."
