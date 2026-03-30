@@ -74,6 +74,25 @@
         "fix": true
       }
     },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/aitoearn-server",
+        "command": "vitest"
+      },
+      "outputs": ["{workspaceRoot}/coverage/apps/aitoearn-server"],
+      "inputs": [
+        "default",
+        "^production",
+        {
+          "externalDependencies": ["vitest"]
+        },
+        {
+          "env": "CI"
+        }
+      ],
+      "cache": true
+    },
     "docker-context": {},
     "docker-build": {}
   }
