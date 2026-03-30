@@ -1,15 +1,19 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
-import { Brand, BrandSchema } from '@yikart/mongodb'
+import { Brand, BrandSchema, CopyHistory, CopyHistorySchema } from '@yikart/mongodb'
+import { CopyController } from './copy.controller'
+import { CopyEngineService } from './copy-engine.service'
 import { CopyService } from './copy.service'
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Brand.name, schema: BrandSchema },
+      { name: CopyHistory.name, schema: CopyHistorySchema },
     ]),
   ],
-  providers: [CopyService],
-  exports: [CopyService],
+  controllers: [CopyController],
+  providers: [CopyEngineService, CopyService],
+  exports: [CopyEngineService, CopyService],
 })
 export class CopyModule {}

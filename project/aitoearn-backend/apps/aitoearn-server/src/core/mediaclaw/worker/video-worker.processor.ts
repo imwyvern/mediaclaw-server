@@ -71,7 +71,10 @@ export class VideoWorkerProcessor extends WorkerHost {
           const copy = await this.copyService.generateCopy(
             task.brandId?.toString(),
             task.outputVideoUrl || task.sourceVideoUrl,
-            task.metadata,
+            {
+              ...task.metadata,
+              taskId,
+            },
           )
           const completedTask = await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
             outputVideoUrl: task.outputVideoUrl || `${task.sourceVideoUrl}?processed=${taskId}`,
