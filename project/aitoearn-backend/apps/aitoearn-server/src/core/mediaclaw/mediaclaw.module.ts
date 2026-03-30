@@ -17,6 +17,9 @@ import { OrgModule } from './org/org.module'
 import { BillingModule } from './billing/billing.module'
 import { HealthModule } from './health/health.module'
 import { McAuthModule } from './auth/auth.module'
+import { VideoModule } from './video/video.module'
+import { PaymentModule } from './payment/payment.module'
+import { PipelineModule } from './pipeline/pipeline.module'
 
 @Module({
   imports: [
@@ -36,6 +39,9 @@ import { McAuthModule } from './auth/auth.module'
     BillingModule,
     HealthModule,
     McAuthModule,
+    VideoModule,
+    PaymentModule,
+    PipelineModule,
   ],
   exports: [MongooseModule],
 })
