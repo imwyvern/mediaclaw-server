@@ -38,6 +38,7 @@ import { CampaignModule } from './campaign/campaign.module'
 import { WebhookModule } from './webhook/webhook.module'
 import { AcquisitionModule } from './acquisition/acquisition.module'
 import { CrawlerModule } from './crawler/crawler.module'
+import { DataDashboardModule } from './data-dashboard/data-dashboard.module'
 import { DiscoveryModule } from './discovery/discovery.module'
 
 @Module({
@@ -77,6 +78,7 @@ import { DiscoveryModule } from './discovery/discovery.module'
     CampaignModule,
     AcquisitionModule,
     CrawlerModule,
+    DataDashboardModule,
     DiscoveryModule,
     WebhookModule,
     WorkerModule,
