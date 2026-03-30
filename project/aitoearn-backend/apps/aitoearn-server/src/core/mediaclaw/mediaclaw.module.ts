@@ -8,12 +8,15 @@ import {
   VideoTask, VideoTaskSchema,
   Pipeline, PipelineSchema,
   PaymentOrder, PaymentOrderSchema,
+  Subscription, SubscriptionSchema,
+  Invoice, InvoiceSchema,
 } from '@yikart/mongodb'
 
 import { BrandModule } from './brand/brand.module'
 import { OrgModule } from './org/org.module'
 import { BillingModule } from './billing/billing.module'
 import { HealthModule } from './health/health.module'
+import { McAuthModule } from './auth/auth.module'
 
 @Module({
   imports: [
@@ -25,11 +28,14 @@ import { HealthModule } from './health/health.module'
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: Pipeline.name, schema: PipelineSchema },
       { name: PaymentOrder.name, schema: PaymentOrderSchema },
+      { name: Subscription.name, schema: SubscriptionSchema },
+      { name: Invoice.name, schema: InvoiceSchema },
     ]),
     BrandModule,
     OrgModule,
     BillingModule,
     HealthModule,
+    McAuthModule,
   ],
   exports: [MongooseModule],
 })
