@@ -99,3 +99,12 @@ export const schemas = [
   { name: InteractionRecord.name, schema: InteractionRecordSchema },
   { name: ReplyCommentRecord.name, schema: ReplyCommentRecordSchema },
 ] as const
+
+// MediaClaw-specific schemas
+export * from './brand.schema'
+export * from './organization.schema'
+export * from './mediaclaw-user.schema'
+export * from './video-pack.schema'
+export * from './video-task.schema'
+export * from './pipeline.schema'
+export * from './payment-order.schema'
