@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Job, Queue } from 'bullmq'
 import { TikHubService } from '../acquisition/tikhub.service'
 
-export const MEDIACLAW_CRAWL_QUEUE = 'mediaclaw:crawl'
+export const MEDIACLAW_CRAWL_QUEUE = 'mediaclaw_crawl'
 
 interface CrawlQuery {
   platform: string

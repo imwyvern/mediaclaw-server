@@ -25,7 +25,7 @@ export class ApiKey extends WithTimestampSchema {
   @Prop({ type: [String], default: [] })
   permissions: string[]
 
-  @Prop()
+  @Prop({ type: Date, required: false, default: null })
   lastUsedAt: Date | null
 
   @Prop({ type: Date, default: null })

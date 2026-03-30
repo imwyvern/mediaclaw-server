@@ -1,6 +1,19 @@
 import { Prop, Schema } from '@nestjs/mongoose'
 import mongoose from 'mongoose'
 
+const TIKTOK_PRIVACY_LEVELS = [
+  'PUBLIC_TO_EVERYONE',
+  'MUTUAL_FOLLOW_FRIENDS',
+  'SELF_ONLY',
+  'FOLLOWER_OF_CREATOR',
+] as const
+
+const META_CONTENT_CATEGORIES = ['post', 'reel', 'story'] as const
+
+const YOUTUBE_PRIVACY_STATUSES = ['public', 'unlisted', 'private'] as const
+
+const YOUTUBE_LICENSES = ['youtube', 'creativeCommon'] as const
+
 @Schema({})
 export class BiliBiliPublishTaskMeta {
   @Prop({ required: true })
@@ -18,8 +31,8 @@ export class BiliBiliPublishTaskMeta {
 
 @Schema({})
 export class TiktokPublishTaskMeta {
-  @Prop({ required: true })
-  privacy_level: 'PUBLIC_TO_EVERYONE' | 'MUTUAL_FOLLOW_FRIENDS' | 'SELF_ONLY' | 'FOLLOWER_OF_CREATOR'
+  @Prop({ type: String, required: true, enum: TIKTOK_PRIVACY_LEVELS })
+  privacy_level: (typeof TIKTOK_PRIVACY_LEVELS)[number]
 
   @Prop({ required: false })
   disable_duet?: boolean
@@ -39,23 +52,23 @@ export class TiktokPublishTaskMeta {
 
 @Schema({})
 export class FacebookPublishTaskMeta {
-  @Prop({ required: true })
-  content_category: 'post' | 'reel' | 'story'
+  @Prop({ type: String, required: true, enum: META_CONTENT_CATEGORIES })
+  content_category: (typeof META_CONTENT_CATEGORIES)[number]
 }
 
 @Schema({})
 export class InstagramPublishTaskMeta {
-  @Prop({ required: true })
-  content_category: 'post' | 'reel' | 'story'
+  @Prop({ type: String, required: true, enum: META_CONTENT_CATEGORIES })
+  content_category: (typeof META_CONTENT_CATEGORIES)[number]
 }
 
 @Schema({})
 export class YoutubePublishTaskMeta {
-  @Prop({ required: true })
-  privacyStatus: 'public' | 'unlisted' | 'private'
+  @Prop({ type: String, required: true, enum: YOUTUBE_PRIVACY_STATUSES })
+  privacyStatus: (typeof YOUTUBE_PRIVACY_STATUSES)[number]
 
-  @Prop({ required: true })
-  license: 'youtube' | 'creativeCommon'
+  @Prop({ type: String, required: true, enum: YOUTUBE_LICENSES })
+  license: (typeof YOUTUBE_LICENSES)[number]
 
   @Prop({ required: true })
   categoryId: string
