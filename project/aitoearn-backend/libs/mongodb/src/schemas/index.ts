@@ -41,6 +41,7 @@ import {
   User,
   UserSchema,
 } from './user.schema'
+import { Webhook, WebhookSchema } from './webhook.schema'
 
 export * from './account-group.schema'
 export * from './account.schema'
@@ -73,6 +74,7 @@ export * from './reply-comment-record.schema'
 export * from './timestamp.schema'
 export * from './user-notification-control.schema'
 export * from './user.schema'
+export * from './webhook.schema'
 
 export const schemas = [
   { name: User.name, schema: UserSchema },
@@ -99,6 +101,7 @@ export const schemas = [
   { name: ContentGenerationTask.name, schema: ContentGenerationTaskSchema },
   { name: UserNotificationControl.name, schema: UserNotificationControlSchema },
   { name: Asset.name, schema: AssetSchema },
+  { name: Webhook.name, schema: WebhookSchema },
   { name: QrCodeArtImage.name, schema: QrCodeArtImageSchema },
   { name: EngagementTask.name, schema: EngagementTaskSchema },
   { name: EngagementSubTask.name, schema: EngagementSubTaskSchema },

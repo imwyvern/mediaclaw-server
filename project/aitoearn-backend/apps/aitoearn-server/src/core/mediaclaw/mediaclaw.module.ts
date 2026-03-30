@@ -13,6 +13,7 @@ import {
   PaymentOrder, PaymentOrderSchema,
   Subscription, SubscriptionSchema,
   Invoice, InvoiceSchema,
+  Webhook, WebhookSchema,
 } from '@yikart/mongodb'
 
 import { BrandModule } from './brand/brand.module'
@@ -32,6 +33,7 @@ import { SkillModule } from './skill/skill.module'
 import { AnalyticsModule } from './analytics/analytics.module'
 import { AuditModule } from './audit/audit.module'
 import { CampaignModule } from './campaign/campaign.module'
+import { WebhookModule } from './webhook/webhook.module'
 
 @Module({
   imports: [
@@ -48,6 +50,7 @@ import { CampaignModule } from './campaign/campaign.module'
       { name: PaymentOrder.name, schema: PaymentOrderSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
       { name: Invoice.name, schema: InvoiceSchema },
+      { name: Webhook.name, schema: WebhookSchema },
     ]),
     BrandModule,
     OrgModule,
@@ -65,6 +68,7 @@ import { CampaignModule } from './campaign/campaign.module'
     AnalyticsModule,
     AuditModule,
     CampaignModule,
+    WebhookModule,
     WorkerModule,
   ],
   exports: [MongooseModule],
