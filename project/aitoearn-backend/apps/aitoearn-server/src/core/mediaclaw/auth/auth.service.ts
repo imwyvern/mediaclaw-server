@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { JwtService } from '@nestjs/jwt'
 import { Model } from 'mongoose'
-import { MediaClawUser, UserRole } from '@yikart/mongodb'
+import { McUserType, MediaClawUser, UserRole } from '@yikart/mongodb'
 import { VideoPack } from '@yikart/mongodb'
 
 @Injectable()
@@ -18,13 +18,17 @@ export class McAuthService {
     private readonly jwtService: JwtService,
   ) {}
 
+  validatePhoneNumber(phone: string) {
+    if (!/^1\d{10}$/.test(phone)) {
+      throw new BadRequestException('Invalid phone number')
+    }
+  }
+
   /**
    * Send SMS verification code
    */
   async sendSmsCode(phone: string) {
-    if (!/^1\d{10}$/.test(phone)) {
-      throw new BadRequestException('Invalid phone number')
-    }
+    this.validatePhoneNumber(phone)
 
     // Rate limit: 1 code per 60s
     const existing = this.otpStore.get(phone)
@@ -44,16 +48,20 @@ export class McAuthService {
     return { success: true, message: 'Code sent' }
   }
 
-  /**
-   * Verify SMS code and login/register
-   */
-  async verifySmsCode(phone: string, code: string) {
+  async consumeSmsCode(phone: string, code: string) {
     const stored = this.otpStore.get(phone)
     if (!stored || stored.code !== code || stored.expiresAt < Date.now()) {
       throw new BadRequestException('Invalid or expired verification code')
     }
 
     this.otpStore.delete(phone)
+  }
+
+  /**
+   * Verify SMS code and login/register
+   */
+  async verifySmsCode(phone: string, code: string) {
+    await this.consumeSmsCode(phone, code)
 
     // Find or create user
     let user = await this.userModel.findOne({ phone }).exec()
@@ -65,6 +73,8 @@ export class McAuthService {
         phone,
         name: `用户${phone.slice(-4)}`,
         role: UserRole.ADMIN, // First user = admin of their own account
+        userType: McUserType.INDIVIDUAL,
+        orgMemberships: [],
         isActive: true,
         lastLoginAt: new Date(),
       })
@@ -83,36 +93,16 @@ export class McAuthService {
 
       this.logger.log(`New user registered: ${phone}, trial pack created`)
     } else {
-      await this.userModel.findByIdAndUpdate(user._id, {
+      const updatedUser = await this.userModel.findByIdAndUpdate(user._id, {
         lastLoginAt: new Date(),
-      })
+      }, { new: true }).exec()
+
+      if (updatedUser) {
+        user = updatedUser
+      }
     }
 
-    // Generate JWT with orgId + role
-    const payload = {
-      id: user._id.toString(),
-      orgId: user.orgId?.toString() || null,
-      role: user.role,
-      phone: user.phone,
-      name: user.name,
-    }
-
-    const accessToken = this.jwtService.sign(payload, { expiresIn: '2h' })
-    const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' })
-
-    return {
-      accessToken,
-      refreshToken,
-      user: {
-        id: user._id,
-        phone: user.phone,
-        name: user.name,
-        role: user.role,
-        orgId: user.orgId,
-        avatarUrl: user.avatarUrl,
-      },
-      isNewUser,
-    }
+    return this.buildAuthResult(user, isNewUser)
   }
 
   /**
@@ -138,20 +128,49 @@ export class McAuthService {
         throw new BadRequestException('User not found or inactive')
       }
 
-      const newPayload = {
-        id: user._id.toString(),
-        orgId: user.orgId?.toString() || null,
-        role: user.role,
-        phone: user.phone,
-        name: user.name,
-      }
-
+      const tokens = this.issueTokens(user)
       return {
-        accessToken: this.jwtService.sign(newPayload, { expiresIn: '2h' }),
-        refreshToken: this.jwtService.sign(newPayload, { expiresIn: '7d' }),
+        ...tokens,
       }
     } catch {
       throw new BadRequestException('Invalid refresh token')
+    }
+  }
+
+  buildAuthResult(user: MediaClawUser, isNewUser: boolean) {
+    const tokens = this.issueTokens(user)
+
+    return {
+      ...tokens,
+      user: this.toUserResponse(user),
+      isNewUser,
+    }
+  }
+
+  private issueTokens(user: MediaClawUser) {
+    const payload = {
+      id: user._id.toString(),
+      orgId: user.orgId?.toString() || null,
+      role: user.role,
+      phone: user.phone,
+      name: user.name,
+    }
+
+    return {
+      accessToken: this.jwtService.sign(payload, { expiresIn: '2h' }),
+      refreshToken: this.jwtService.sign(payload, { expiresIn: '7d' }),
+    }
+  }
+
+  private toUserResponse(user: MediaClawUser) {
+    return {
+      id: user._id,
+      phone: user.phone,
+      name: user.name,
+      role: user.role,
+      orgId: user.orgId,
+      userType: user.userType,
+      avatarUrl: user.avatarUrl,
     }
   }
 }

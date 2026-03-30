@@ -1,11 +1,16 @@
-import { Body, Post, Query } from '@nestjs/common'
-import { Public } from '@yikart/aitoearn-auth'
+import { Body, Get, Post, Query } from '@nestjs/common'
+import { GetToken, Public } from '@yikart/aitoearn-auth'
+import { UserRole } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { EnterpriseAuthService } from './enterprise-auth.service'
 import { McAuthService } from './auth.service'
 
 @MediaClawApiController('api/v1/auth')
 export class McAuthController {
-  constructor(private readonly authService: McAuthService) {}
+  constructor(
+    private readonly authService: McAuthService,
+    private readonly enterpriseAuthService: EnterpriseAuthService,
+  ) {}
 
   @Public()
   @Post('sms/send')
@@ -29,5 +34,64 @@ export class McAuthController {
   @Post('refresh')
   async refresh(@Body('refreshToken') refreshToken: string) {
     return this.authService.refreshToken(refreshToken)
+  }
+
+  @Public()
+  @Post('enterprise/register')
+  async registerEnterprise(
+    @Body()
+    body: {
+      orgName: string
+      adminPhone: string
+      adminName?: string
+      contactEmail?: string
+      contactName?: string
+      monthlyQuota?: number
+    },
+  ) {
+    return this.enterpriseAuthService.registerEnterprise(body)
+  }
+
+  @Post('enterprise/invite')
+  async inviteByPhone(
+    @GetToken() user: { orgId?: string },
+    @Body()
+    body: {
+      orgId?: string
+      phone: string
+      role: UserRole
+    },
+  ) {
+    return this.enterpriseAuthService.inviteByPhone(
+      body.orgId || user.orgId || '',
+      body.phone,
+      body.role,
+    )
+  }
+
+  @Public()
+  @Post('enterprise/accept-invite')
+  async acceptInvite(
+    @Body()
+    body: {
+      token: string
+      phone: string
+      code: string
+    },
+  ) {
+    return this.enterpriseAuthService.acceptInvite(body.token, body.phone, body.code)
+  }
+
+  @Post('switch-org')
+  async switchOrg(
+    @GetToken() user: { id: string },
+    @Body('orgId') orgId: string,
+  ) {
+    return this.enterpriseAuthService.switchOrg(user.id, orgId)
+  }
+
+  @Get('my-orgs')
+  async listUserOrgs(@GetToken() user: { id: string }) {
+    return this.enterpriseAuthService.listUserOrgs(user.id)
   }
 }

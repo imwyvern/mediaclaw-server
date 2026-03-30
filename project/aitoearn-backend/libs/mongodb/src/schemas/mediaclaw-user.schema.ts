@@ -16,6 +16,18 @@ export enum McUserType {
 }
 
 @Schema({ _id: false })
+export class OrgMembership {
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
+  orgId: MongooseSchema.Types.ObjectId
+
+  @Prop({ type: String, enum: UserRole, default: UserRole.VIEWER })
+  role: UserRole
+
+  @Prop({ type: Date, default: Date.now })
+  joinedAt: Date
+}
+
+@Schema({ _id: false })
 class ImBinding {
   @Prop({ type: String, required: true })
   platform: string // 'openclaw' | 'wechat' | 'feishu' | 'dingtalk'
@@ -56,6 +68,9 @@ export class MediaClawUser extends WithTimestampSchema {
   @Prop({ type: String, enum: McUserType, default: McUserType.INDIVIDUAL })
   userType: McUserType
 
+  @Prop({ type: [OrgMembership], default: [] })
+  orgMemberships: OrgMembership[]
+
   @Prop({ type: [ImBinding], default: [] })
   imBindings: ImBinding[]
 
@@ -72,4 +87,5 @@ export class MediaClawUser extends WithTimestampSchema {
 export const MediaClawUserSchema = SchemaFactory.createForClass(MediaClawUser)
 MediaClawUserSchema.index({ phone: 1 }, { unique: true, sparse: true })
 MediaClawUserSchema.index({ email: 1 }, { sparse: true })
+MediaClawUserSchema.index({ 'orgMemberships.orgId': 1 })
 MediaClawUserSchema.index({ 'imBindings.platform': 1, 'imBindings.platformUserId': 1 })
