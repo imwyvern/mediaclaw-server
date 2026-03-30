@@ -10,12 +10,12 @@ export class ApiKeyRepository extends BaseRepository<ApiKey> {
     super(apiKeyModel)
   }
 
-  async getByKeyHash(keyHash: string) {
-    return await this.findOne({ keyHash })
+  async getByHashedKeys(keys: string[]) {
+    return await this.findOne({ $or: [{ key: { $in: keys } }, { keyHash: { $in: keys } }] })
   }
 
-  async listByUserId(userId: string) {
-    return await this.find({ userId })
+  async listByUserId(userId: string, includeInactive = false) {
+    return await this.find(includeInactive ? { userId } : { userId, isActive: true })
   }
 
   async updateLastUsedAt(id: string) {

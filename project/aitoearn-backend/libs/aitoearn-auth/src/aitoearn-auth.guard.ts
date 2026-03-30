@@ -37,10 +37,20 @@ export class AitoearnAuthGuard implements CanActivate {
     // 1. API Key 认证
     const apiKey = request.headers['x-api-key'] as string | undefined
     if (apiKey) {
-      const keyHash = createHash('sha1').update(apiKey).digest('hex')
-      const record = await this.apiKeyRepository.getByKeyHash(keyHash)
+      const record = await this.apiKeyRepository.getByHashedKeys([
+        this.hashKey(apiKey),
+        this.hashLegacyKey(apiKey),
+      ])
       if (!record) {
         throw new UnauthorizedException()
+      }
+      if (!this.isKeyUsable(record)) {
+        throw new UnauthorizedException()
+      }
+      if (apiKey.startsWith('mc_live_')) {
+        request['user'] = this.buildMediaClawUser(record)
+        await this.apiKeyRepository.updateLastUsedAt(record.id)
+        return true
       }
       await this.apiKeyRepository.updateLastUsedAt(record.id)
       const user = await this.userRepository.getById(record.userId)
@@ -62,6 +72,16 @@ export class AitoearnAuthGuard implements CanActivate {
         return true
       }
       throw new UnauthorizedException()
+    }
+
+    if (token.startsWith('mc_live_')) {
+      const record = await this.apiKeyRepository.getByHashedKeys([this.hashKey(token)])
+      if (!record || !this.isKeyUsable(record)) {
+        throw new UnauthorizedException()
+      }
+      await this.apiKeyRepository.updateLastUsedAt(record.id)
+      request['user'] = this.buildMediaClawUser(record)
+      return true
     }
 
     if (token === this.config.internalToken) {
@@ -91,5 +111,35 @@ export class AitoearnAuthGuard implements CanActivate {
   private extractTokenFromHeader(request: any): string | undefined {
     const [type, token] = request.headers.authorization?.split(' ') ?? []
     return type === 'Bearer' ? token : undefined
+  }
+
+  private hashKey(rawKey: string): string {
+    return createHash('sha256').update(rawKey).digest('hex')
+  }
+
+  private hashLegacyKey(rawKey: string): string {
+    return createHash('sha1').update(rawKey).digest('hex')
+  }
+
+  private isKeyUsable(record: any): boolean {
+    if (record.isActive === false) {
+      return false
+    }
+
+    if (record.expiresAt && new Date(record.expiresAt).getTime() <= Date.now()) {
+      return false
+    }
+
+    return true
+  }
+
+  private buildMediaClawUser(record: any) {
+    return {
+      id: record.userId,
+      orgId: record.orgId?.toString() || null,
+      permissions: record.permissions || [],
+      apiKeyId: record.id || record._id?.toString(),
+      authType: 'api_key',
+    }
   }
 }

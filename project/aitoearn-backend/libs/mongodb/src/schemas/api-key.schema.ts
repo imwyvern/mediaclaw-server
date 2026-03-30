@@ -1,4 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
+import { Schema as MongooseSchema } from 'mongoose'
 import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
 import { WithTimestampSchema } from './timestamp.schema'
 
@@ -9,14 +10,32 @@ export class ApiKey extends WithTimestampSchema {
   @Prop({ required: true, index: true })
   userId: string
 
+  @Prop({ type: MongooseSchema.Types.ObjectId, default: null, index: true })
+  orgId: MongooseSchema.Types.ObjectId | null
+
   @Prop({ required: true })
   name: string
 
   @Prop({ required: true, unique: true, index: true })
-  keyHash: string
+  key: string
+
+  @Prop({ default: '', index: true })
+  prefix: string
+
+  @Prop({ type: [String], default: [] })
+  permissions: string[]
 
   @Prop()
-  lastUsedAt: Date
+  lastUsedAt: Date | null
+
+  @Prop({ type: Date, default: null })
+  expiresAt: Date | null
+
+  @Prop({ type: Boolean, default: true, index: true })
+  isActive: boolean
+
+  @Prop({ default: '' })
+  keyHash: string
 }
 
 export const ApiKeySchema = SchemaFactory.createForClass(ApiKey)

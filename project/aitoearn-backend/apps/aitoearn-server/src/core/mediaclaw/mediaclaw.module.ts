@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
+  ApiKey, ApiKeySchema,
   Brand, BrandSchema,
   Organization, OrganizationSchema,
   MediaClawUser, MediaClawUserSchema,
@@ -23,12 +24,14 @@ import { PipelineModule } from './pipeline/pipeline.module'
 import { McAccountModule } from './account/account.module'
 import { WorkerModule } from './worker/worker.module'
 import { CopyModule } from './copy/copy.module'
+import { MediaClawApiKeyModule } from './apikey/apikey.module'
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Organization.name, schema: OrganizationSchema },
       { name: Brand.name, schema: BrandSchema },
+      { name: ApiKey.name, schema: ApiKeySchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
@@ -47,6 +50,7 @@ import { CopyModule } from './copy/copy.module'
     PipelineModule,
     McAccountModule,
     CopyModule,
+    MediaClawApiKeyModule,
     WorkerModule,
   ],
   exports: [MongooseModule],

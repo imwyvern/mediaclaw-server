@@ -14,12 +14,16 @@ export class ApiKeyService {
 
   async create(userId: string, name: string) {
     const rawKey = `ak_${generateId()}`
-    const keyHash = this.hashKey(rawKey)
+    const key = this.hashKey(rawKey)
 
     const apiKey = await this.apiKeyRepository.create({
       userId,
       name,
-      keyHash,
+      key,
+      prefix: rawKey.slice(0, 12),
+      permissions: [],
+      expiresAt: null,
+      isActive: true,
     })
 
     return {
@@ -39,8 +43,10 @@ export class ApiKeyService {
   }
 
   async validateKey(rawKey: string) {
-    const keyHash = this.hashKey(rawKey)
-    const apiKey = await this.apiKeyRepository.getByKeyHash(keyHash)
+    const apiKey = await this.apiKeyRepository.getByHashedKeys([
+      this.hashKey(rawKey),
+      this.hashLegacyKey(rawKey),
+    ])
 
     if (!apiKey) {
       throw new AppException(ResponseCode.ApiKeyInvalid)
@@ -52,6 +58,10 @@ export class ApiKeyService {
   }
 
   private hashKey(rawKey: string): string {
+    return createHash('sha256').update(rawKey).digest('hex')
+  }
+
+  private hashLegacyKey(rawKey: string): string {
     return createHash('sha1').update(rawKey).digest('hex')
   }
 }
