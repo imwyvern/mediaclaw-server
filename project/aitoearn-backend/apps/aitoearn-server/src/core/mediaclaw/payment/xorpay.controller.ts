@@ -85,8 +85,11 @@ export class XorPayController {
   }
 
   @Get('status/:orderId')
-  async getStatus(@Param('orderId') orderId: string) {
-    return this.xorPayService.getOrderStatus(orderId)
+  async getStatus(
+    @GetToken() user: AuthenticatedPaymentUser,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.xorPayService.getOrderStatus(orderId, user)
   }
 
   @Get('orders')

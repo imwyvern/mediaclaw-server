@@ -1,5 +1,5 @@
 import type { DistributionRulePayload, DistributionTargetInput } from './distribution.service'
-import { Body, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { DistributionRuleType } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
@@ -23,30 +23,31 @@ export class DistributionController {
     },
   ) {
     return this.distributionService.createRule(
-      body.orgId || user.orgId || user.id || '',
+      user.orgId || user.id || '',
       body,
     )
   }
 
   @Get()
-  async listRules(
-    @GetToken() user: { orgId?: string, id?: string },
-    @Query('orgId') orgId?: string,
-  ) {
-    return this.distributionService.listRules(orgId || user.orgId || user.id || '')
+  async listRules(@GetToken() user: { orgId?: string, id?: string }) {
+    return this.distributionService.listRules(user.orgId || user.id || '')
   }
 
   @Patch(':id')
   async updateRule(
+    @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
     @Body() body: Partial<DistributionRulePayload>,
   ) {
-    return this.distributionService.updateRule(id, body)
+    return this.distributionService.updateRule(user.orgId || user.id || '', id, body)
   }
 
   @Delete(':id')
-  async deleteRule(@Param('id') id: string) {
-    return this.distributionService.deleteRule(id)
+  async deleteRule(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+  ) {
+    return this.distributionService.deleteRule(user.orgId || user.id || '', id)
   }
 
   @Post('evaluate')
@@ -59,7 +60,7 @@ export class DistributionController {
     },
   ) {
     return this.distributionService.evaluateRules(
-      body.orgId || user.orgId || user.id || '',
+      user.orgId || user.id || '',
       body.content,
     )
   }
@@ -75,7 +76,7 @@ export class DistributionController {
     },
   ) {
     return this.distributionService.distribute(
-      body.orgId || user.orgId || user.id || '',
+      user.orgId || user.id || '',
       body.contentId,
       body.targets,
     )
@@ -83,17 +84,23 @@ export class DistributionController {
 
   @Post('status')
   async trackPublishStatus(
+    @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: {
       contentId: string
       status: DistributionPublishStatus
     },
   ) {
-    return this.distributionService.trackPublishStatus(body.contentId, body.status)
+    return this.distributionService.trackPublishStatus(
+      user.orgId || user.id || '',
+      body.contentId,
+      body.status,
+    )
   }
 
   @Post('feedback')
   async collectFeedback(
+    @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: {
       contentId: string
@@ -102,6 +109,7 @@ export class DistributionController {
     },
   ) {
     return this.distributionService.collectFeedback(
+      user.orgId || user.id || '',
       body.contentId,
       body.employeeId,
       body.feedback,

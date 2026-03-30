@@ -36,7 +36,7 @@ export class WebhookService {
       failCount: 0,
     })
 
-    return this.toResponse(webhook.toObject())
+    return this.toResponse(webhook.toObject(), { includeSecret: true })
   }
 
   async listByOrg(orgId: string) {
@@ -47,8 +47,8 @@ export class WebhookService {
     return webhooks.map(webhook => this.toResponse(webhook))
   }
 
-  async getById(id: string) {
-    const webhook = await this.webhookModel.findById(id).lean().exec()
+  async getById(orgId: string, id: string) {
+    const webhook = await this.webhookModel.findOne(this.buildOwnedQuery(orgId, id)).lean().exec()
     if (!webhook) {
       throw new NotFoundException('Webhook not found')
     }
@@ -56,7 +56,7 @@ export class WebhookService {
     return this.toResponse(webhook)
   }
 
-  async update(id: string, data: Partial<Webhook> & { secret?: string }) {
+  async update(orgId: string, id: string, data: Partial<Webhook> & { secret?: string }) {
     const payload: Record<string, any> = {}
 
     if ('name' in data && typeof data.name === 'string') {
@@ -79,7 +79,7 @@ export class WebhookService {
       payload['secret'] = data.secret.trim()
     }
 
-    const webhook = await this.webhookModel.findByIdAndUpdate(id, payload, {
+    const webhook = await this.webhookModel.findOneAndUpdate(this.buildOwnedQuery(orgId, id), payload, {
       new: true,
     }).lean().exec()
 
@@ -87,11 +87,11 @@ export class WebhookService {
       throw new NotFoundException('Webhook not found')
     }
 
-    return this.toResponse(webhook)
+    return this.toResponse(webhook, { includeSecret: Boolean(payload['secret']) })
   }
 
-  async delete(id: string) {
-    const webhook = await this.webhookModel.findByIdAndDelete(id).exec()
+  async delete(orgId: string, id: string) {
+    const webhook = await this.webhookModel.findOneAndDelete(this.buildOwnedQuery(orgId, id)).exec()
     if (!webhook) {
       throw new NotFoundException('Webhook not found')
     }
@@ -227,13 +227,22 @@ export class WebhookService {
     return null
   }
 
-  private toResponse(webhook: any) {
+  private buildOwnedQuery(orgId: string, id: string) {
+    return {
+      _id: new Types.ObjectId(id),
+      orgId: new Types.ObjectId(orgId),
+    }
+  }
+
+  private toResponse(webhook: any, options: { includeSecret?: boolean } = {}) {
     return {
       id: webhook._id?.toString(),
       orgId: webhook.orgId?.toString() || null,
       name: webhook.name,
       url: webhook.url,
-      secret: webhook.secret,
+      secret: options.includeSecret ? webhook.secret : undefined,
+      hasSecret: Boolean(webhook.secret),
+      secretPreview: webhook.secret ? `${String(webhook.secret).slice(0, 4)}...` : null,
       events: webhook.events || [],
       isActive: webhook.isActive ?? true,
       lastTriggeredAt: webhook.lastTriggeredAt || null,

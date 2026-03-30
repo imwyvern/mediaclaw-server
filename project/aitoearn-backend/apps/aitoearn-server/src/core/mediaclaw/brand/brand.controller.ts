@@ -18,27 +18,27 @@ export class BrandController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.brandService.findById(id)
+  async findOne(@GetToken() user: any, @Param('id') id: string) {
+    return this.brandService.findById(user.orgId || user.id, id)
   }
 
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() body: any) {
-    return this.brandService.update(id, body)
+  async update(@GetToken() user: any, @Param('id') id: string, @Body() body: any) {
+    return this.brandService.update(user.orgId || user.id, id, body)
   }
 
   @Patch(':id/assets')
-  async updateAssets(@Param('id') id: string, @Body() body: any) {
-    return this.brandService.updateAssets(id, body)
+  async updateAssets(@GetToken() user: any, @Param('id') id: string, @Body() body: any) {
+    return this.brandService.updateAssets(user.orgId || user.id, id, body)
   }
 
   @Patch(':id/video-style')
-  async updateVideoStyle(@Param('id') id: string, @Body() body: any) {
-    return this.brandService.updateVideoStyle(id, body)
+  async updateVideoStyle(@GetToken() user: any, @Param('id') id: string, @Body() body: any) {
+    return this.brandService.updateVideoStyle(user.orgId || user.id, id, body)
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string) {
-    return this.brandService.delete(id)
+  async remove(@GetToken() user: any, @Param('id') id: string) {
+    return this.brandService.delete(user.orgId || user.id, id)
   }
 }

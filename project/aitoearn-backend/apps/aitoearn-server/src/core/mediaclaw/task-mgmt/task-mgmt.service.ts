@@ -114,8 +114,10 @@ export class TaskMgmtService {
     return task
   }
 
-  async getTask(taskId: string) {
-    const task = await this.videoTaskModel.findById(this.toObjectId(taskId, 'taskId')).exec()
+  async getTask(orgIdOrTaskId: string, maybeTaskId?: string) {
+    const taskId = maybeTaskId || orgIdOrTaskId
+    const orgId = maybeTaskId ? orgIdOrTaskId : undefined
+    const task = await this.findTask(orgId, taskId)
     if (!task) {
       throw new NotFoundException('Task not found')
     }
@@ -162,8 +164,8 @@ export class TaskMgmtService {
     }
   }
 
-  async cancelTask(taskId: string) {
-    const task = await this.getTask(taskId)
+  async cancelTask(orgId: string, taskId: string) {
+    const task = await this.getTask(orgId, taskId)
     if (task.status !== VideoTaskStatus.PENDING) {
       throw new BadRequestException('Only pending tasks can be cancelled')
     }
@@ -198,8 +200,8 @@ export class TaskMgmtService {
     return updated
   }
 
-  async retryTask(taskId: string) {
-    const task = await this.getTask(taskId)
+  async retryTask(orgId: string, taskId: string) {
+    const task = await this.getTask(orgId, taskId)
     if (task.status !== VideoTaskStatus.FAILED) {
       throw new BadRequestException('Only failed tasks can be retried')
     }
@@ -243,13 +245,16 @@ export class TaskMgmtService {
     return updated
   }
 
-  async batchDownload(taskIds: string[]) {
+  async batchDownload(orgId: string, taskIds: string[]) {
     if (!Array.isArray(taskIds) || taskIds.length === 0) {
       throw new BadRequestException('taskIds is required')
     }
 
     const objectIds = taskIds.map(taskId => this.toObjectId(taskId, 'taskId'))
-    const tasks = await this.videoTaskModel.find({ _id: { $in: objectIds } }).lean().exec()
+    const tasks = await this.videoTaskModel.find({
+      _id: { $in: objectIds },
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }).lean().exec()
 
     return tasks.map(task => ({
       taskId: task._id.toString(),
@@ -260,8 +265,10 @@ export class TaskMgmtService {
     }))
   }
 
-  async getTaskTimeline(taskId: string) {
-    const task = await this.videoTaskModel.findById(this.toObjectId(taskId, 'taskId')).lean().exec()
+  async getTaskTimeline(orgIdOrTaskId: string, maybeTaskId?: string) {
+    const taskId = maybeTaskId || orgIdOrTaskId
+    const orgId = maybeTaskId ? orgIdOrTaskId : undefined
+    const task = await this.findTask(orgId, taskId, true)
     if (!task) {
       throw new NotFoundException('Task not found')
     }
@@ -379,6 +386,47 @@ export class TaskMgmtService {
     return Math.max(1, Math.min(Math.trunc(Number(limit) || 20), 100))
   }
 
+  private buildTaskOwnershipQuery(orgId: string, taskId: string) {
+    return {
+      _id: this.toDocumentId(taskId),
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }
+  }
+
+  private async findTask(orgId: string | undefined, taskId: string, lean = false) {
+    const taskIdQuery = this.toDocumentId(taskId)
+    const videoTaskModel = this.videoTaskModel as unknown as {
+      findOne?: (input: Record<string, any>) => any
+      findById?: (input: unknown) => any
+    }
+
+    if (orgId && typeof videoTaskModel.findOne === 'function') {
+      const query = videoTaskModel.findOne(this.buildTaskOwnershipQuery(orgId, taskId))
+      return this.resolveQueryResult(query, lean)
+    }
+
+    if (typeof videoTaskModel.findById === 'function') {
+      const task = await this.resolveQueryResult(videoTaskModel.findById(taskIdQuery), lean)
+      if (!orgId || !task) {
+        return task
+      }
+
+      return task.orgId?.toString?.() === this.toObjectId(orgId, 'orgId').toString()
+        ? task
+        : null
+    }
+
+    if (typeof videoTaskModel.findOne === 'function') {
+      return this.resolveQueryResult(videoTaskModel.findOne({ _id: taskIdQuery }), lean)
+    }
+
+    return null
+  }
+
+  private toDocumentId(value: string) {
+    return Types.ObjectId.isValid(value) ? new Types.ObjectId(value) : value
+  }
+
   private toObjectId(value: string, field: string) {
     if (!Types.ObjectId.isValid(value)) {
       throw new BadRequestException(`${field} is invalid`)
@@ -427,5 +475,29 @@ export class TaskMgmtService {
         }
       }),
     )
+  }
+
+  private async resolveQueryResult<T>(queryOrValue: T, lean = false) {
+    if (!queryOrValue) {
+      return queryOrValue
+    }
+
+    const maybeQuery = queryOrValue as T & {
+      lean?: () => unknown
+      exec?: () => Promise<unknown>
+    }
+
+    if (lean && typeof maybeQuery.lean === 'function') {
+      const leaned = maybeQuery.lean()
+      if (leaned && typeof (leaned as { exec?: () => Promise<unknown> }).exec === 'function') {
+        return (leaned as { exec: () => Promise<T> }).exec()
+      }
+    }
+
+    if (typeof maybeQuery.exec === 'function') {
+      return maybeQuery.exec() as Promise<T>
+    }
+
+    return queryOrValue
   }
 }

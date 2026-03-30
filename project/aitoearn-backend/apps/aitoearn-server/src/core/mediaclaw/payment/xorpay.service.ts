@@ -14,6 +14,7 @@ import {
   PaymentOrder,
   PaymentProductType,
   PaymentStatus,
+  UserRole,
   VideoPack,
 } from '@yikart/mongodb'
 import axios from 'axios'
@@ -53,6 +54,12 @@ interface NormalizedGatewayResponse {
   mock: boolean
 }
 
+interface PaymentOrderAccessUser {
+  id: string
+  orgId?: string | null
+  role?: UserRole
+}
+
 @Injectable()
 export class XorPayService {
   private readonly logger = new Logger(XorPayService.name)
@@ -82,9 +89,24 @@ export class XorPayService {
     const product = this.resolveProduct(params.productId, params.productType)
     const quantity = this.normalizeQuantity(params.quantity)
     const amount = product.unitAmount * quantity
+    const normalizedOrgId = this.toObjectId(params.orgId)
+    const existingPendingOrder = await this.findReusablePendingOrder({
+      orgId: normalizedOrgId,
+      userId: params.userId,
+      paymentMethod: params.paymentMethod,
+      status: PaymentStatus.PENDING,
+      productType: product.productType,
+      productId: product.id,
+      quantity,
+      expiredAt: { $gt: new Date() },
+    })
+
+    if (existingPendingOrder) {
+      return this.toOrderResponse(existingPendingOrder)
+    }
 
     const order = await this.orderModel.create({
-      orgId: this.toObjectId(params.orgId),
+      orgId: normalizedOrgId,
       userId: params.userId,
       amount,
       currency: product.currency,
@@ -190,9 +212,12 @@ export class XorPayService {
     return this.toOrderResponse(updatedOrder.toObject())
   }
 
-  async getOrderStatus(orderId: string) {
+  async getOrderStatus(orderId: string, user: PaymentOrderAccessUser) {
     const order = await this.orderModel.findOne({ orderId }).lean().exec()
     if (!order) {
+      throw new NotFoundException('Order not found')
+    }
+    if (!this.canAccessOrder(order, user)) {
       throw new NotFoundException('Order not found')
     }
 
@@ -487,6 +512,8 @@ export class XorPayService {
   }
 
   private toOrderResponse(order: Partial<PaymentOrder> & { _id?: any, callbackData?: Record<string, any> }) {
+    const callbackData = this.sanitizeCallbackData(order.callbackData)
+
     return {
       id: order._id?.toString?.() || undefined,
       orderId: order.orderId,
@@ -501,10 +528,50 @@ export class XorPayService {
       quantity: order.quantity,
       paidAt: order.paidAt || null,
       expiredAt: order.expiredAt || null,
-      callbackData: order.callbackData || {},
+      callbackData,
       createdAt: order.createdAt || null,
       updatedAt: order.updatedAt || null,
     }
+  }
+
+  private sanitizeCallbackData(callbackData?: Record<string, any> | null) {
+    const data = this.toPlainObject(callbackData)
+    const callbackBody = this.toPlainObject(data['callbackBody'] as Record<string, any> | undefined)
+
+    return {
+      gatewayMocked: Boolean(data['gatewayMocked']),
+      payUrl: typeof data['payUrl'] === 'string' ? data['payUrl'] : null,
+      tradeNo: typeof data['tradeNo'] === 'string' ? data['tradeNo'] : null,
+      createError: typeof data['createError'] === 'string' ? data['createError'] : null,
+      callbackStatus: this.extractCallbackStatus(callbackBody),
+    }
+  }
+
+  private extractCallbackStatus(callbackBody: Record<string, any>) {
+    const candidate = callbackBody['status']
+      || callbackBody['trade_status']
+      || callbackBody['pay_status']
+      || callbackBody['result']
+
+    return typeof candidate === 'string' && candidate.trim()
+      ? candidate.trim()
+      : null
+  }
+
+  private canAccessOrder(
+    order: Partial<PaymentOrder> & { orgId?: any, userId?: string },
+    user: PaymentOrderAccessUser,
+  ) {
+    if (order.userId && user.id === order.userId) {
+      return true
+    }
+
+    if (user.role !== UserRole.ADMIN) {
+      return false
+    }
+
+    const orderOrgId = order.orgId?.toString?.() || null
+    return Boolean(orderOrgId && user.orgId && orderOrgId === user.orgId)
   }
 
   private toObjectId(value?: string | null) {
@@ -517,5 +584,50 @@ export class XorPayService {
 
   private toPlainObject(value: Record<string, any> | undefined | null) {
     return value ? { ...value } : {}
+  }
+
+  private async findReusablePendingOrder(query: Record<string, any>) {
+    const orderModel = this.orderModel as unknown as {
+      findOne?: (input: Record<string, any>) => any
+    }
+
+    if (typeof orderModel.findOne !== 'function') {
+      return null
+    }
+
+    const pendingQuery = orderModel.findOne(query)
+    if (!pendingQuery) {
+      return null
+    }
+
+    if (typeof pendingQuery.sort === 'function') {
+      pendingQuery.sort({ createdAt: -1 })
+    }
+
+    return this.resolveQueryResult(pendingQuery)
+  }
+
+  private async resolveQueryResult<T>(queryOrValue: T) {
+    if (!queryOrValue) {
+      return queryOrValue
+    }
+
+    const maybeQuery = queryOrValue as T & {
+      lean?: () => unknown
+      exec?: () => Promise<unknown>
+    }
+
+    if (typeof maybeQuery.lean === 'function') {
+      const leaned = maybeQuery.lean()
+      if (leaned && typeof (leaned as { exec?: () => Promise<unknown> }).exec === 'function') {
+        return (leaned as { exec: () => Promise<T> }).exec()
+      }
+    }
+
+    if (typeof maybeQuery.exec === 'function') {
+      return maybeQuery.exec() as Promise<T>
+    }
+
+    return queryOrValue
   }
 }

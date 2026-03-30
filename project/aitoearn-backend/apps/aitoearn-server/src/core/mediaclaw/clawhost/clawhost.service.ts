@@ -90,9 +90,9 @@ export class ClawHostService {
     return this.toResponse(running)
   }
 
-  async stopInstance(instanceId: string) {
+  async stopInstance(orgId: string, instanceId: string) {
     const stopped = await this.clawHostInstanceModel.findOneAndUpdate(
-      { instanceId },
+      { instanceId, orgId: orgId.trim() },
       {
         $set: {
           status: ClawHostInstanceStatus.STOPPED,
@@ -113,8 +113,8 @@ export class ClawHostService {
     return this.toResponse(stopped)
   }
 
-  async restartInstance(instanceId: string) {
-    const existing = await this.getInstanceOrThrow(instanceId)
+  async restartInstance(orgId: string, instanceId: string) {
+    const existing = await this.getInstanceOrThrow(orgId, instanceId)
 
     this.logger.log({
       message: 'ClawHost instance restarting',
@@ -143,8 +143,8 @@ export class ClawHostService {
     }
   }
 
-  async getInstanceHealth(instanceId: string) {
-    const instance = await this.getInstanceOrThrow(instanceId)
+  async getInstanceHealth(orgId: string, instanceId: string) {
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
     const healthStatus = instance.healthStatus?.lastCheck
       ? instance.healthStatus
       : this.buildHealthStatus(instance)
@@ -163,12 +163,15 @@ export class ClawHostService {
     }
   }
 
-  async installSkill(instanceId: string, skillId: string, version: string) {
+  async installSkill(orgId: string, instanceId: string, skillId: string, version: string) {
     if (!skillId?.trim() || !version?.trim()) {
       throw new BadRequestException('skillId and version are required')
     }
 
-    const instance = await this.clawHostInstanceModel.findOne({ instanceId }).exec()
+    const instance = await this.clawHostInstanceModel.findOne({
+      instanceId,
+      orgId: orgId.trim(),
+    }).exec()
     if (!instance) {
       throw new NotFoundException('ClawHost instance not found')
     }
@@ -185,12 +188,13 @@ export class ClawHostService {
     }
   }
 
-  async batchUpgradeSkill(skillId: string, version: string) {
+  async batchUpgradeSkill(orgId: string, skillId: string, version: string) {
     if (!skillId?.trim() || !version?.trim()) {
       throw new BadRequestException('skillId and version are required')
     }
 
     const instances = await this.clawHostInstanceModel.find({
+      'orgId': orgId.trim(),
       'status': ClawHostInstanceStatus.RUNNING,
       'skills.skillId': skillId,
     }).exec()
@@ -301,8 +305,8 @@ export class ClawHostService {
     }
   }
 
-  async getInstanceLogs(instanceId: string, lines = 100) {
-    const instance = await this.getInstanceOrThrow(instanceId)
+  async getInstanceLogs(orgId: string, instanceId: string, lines = 100) {
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
     const normalizedLines = Math.min(Math.max(lines, 1), 500)
     const now = new Date()
 
@@ -316,8 +320,11 @@ export class ClawHostService {
     }
   }
 
-  private async getInstanceOrThrow(instanceId: string) {
-    const instance = await this.clawHostInstanceModel.findOne({ instanceId }).lean().exec()
+  private async getInstanceOrThrow(orgId: string, instanceId: string) {
+    const instance = await this.clawHostInstanceModel.findOne({
+      instanceId,
+      orgId: orgId.trim(),
+    }).lean().exec()
     if (!instance) {
       throw new NotFoundException('ClawHost instance not found')
     }

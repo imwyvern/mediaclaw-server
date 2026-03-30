@@ -1,7 +1,8 @@
-import { Body, Get, Post, Query } from '@nestjs/common'
+import { Body, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { UserRole } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { PermissionGuard, Roles } from '../permission.guard'
 import { McAuthService } from './auth.service'
 import { EnterpriseAuthService } from './enterprise-auth.service'
 
@@ -52,6 +53,8 @@ export class McAuthController {
     return this.enterpriseAuthService.registerEnterprise(body)
   }
 
+  @Roles(UserRole.ADMIN)
+  @UseGuards(PermissionGuard)
   @Post('enterprise/invite')
   async inviteByPhone(
     @GetToken() user: { orgId?: string },
@@ -63,7 +66,7 @@ export class McAuthController {
     },
   ) {
     return this.enterpriseAuthService.inviteByPhone(
-      body.orgId || user.orgId || '',
+      user.orgId || '',
       body.phone,
       body.role,
     )

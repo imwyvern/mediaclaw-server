@@ -37,7 +37,7 @@ export class AssetController {
       metadata?: Record<string, any>
     },
   ) {
-    return this.assetService.uploadAsset(body.brandId, body.type, {
+    return this.assetService.uploadAsset(user.orgId || user.id, body.brandId, body.type, {
       fileUrl: body.fileUrl,
       fileName: file?.originalname,
       fileSize: file?.size,
@@ -49,27 +49,29 @@ export class AssetController {
 
   @Get()
   async getActiveAsset(
+    @GetToken() user: any,
     @Query('brandId') brandId: string,
     @Query('type') type: BrandAssetType,
   ) {
-    return this.assetService.getActiveAsset(brandId, type)
+    return this.assetService.getActiveAsset(user.orgId || user.id, brandId, type)
   }
 
   @Get('versions')
   async listVersions(
+    @GetToken() user: any,
     @Query('brandId') brandId: string,
     @Query('type') type: BrandAssetType,
   ) {
-    return this.assetService.listVersions(brandId, type)
+    return this.assetService.listVersions(user.orgId || user.id, brandId, type)
   }
 
   @Patch(':id/activate')
-  async setActive(@Param('id') id: string) {
-    return this.assetService.setActive(id)
+  async setActive(@GetToken() user: any, @Param('id') id: string) {
+    return this.assetService.setActive(user.orgId || user.id, id)
   }
 
   @Delete(':id')
-  async deleteVersion(@Param('id') id: string) {
-    return this.assetService.deleteVersion(id)
+  async deleteVersion(@GetToken() user: any, @Param('id') id: string) {
+    return this.assetService.deleteVersion(user.orgId || user.id, id)
   }
 }

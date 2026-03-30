@@ -43,8 +43,8 @@ export class NotificationService {
     return configs.map(config => this.toResponse(config))
   }
 
-  async getConfig(id: string) {
-    const config = await this.notificationConfigModel.findById(id).lean().exec()
+  async getConfig(orgId: string, id: string) {
+    const config = await this.notificationConfigModel.findOne(this.buildOwnedQuery(orgId, id)).lean().exec()
     if (!config) {
       throw new NotFoundException('Notification config not found')
     }
@@ -52,7 +52,7 @@ export class NotificationService {
     return this.toResponse(config)
   }
 
-  async updateConfig(id: string, data: Partial<NotificationConfigInput>) {
+  async updateConfig(orgId: string, id: string, data: Partial<NotificationConfigInput>) {
     const payload: Record<string, any> = {}
 
     if ('channel' in data && data.channel) {
@@ -71,7 +71,7 @@ export class NotificationService {
       payload['isActive'] = data.isActive
     }
 
-    const updated = await this.notificationConfigModel.findByIdAndUpdate(id, payload, {
+    const updated = await this.notificationConfigModel.findOneAndUpdate(this.buildOwnedQuery(orgId, id), payload, {
       new: true,
     }).lean().exec()
 
@@ -82,8 +82,8 @@ export class NotificationService {
     return this.toResponse(updated)
   }
 
-  async deleteConfig(id: string) {
-    const deleted = await this.notificationConfigModel.findByIdAndDelete(id).lean().exec()
+  async deleteConfig(orgId: string, id: string) {
+    const deleted = await this.notificationConfigModel.findOneAndDelete(this.buildOwnedQuery(orgId, id)).lean().exec()
     if (!deleted) {
       throw new NotFoundException('Notification config not found')
     }
@@ -130,8 +130,8 @@ export class NotificationService {
     }
   }
 
-  async testConfig(id: string) {
-    const config = await this.notificationConfigModel.findById(id).lean().exec()
+  async testConfig(orgId: string, id: string) {
+    const config = await this.notificationConfigModel.findOne(this.buildOwnedQuery(orgId, id)).lean().exec()
     if (!config) {
       throw new NotFoundException('Notification config not found')
     }
@@ -162,6 +162,13 @@ export class NotificationService {
 
   private normalizeEvents(events?: NotificationEvent[]) {
     return [...new Set((events || []).filter(Boolean))]
+  }
+
+  private buildOwnedQuery(orgId: string, id: string) {
+    return {
+      _id: new Types.ObjectId(id),
+      orgId: new Types.ObjectId(orgId),
+    }
   }
 
   private toResponse(config: {

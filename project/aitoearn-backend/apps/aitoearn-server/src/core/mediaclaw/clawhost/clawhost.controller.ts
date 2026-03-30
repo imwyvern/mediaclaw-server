@@ -32,48 +32,67 @@ export class ClawHostController {
     @Body() body: CreateClawHostInstanceDto,
   ) {
     return this.clawHostService.createInstance(
-      body.orgId || user.orgId || user.id,
+      user.orgId || user.id,
       body.config,
       body.clientName,
     )
   }
 
   @Post('instances/:id/stop')
-  async stopInstance(@Param('id') instanceId: string) {
-    return this.clawHostService.stopInstance(instanceId)
+  async stopInstance(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.stopInstance(user.orgId || user.id, instanceId)
   }
 
   @Post('instances/:id/restart')
-  async restartInstance(@Param('id') instanceId: string) {
-    return this.clawHostService.restartInstance(instanceId)
+  async restartInstance(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.restartInstance(user.orgId || user.id, instanceId)
   }
 
   @Get('instances/:id/health')
-  async getInstanceHealth(@Param('id') instanceId: string) {
-    return this.clawHostService.getInstanceHealth(instanceId)
+  async getInstanceHealth(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.getInstanceHealth(user.orgId || user.id, instanceId)
   }
 
   @Post('instances/:id/skills')
   async installSkill(
+    @GetToken() user: { orgId?: string, id: string },
     @Param('id') instanceId: string,
     @Body() body: InstallClawHostSkillDto,
   ) {
-    return this.clawHostService.installSkill(instanceId, body.skillId, body.version)
+    return this.clawHostService.installSkill(
+      user.orgId || user.id,
+      instanceId,
+      body.skillId,
+      body.version,
+    )
   }
 
   @Put('skills/:skillId/upgrade')
   async batchUpgradeSkill(
+    @GetToken() user: { orgId?: string, id: string },
     @Param('skillId') skillId: string,
     @Body() body: BatchUpgradeClawHostSkillDto,
   ) {
-    return this.clawHostService.batchUpgradeSkill(skillId, body.version)
+    return this.clawHostService.batchUpgradeSkill(user.orgId || user.id, skillId, body.version)
   }
 
   @Get('instances')
-  async listInstances(@Query() query: ListClawHostInstancesQueryDto) {
+  async listInstances(
+    @GetToken() user: { orgId?: string, id: string },
+    @Query() query: ListClawHostInstancesQueryDto,
+  ) {
     return this.clawHostService.listInstances(
       {
-        orgId: query.orgId,
+        orgId: user.orgId || user.id,
         status: query.status,
       },
       {
@@ -85,9 +104,10 @@ export class ClawHostController {
 
   @Get('instances/:id/logs')
   async getInstanceLogs(
+    @GetToken() user: { orgId?: string, id: string },
     @Param('id') instanceId: string,
     @Query() query: GetClawHostLogsQueryDto,
   ) {
-    return this.clawHostService.getInstanceLogs(instanceId, query.lines)
+    return this.clawHostService.getInstanceLogs(user.orgId || user.id, instanceId, query.lines)
   }
 }

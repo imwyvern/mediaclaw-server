@@ -11,6 +11,7 @@ import {
   VideoPack,
   VideoPackSchema,
 } from '@yikart/mongodb'
+import { getRequiredEnv } from '../mediaclaw-env.util'
 import { McAuthController } from './auth.controller'
 import { McAuthService } from './auth.service'
 import { EnterpriseAuthService } from './enterprise-auth.service'
@@ -24,7 +25,7 @@ import { EnterpriseAuthService } from './enterprise-auth.service'
       { name: Subscription.name, schema: SubscriptionSchema },
     ]),
     JwtModule.register({
-      secret: process.env['JWT_SECRET'] || 'mediaclaw-dev-secret',
+      secret: getRequiredEnv('JWT_SECRET'),
       signOptions: { expiresIn: '2h' },
     }),
   ],

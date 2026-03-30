@@ -36,6 +36,7 @@ export class MarketplaceService {
 
   async publishTemplate(
     orgId: string,
+    requestedBy: string,
     pipelineTemplateId: string,
     data: {
       title?: string
@@ -48,6 +49,9 @@ export class MarketplaceService {
   ) {
     const pipelineTemplate = await this.pipelineTemplateModel.findById(pipelineTemplateId).lean().exec()
     if (!pipelineTemplate) {
+      throw new NotFoundException('Pipeline template not found')
+    }
+    if (!pipelineTemplate.isPublic && pipelineTemplate.createdBy !== requestedBy) {
       throw new NotFoundException('Pipeline template not found')
     }
 
@@ -90,11 +94,12 @@ export class MarketplaceService {
     filters: MarketplaceFilters,
     sort: string | undefined,
     pagination: PaginationInput,
+    requesterOrgId?: string,
   ) {
     const page = Math.max(Number(pagination.page || 1), 1)
     const limit = Math.min(Math.max(Number(pagination.limit || 20), 1), 100)
     const skip = (page - 1) * limit
-    const query = this.buildListQuery(filters)
+    const query = this.buildListQuery(filters, requesterOrgId)
     const sortOption = this.resolveSort(sort)
 
     const [items, total] = await Promise.all([
@@ -115,9 +120,12 @@ export class MarketplaceService {
     }
   }
 
-  async getTemplate(id: string) {
+  async getTemplate(id: string, requesterOrgId?: string) {
     const template = await this.marketplaceTemplateModel.findById(id).lean().exec()
     if (!template) {
+      throw new NotFoundException('Marketplace template not found')
+    }
+    if (!template.isApproved && template.authorOrgId.toString() !== requesterOrgId) {
       throw new NotFoundException('Marketplace template not found')
     }
 
@@ -221,9 +229,17 @@ export class MarketplaceService {
     return this.toResponse(updated, true)
   }
 
-  private buildListQuery(filters: MarketplaceFilters) {
+  private buildListQuery(filters: MarketplaceFilters, requesterOrgId?: string) {
     const query: Record<string, any> = {
       isApproved: filters.isApproved ?? true,
+    }
+
+    if (filters.isApproved === false) {
+      if (!requesterOrgId || !Types.ObjectId.isValid(requesterOrgId)) {
+        throw new BadRequestException('authorOrgId is required when querying unapproved templates')
+      }
+
+      query['authorOrgId'] = new Types.ObjectId(requesterOrgId)
     }
 
     if (filters.search?.trim()) {

@@ -42,7 +42,7 @@ export class McAuthService {
     })
 
     // TODO: Integrate with AliSms service for real SMS
-    this.logger.log(`[DEV] SMS code for ${phone}: ${code}`)
+    this.logger.log(`SMS verification code generated for ${this.maskPhone(phone)}`)
 
     return { success: true, message: 'Code sent' }
   }
@@ -173,5 +173,13 @@ export class McAuthService {
       userType: user.userType,
       avatarUrl: user.avatarUrl,
     }
+  }
+
+  private maskPhone(phone: string) {
+    if (phone.length < 7) {
+      return phone
+    }
+
+    return `${phone.slice(0, 3)}****${phone.slice(-4)}`
   }
 }

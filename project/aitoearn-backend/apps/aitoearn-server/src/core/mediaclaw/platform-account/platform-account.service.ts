@@ -12,6 +12,7 @@ import {
   PublishRecord,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { getRequiredEnv } from '../mediaclaw-env.util'
 
 interface PaginationInput {
   page?: number
@@ -72,7 +73,7 @@ export class PlatformAccountService {
       },
     ).lean().exec()
 
-    return this.toResponse(account)
+    return this.toResponse(account, { includeEncryptedCredentials: true })
   }
 
   async listAccounts(orgId: string) {
@@ -83,13 +84,13 @@ export class PlatformAccountService {
     return accounts.map(account => this.toResponse(account))
   }
 
-  async getAccount(id: string) {
-    const account = await this.findAccount(id)
+  async getAccount(orgId: string, id: string) {
+    const account = await this.findAccount(orgId, id)
     return this.toResponse(account)
   }
 
-  async syncMetrics(accountId: string) {
-    const account = await this.findAccount(accountId)
+  async syncMetrics(orgId: string, accountId: string) {
+    const account = await this.findAccount(orgId, accountId)
     const nextFollowers = (account.metrics?.followers || 0) + 100
     const nextViews = (account.metrics?.totalViews || 0) + 1000
     const nextEngagement = Number((((account.metrics?.avgEngagement || 2.5) + 0.3)).toFixed(2))
@@ -110,8 +111,8 @@ export class PlatformAccountService {
     return this.toResponse(updated)
   }
 
-  async removeAccount(id: string) {
-    const deleted = await this.platformAccountModel.findByIdAndDelete(id).lean().exec()
+  async removeAccount(orgId: string, id: string) {
+    const deleted = await this.platformAccountModel.findOneAndDelete(this.buildOwnedQuery(orgId, id)).lean().exec()
     if (!deleted) {
       throw new NotFoundException('Platform account not found')
     }
@@ -122,8 +123,8 @@ export class PlatformAccountService {
     }
   }
 
-  async getPublishHistory(accountId: string, pagination: PaginationInput) {
-    const account = await this.findAccount(accountId)
+  async getPublishHistory(orgId: string, accountId: string, pagination: PaginationInput) {
+    const account = await this.findAccount(orgId, accountId)
     const page = Math.max(Number(pagination.page || 1), 1)
     const limit = Math.min(Math.max(Number(pagination.limit || 20), 1), 100)
     const skip = (page - 1) * limit
@@ -160,10 +161,10 @@ export class PlatformAccountService {
     }
   }
 
-  private async findAccount(id: string) {
+  private async findAccount(orgId: string, id: string) {
     const query = Types.ObjectId.isValid(id)
-      ? { _id: new Types.ObjectId(id) }
-      : { accountId: id }
+      ? this.buildOwnedQuery(orgId, id)
+      : { accountId: id, orgId: new Types.ObjectId(orgId) }
     const account = await this.platformAccountModel.findOne(query).lean().exec()
 
     if (!account) {
@@ -173,8 +174,15 @@ export class PlatformAccountService {
     return account
   }
 
+  private buildOwnedQuery(orgId: string, id: string) {
+    return {
+      _id: new Types.ObjectId(id),
+      orgId: new Types.ObjectId(orgId),
+    }
+  }
+
   private encryptCredentials(credentials: Record<string, any>) {
-    const secret = process.env['MEDIACLAW_PLATFORM_ACCOUNT_SECRET'] || 'mediaclaw-platform-account-dev-secret'
+    const secret = getRequiredEnv('MEDIACLAW_PLATFORM_ACCOUNT_SECRET')
     const key = createHash('sha256').update(secret).digest()
     const iv = randomBytes(16)
     const cipher = createCipheriv('aes-256-cbc', key, iv)
@@ -219,7 +227,7 @@ export class PlatformAccountService {
     lastSyncedAt: Date | null
     createdAt?: Date
     updatedAt?: Date
-  } | null) {
+  } | null, options?: { includeEncryptedCredentials?: boolean }) {
     if (!account) {
       throw new NotFoundException('Platform account not found')
     }
@@ -231,7 +239,8 @@ export class PlatformAccountService {
       accountId: account.accountId,
       accountName: account.accountName,
       avatarUrl: account.avatarUrl,
-      credentials: account.credentials || {},
+      ...(options?.includeEncryptedCredentials ? { credentials: account.credentials || null } : {}),
+      hasCredentials: Boolean(account.credentials && Object.keys(account.credentials).length > 0),
       status: account.status,
       metrics: {
         followers: account.metrics?.followers || 0,

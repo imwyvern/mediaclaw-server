@@ -132,10 +132,13 @@ export class CompetitorService {
     }
   }
 
-  async removeCompetitor(id: string) {
+  async removeCompetitor(orgId: string, id: string) {
     const competitor = await this.competitorModel
-      .findByIdAndUpdate(
-        this.toObjectId(id, 'id'),
+      .findOneAndUpdate(
+        {
+          _id: this.toObjectId(id, 'id'),
+          orgId: this.toObjectId(orgId, 'orgId'),
+        },
         { isActive: false },
         { new: true },
       )

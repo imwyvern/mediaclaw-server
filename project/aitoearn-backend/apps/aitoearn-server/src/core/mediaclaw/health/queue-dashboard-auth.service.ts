@@ -2,6 +2,7 @@ import type { Request } from 'express'
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common'
 import { UserRole } from '@yikart/mongodb'
 import { verify } from 'jsonwebtoken'
+import { getRequiredEnv } from '../mediaclaw-env.util'
 
 export interface QueueDashboardJwtPayload {
   id: string
@@ -15,7 +16,7 @@ export interface QueueDashboardJwtPayload {
 
 @Injectable()
 export class QueueDashboardAuthService {
-  private readonly jwtSecret = process.env['JWT_SECRET'] || 'mediaclaw-dev-secret'
+  private readonly jwtSecret = getRequiredEnv('JWT_SECRET')
 
   authorize(request: Request): QueueDashboardJwtPayload {
     const token = this.extractBearerToken(request.headers.authorization)

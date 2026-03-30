@@ -1,7 +1,8 @@
-import { Body, Get, Param, Post, Query } from '@nestjs/common'
+import { Body, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
-import { MarketplaceCurrency } from '@yikart/mongodb'
+import { MarketplaceCurrency, UserRole } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { PermissionGuard, Roles } from '../permission.guard'
 import { MarketplaceService } from './marketplace.service'
 
 @MediaClawApiController('api/v1/marketplace')
@@ -23,6 +24,7 @@ export class MarketplaceController {
   ) {
     return this.marketplaceService.publishTemplate(
       user.orgId || user.id,
+      user.id,
       body.pipelineTemplateId,
       body,
     )
@@ -53,13 +55,19 @@ export class MarketplaceController {
     )
   }
 
+  @Roles(UserRole.ADMIN)
+  @UseGuards(PermissionGuard)
   @Post('feature')
-  async feature(@Body() body: { templateId: string }) {
+  async feature(
+    @GetToken() user: any,
+    @Body() body: { templateId: string },
+  ) {
     return this.marketplaceService.featureTemplate(body.templateId)
   }
 
   @Get()
   async list(
+    @GetToken() user: any,
     @Query('search') search?: string,
     @Query('tag') tag?: string,
     @Query('isFeatured') isFeatured?: string,
@@ -84,11 +92,12 @@ export class MarketplaceController {
         page: Number(page),
         limit: Number(limit),
       },
+      user.orgId || user.id,
     )
   }
 
   @Get(':id')
-  async detail(@Param('id') id: string) {
-    return this.marketplaceService.getTemplate(id)
+  async detail(@GetToken() user: any, @Param('id') id: string) {
+    return this.marketplaceService.getTemplate(id, user.orgId || user.id)
   }
 }

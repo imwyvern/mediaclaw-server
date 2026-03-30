@@ -26,7 +26,7 @@ export class TaskMgmtController {
       metadata?: Record<string, any>
     },
   ) {
-    const orgId = body.orgId || user.orgId
+    const orgId = user.orgId || user.id
     return this.taskMgmtService.createTask(orgId, {
       requestedBy: user.id,
       brandId: body.brandId,
@@ -38,13 +38,13 @@ export class TaskMgmtController {
   }
 
   @Get('timeline/:id')
-  async getTaskTimeline(@Param('id') id: string) {
-    return this.taskMgmtService.getTaskTimeline(id)
+  async getTaskTimeline(@GetToken() user: any, @Param('id') id: string) {
+    return this.taskMgmtService.getTaskTimeline(user.orgId || user.id, id)
   }
 
   @Post('batch-download')
-  async batchDownload(@Body('taskIds') taskIds: string[]) {
-    return this.taskMgmtService.batchDownload(taskIds)
+  async batchDownload(@GetToken() user: any, @Body('taskIds') taskIds: string[]) {
+    return this.taskMgmtService.batchDownload(user.orgId || user.id, taskIds)
   }
 
   @Get()
@@ -59,7 +59,7 @@ export class TaskMgmtController {
     @Query('limit') limit?: string,
   ) {
     return this.taskMgmtService.listTasks(
-      orgId || user.orgId,
+      user.orgId || user.id,
       { status, brandId, startDate, endDate },
       {
         page: page ? Number.parseInt(page, 10) : 1,
@@ -69,17 +69,17 @@ export class TaskMgmtController {
   }
 
   @Get(':id')
-  async getTask(@Param('id') id: string) {
-    return this.taskMgmtService.getTask(id)
+  async getTask(@GetToken() user: any, @Param('id') id: string) {
+    return this.taskMgmtService.getTask(user.orgId || user.id, id)
   }
 
   @Post(':id/cancel')
-  async cancelTask(@Param('id') id: string) {
-    return this.taskMgmtService.cancelTask(id)
+  async cancelTask(@GetToken() user: any, @Param('id') id: string) {
+    return this.taskMgmtService.cancelTask(user.orgId || user.id, id)
   }
 
   @Post(':id/retry')
-  async retryTask(@Param('id') id: string) {
-    return this.taskMgmtService.retryTask(id)
+  async retryTask(@GetToken() user: any, @Param('id') id: string) {
+    return this.taskMgmtService.retryTask(user.orgId || user.id, id)
   }
 }

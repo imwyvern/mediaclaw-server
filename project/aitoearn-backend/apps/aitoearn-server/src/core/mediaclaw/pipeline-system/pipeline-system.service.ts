@@ -126,11 +126,8 @@ export class PipelineSystemService {
     }))
   }
 
-  async getTemplate(id: string) {
-    const template = await this.pipelineTemplateModel
-      .findById(this.toObjectId(id, 'id'))
-      .lean()
-      .exec()
+  async getTemplate(id: string, requestedBy?: string) {
+    const template = await this.findAccessibleTemplate(id, requestedBy)
 
     if (!template) {
       throw new NotFoundException('Pipeline template not found')
@@ -150,10 +147,20 @@ export class PipelineSystemService {
     }
   }
 
-  async applyTemplate(templateId: string, brandId: string, overrides: ApplyTemplateOverrides = {}) {
+  async applyTemplate(
+    templateId: string,
+    requestedBy: string,
+    orgId: string,
+    brandId: string,
+    overrides: ApplyTemplateOverrides = {},
+  ) {
+    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
     const [template, brand] = await Promise.all([
-      this.pipelineTemplateModel.findById(this.toObjectId(templateId, 'templateId')).lean().exec(),
-      this.brandModel.findById(this.toObjectId(brandId, 'brandId')).lean().exec(),
+      this.findAccessibleTemplate(templateId, requestedBy),
+      this.brandModel.findOne({
+        _id: this.toObjectId(brandId, 'brandId'),
+        orgId: normalizedOrgId,
+      }).lean().exec(),
     ])
 
     if (!template) {
@@ -211,15 +218,9 @@ export class PipelineSystemService {
     return pipeline
   }
 
-  async learnPreference(pipelineId: string, feedback: LearnPreferenceInput) {
-    const pipeline = await this.pipelineModel
-      .findById(this.toObjectId(pipelineId, 'pipelineId'))
-      .lean()
-      .exec()
-
-    if (!pipeline) {
-      throw new NotFoundException('Pipeline not found')
-    }
+  async learnPreference(orgId: string, pipelineId: string, feedback: LearnPreferenceInput) {
+    const pipeline = await this.findOwnedPipeline(orgId, pipelineId)
+    const pipelineQuery = this.buildPipelineOwnershipQuery(orgId, pipelineId)
 
     const source = feedback.source?.trim().toLowerCase() || 'performance'
     const multiplier = this.resolveFeedbackMultiplier(source)
@@ -236,8 +237,8 @@ export class PipelineSystemService {
       feedback.preferredStyles,
     )
 
-    return this.pipelineModel.findByIdAndUpdate(
-      pipeline._id,
+    return this.pipelineModel.findOneAndUpdate(
+      pipelineQuery,
       {
         $set: {
           'preferences.preferredStyles': preferredStyles,
@@ -271,15 +272,8 @@ export class PipelineSystemService {
     ).exec()
   }
 
-  async warmUp(pipelineId: string, requestedBy?: string) {
-    const pipeline = await this.pipelineModel
-      .findById(this.toObjectId(pipelineId, 'pipelineId'))
-      .lean()
-      .exec()
-
-    if (!pipeline) {
-      throw new NotFoundException('Pipeline not found')
-    }
+  async warmUp(orgId: string, pipelineId: string, requestedBy?: string) {
+    const pipeline = await this.findOwnedPipeline(orgId, pipelineId)
     if (pipeline.status !== PipelineStatus.ACTIVE) {
       throw new BadRequestException('Only active pipelines can be warmed up')
     }
@@ -359,6 +353,44 @@ export class PipelineSystemService {
     }
 
     return query
+  }
+
+  private async findAccessibleTemplate(templateId: string, requestedBy?: string) {
+    const query: Record<string, any> = {
+      _id: this.toObjectId(templateId, 'templateId'),
+    }
+
+    if (requestedBy?.trim()) {
+      query['$or'] = [
+        { isPublic: true },
+        { createdBy: requestedBy.trim() },
+      ]
+    }
+    else {
+      query['isPublic'] = true
+    }
+
+    return this.pipelineTemplateModel.findOne(query).lean().exec()
+  }
+
+  private async findOwnedPipeline(orgId: string, pipelineId: string) {
+    const pipeline = await this.pipelineModel
+      .findOne(this.buildPipelineOwnershipQuery(orgId, pipelineId))
+      .lean()
+      .exec()
+
+    if (!pipeline) {
+      throw new NotFoundException('Pipeline not found')
+    }
+
+    return pipeline
+  }
+
+  private buildPipelineOwnershipQuery(orgId: string, pipelineId: string) {
+    return {
+      _id: this.toObjectId(pipelineId, 'pipelineId'),
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }
   }
 
   private normalizeTemplateSteps(steps?: PipelineTemplateStepInput[]) {

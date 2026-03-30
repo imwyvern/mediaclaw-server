@@ -36,17 +36,17 @@ export class WebhookController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.webhookService.getById(id)
+  async findOne(@GetToken() user: any, @Param('id') id: string) {
+    return this.webhookService.getById(user.orgId || user.id, id)
   }
 
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() body: any) {
-    return this.webhookService.update(id, body)
+  async update(@GetToken() user: any, @Param('id') id: string, @Body() body: any) {
+    return this.webhookService.update(user.orgId || user.id, id, body)
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string) {
-    return this.webhookService.delete(id)
+  async remove(@GetToken() user: any, @Param('id') id: string) {
+    return this.webhookService.delete(user.orgId || user.id, id)
   }
 }

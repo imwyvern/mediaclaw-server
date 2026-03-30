@@ -37,29 +37,30 @@ export class PlatformAccountController {
   }
 
   @Get(':id')
-  async detail(@Param('id') id: string) {
-    return this.platformAccountService.getAccount(id)
+  async detail(@GetToken() user: any, @Param('id') id: string) {
+    return this.platformAccountService.getAccount(user.orgId || user.id, id)
   }
 
   @Post(':id/sync')
-  async sync(@Param('id') id: string) {
-    return this.platformAccountService.syncMetrics(id)
+  async sync(@GetToken() user: any, @Param('id') id: string) {
+    return this.platformAccountService.syncMetrics(user.orgId || user.id, id)
   }
 
   @Get(':id/history')
   async history(
+    @GetToken() user: any,
     @Param('id') id: string,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
   ) {
-    return this.platformAccountService.getPublishHistory(id, {
+    return this.platformAccountService.getPublishHistory(user.orgId || user.id, id, {
       page: Number(page),
       limit: Number(limit),
     })
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string) {
-    return this.platformAccountService.removeAccount(id)
+  async remove(@GetToken() user: any, @Param('id') id: string) {
+    return this.platformAccountService.removeAccount(user.orgId || user.id, id)
   }
 }

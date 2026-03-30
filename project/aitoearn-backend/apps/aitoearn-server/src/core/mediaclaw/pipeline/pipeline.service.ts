@@ -27,28 +27,31 @@ export class PipelineService {
     }).exec()
   }
 
-  async findById(id: string) {
-    const pipeline = await this.pipelineModel.findById(id).exec()
+  async findById(orgId: string, id: string) {
+    const pipeline = await this.findOwnedPipeline(orgId, id)
     if (!pipeline)
       throw new NotFoundException('Pipeline not found')
     return pipeline
   }
 
-  async update(id: string, data: Partial<Pipeline>) {
-    return this.pipelineModel.findByIdAndUpdate(id, data, { new: true }).exec()
+  async update(orgId: string, id: string, data: Partial<Pipeline>) {
+    await this.findOwnedPipeline(orgId, id)
+    return this.pipelineModel.findOneAndUpdate(this.buildOwnedQuery(orgId, id), data, { new: true }).exec()
   }
 
-  async archive(id: string) {
-    return this.pipelineModel.findByIdAndUpdate(
-      id,
+  async archive(orgId: string, id: string) {
+    await this.findOwnedPipeline(orgId, id)
+    return this.pipelineModel.findOneAndUpdate(
+      this.buildOwnedQuery(orgId, id),
       { status: PipelineStatus.ARCHIVED },
       { new: true },
     ).exec()
   }
 
-  async updatePreferences(id: string, preferences: Partial<Pipeline['preferences']>) {
-    return this.pipelineModel.findByIdAndUpdate(
-      id,
+  async updatePreferences(orgId: string, id: string, preferences: Partial<Pipeline['preferences']>) {
+    await this.findOwnedPipeline(orgId, id)
+    return this.pipelineModel.findOneAndUpdate(
+      this.buildOwnedQuery(orgId, id),
       { $set: { preferences } },
       { new: true },
     ).exec()
@@ -60,5 +63,17 @@ export class PipelineService {
       { $inc: { [field]: 1 } },
       { new: true },
     ).exec()
+  }
+
+  private buildOwnedQuery(orgId: string, id: string) {
+    return {
+      _id: new Types.ObjectId(id),
+      orgId: new Types.ObjectId(orgId),
+      status: { $ne: PipelineStatus.ARCHIVED },
+    }
+  }
+
+  private async findOwnedPipeline(orgId: string, id: string) {
+    return this.pipelineModel.findOne(this.buildOwnedQuery(orgId, id)).exec()
   }
 }

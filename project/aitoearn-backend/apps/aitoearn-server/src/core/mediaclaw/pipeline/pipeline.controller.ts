@@ -18,22 +18,22 @@ export class PipelineController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.pipelineService.findById(id)
+  async findOne(@GetToken() user: any, @Param('id') id: string) {
+    return this.pipelineService.findById(user.orgId || user.id, id)
   }
 
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() body: any) {
-    return this.pipelineService.update(id, body)
+  async update(@GetToken() user: any, @Param('id') id: string, @Body() body: any) {
+    return this.pipelineService.update(user.orgId || user.id, id, body)
   }
 
   @Patch(':id/preferences')
-  async updatePreferences(@Param('id') id: string, @Body() body: any) {
-    return this.pipelineService.updatePreferences(id, body)
+  async updatePreferences(@GetToken() user: any, @Param('id') id: string, @Body() body: any) {
+    return this.pipelineService.updatePreferences(user.orgId || user.id, id, body)
   }
 
   @Delete(':id')
-  async archive(@Param('id') id: string) {
-    return this.pipelineService.archive(id)
+  async archive(@GetToken() user: any, @Param('id') id: string) {
+    return this.pipelineService.archive(user.orgId || user.id, id)
   }
 }

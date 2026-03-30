@@ -124,8 +124,8 @@ export class ReportService {
     return reports.map(report => this.toResponse(report))
   }
 
-  async getReport(id: string) {
-    const report = await this.reportModel.findById(id).lean().exec()
+  async getReport(orgId: string, id: string) {
+    const report = await this.reportModel.findOne(this.buildOwnedQuery(orgId, id)).lean().exec()
     if (!report) {
       throw new NotFoundException('Report not found')
     }
@@ -159,8 +159,8 @@ export class ReportService {
     }
   }
 
-  async deleteReport(id: string) {
-    const deleted = await this.reportModel.findByIdAndDelete(id).lean().exec()
+  async deleteReport(orgId: string, id: string) {
+    const deleted = await this.reportModel.findOneAndDelete(this.buildOwnedQuery(orgId, id)).lean().exec()
     if (!deleted) {
       throw new NotFoundException('Report not found')
     }
@@ -289,6 +289,13 @@ export class ReportService {
 
   private buildFileUrl(reportId: string, type: ReportType) {
     return `/api/v1/reports/${reportId}/files/${type}.pdf`
+  }
+
+  private buildOwnedQuery(orgId: string, id: string) {
+    return {
+      _id: new Types.ObjectId(id),
+      orgId: new Types.ObjectId(orgId),
+    }
   }
 
   private toRate(value: number, total: number) {

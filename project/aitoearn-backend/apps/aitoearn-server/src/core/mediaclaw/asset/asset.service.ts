@@ -29,10 +29,10 @@ export class AssetService {
     private readonly brandAssetVersionModel: Model<BrandAssetVersion>,
   ) {}
 
-  async uploadAsset(brandId: string, type: BrandAssetType, file: AssetUploadInput) {
+  async uploadAsset(orgId: string, brandId: string, type: BrandAssetType, file: AssetUploadInput) {
     const normalizedBrandId = this.toObjectId(brandId, 'brandId')
     this.ensureAssetType(type)
-    await this.ensureBrandExists(normalizedBrandId)
+    await this.ensureBrandExists(orgId, normalizedBrandId)
 
     const version = await this.getNextVersion(normalizedBrandId, type)
     const fileName = file.fileName?.trim() || `v${version}-${type}`
@@ -66,8 +66,9 @@ export class AssetService {
     })
   }
 
-  async listVersions(brandId: string, type: BrandAssetType) {
+  async listVersions(orgId: string, brandId: string, type: BrandAssetType) {
     this.ensureAssetType(type)
+    await this.ensureBrandExists(orgId, this.toObjectId(brandId, 'brandId'))
 
     const items = await this.brandAssetVersionModel
       .find({
@@ -96,8 +97,8 @@ export class AssetService {
     }))
   }
 
-  async setActive(assetId: string) {
-    const asset = await this.brandAssetVersionModel.findById(this.toObjectId(assetId, 'assetId')).exec()
+  async setActive(orgId: string, assetId: string) {
+    const asset = await this.findOwnedAsset(orgId, assetId)
     if (!asset || asset.deletedAt) {
       throw new NotFoundException('Asset version not found')
     }
@@ -118,8 +119,9 @@ export class AssetService {
     ).exec()
   }
 
-  async getActiveAsset(brandId: string, type: BrandAssetType) {
+  async getActiveAsset(orgId: string, brandId: string, type: BrandAssetType) {
     this.ensureAssetType(type)
+    await this.ensureBrandExists(orgId, this.toObjectId(brandId, 'brandId'))
 
     const asset = await this.brandAssetVersionModel
       .findOne({
@@ -152,8 +154,8 @@ export class AssetService {
     }
   }
 
-  async deleteVersion(assetId: string) {
-    const asset = await this.brandAssetVersionModel.findById(this.toObjectId(assetId, 'assetId')).exec()
+  async deleteVersion(orgId: string, assetId: string) {
+    const asset = await this.findOwnedAsset(orgId, assetId)
     if (!asset || asset.deletedAt) {
       throw new NotFoundException('Asset version not found')
     }
@@ -206,14 +208,29 @@ export class AssetService {
     return `brand-assets/${brandId}/${type}/v${version}/${Date.now()}-${safeName}`
   }
 
-  private async ensureBrandExists(brandId: Types.ObjectId) {
+  private async ensureBrandExists(orgId: string, brandId: unknown) {
+    const normalizedBrandId = typeof brandId === 'string'
+      ? this.toObjectId(brandId, 'brandId')
+      : this.toObjectId(String(brandId), 'brandId')
+
     const exists = await this.brandModel.exists({
-      _id: brandId,
+      _id: normalizedBrandId,
+      orgId: this.toObjectId(orgId, 'orgId'),
       isActive: true,
     })
     if (!exists) {
       throw new NotFoundException('Brand not found')
     }
+  }
+
+  private async findOwnedAsset(orgId: string, assetId: string) {
+    const asset = await this.brandAssetVersionModel.findById(this.toObjectId(assetId, 'assetId')).exec()
+    if (!asset) {
+      throw new NotFoundException('Asset version not found')
+    }
+
+    await this.ensureBrandExists(orgId, asset.brandId)
+    return asset
   }
 
   private ensureAssetType(type: BrandAssetType) {

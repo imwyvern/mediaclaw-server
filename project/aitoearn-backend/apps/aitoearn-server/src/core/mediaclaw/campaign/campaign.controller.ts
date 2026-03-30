@@ -22,32 +22,32 @@ export class CampaignController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.campaignService.findById(id)
+  async findOne(@GetToken() user: any, @Param('id') id: string) {
+    return this.campaignService.findById(user.orgId || user.id, id)
   }
 
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() body: any) {
-    return this.campaignService.update(id, body)
+  async update(@GetToken() user: any, @Param('id') id: string, @Body() body: any) {
+    return this.campaignService.update(user.orgId || user.id, id, body)
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string) {
-    return this.campaignService.delete(id)
+  async remove(@GetToken() user: any, @Param('id') id: string) {
+    return this.campaignService.delete(user.orgId || user.id, id)
   }
 
   @Post(':id/start')
-  async start(@Param('id') id: string) {
-    return this.campaignService.start(id)
+  async start(@GetToken() user: any, @Param('id') id: string) {
+    return this.campaignService.start(user.orgId || user.id, id)
   }
 
   @Post(':id/pause')
-  async pause(@Param('id') id: string) {
-    return this.campaignService.pause(id)
+  async pause(@GetToken() user: any, @Param('id') id: string) {
+    return this.campaignService.pause(user.orgId || user.id, id)
   }
 
   @Post(':id/complete')
-  async complete(@Param('id') id: string) {
-    return this.campaignService.complete(id)
+  async complete(@GetToken() user: any, @Param('id') id: string) {
+    return this.campaignService.complete(user.orgId || user.id, id)
   }
 }

@@ -16,7 +16,7 @@ export class VideoController {
     sourceVideoUrl: string
     metadata?: Record<string, any>
   }) {
-    return this.videoService.createTask(user.id, body)
+    return this.videoService.createTask(user.orgId || user.id, user.id, body)
   }
 
   @Get()
@@ -27,7 +27,7 @@ export class VideoController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.videoService.listTasks(user.id, {
+    return this.videoService.listTasks(user.orgId || user.id, user.id, {
       status,
       brandId,
       page: page ? Number.parseInt(page) : 1,
@@ -36,17 +36,17 @@ export class VideoController {
   }
 
   @Get(':id')
-  async getTask(@Param('id') id: string) {
-    return this.videoService.getTask(id)
+  async getTask(@GetToken() user: any, @Param('id') id: string) {
+    return this.videoService.getTask(user.orgId || user.id, id)
   }
 
   @Patch(':id/copy')
-  async editCopy(@Param('id') id: string, @Body() body: any) {
-    return this.videoService.editCopy(id, body)
+  async editCopy(@GetToken() user: any, @Param('id') id: string, @Body() body: any) {
+    return this.videoService.editCopy(user.orgId || user.id, id, body)
   }
 
   @Patch(':id/publish')
-  async markPublished(@Param('id') id: string) {
-    return this.videoService.markPublished(id)
+  async markPublished(@GetToken() user: any, @Param('id') id: string) {
+    return this.videoService.markPublished(user.orgId || user.id, id)
   }
 }

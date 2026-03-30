@@ -1,6 +1,13 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
-import { VideoTask, VideoTaskSchema } from '@yikart/mongodb'
+import {
+  Brand,
+  BrandSchema,
+  Pipeline,
+  PipelineSchema,
+  VideoTask,
+  VideoTaskSchema,
+} from '@yikart/mongodb'
 import { BillingModule } from '../billing/billing.module'
 import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { VideoController } from './video.controller'
@@ -10,6 +17,8 @@ import { VideoService } from './video.service'
   imports: [
     MongooseModule.forFeature([
       { name: VideoTask.name, schema: VideoTaskSchema },
+      { name: Brand.name, schema: BrandSchema },
+      { name: Pipeline.name, schema: PipelineSchema },
     ]),
     BillingModule,
     VideoWorkerQueueModule,

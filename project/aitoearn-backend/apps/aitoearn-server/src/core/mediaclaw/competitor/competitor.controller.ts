@@ -24,18 +24,15 @@ export class CompetitorController {
     },
   ) {
     return this.competitorService.addCompetitor(
-      body.orgId || user.orgId,
+      user.orgId || user.id,
       body.platform,
       body.accountUrl,
     )
   }
 
   @Get()
-  async listCompetitors(
-    @GetToken() user: any,
-    @Query('orgId') orgId?: string,
-  ) {
-    return this.competitorService.listCompetitors(orgId || user.orgId)
+  async listCompetitors(@GetToken() user: any) {
+    return this.competitorService.listCompetitors(user.orgId || user.id)
   }
 
   @Get('industry-hot')
@@ -48,7 +45,7 @@ export class CompetitorController {
   }
 
   @Delete(':id')
-  async removeCompetitor(@Param('id') id: string) {
-    return this.competitorService.removeCompetitor(id)
+  async removeCompetitor(@GetToken() user: any, @Param('id') id: string) {
+    return this.competitorService.removeCompetitor(user.orgId || user.id, id)
   }
 }

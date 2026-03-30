@@ -13,8 +13,8 @@ export class AnalyticsController {
   }
 
   @Get('stats/:id')
-  async getVideoStats(@Param('id') id: string) {
-    return this.analyticsService.getVideoStats(id)
+  async getVideoStats(@GetToken() user: any, @Param('id') id: string) {
+    return this.analyticsService.getVideoStats(user.orgId || user.id, id)
   }
 
   @Get('trends')

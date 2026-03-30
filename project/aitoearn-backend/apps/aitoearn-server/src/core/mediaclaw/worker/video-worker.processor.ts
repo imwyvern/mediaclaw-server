@@ -34,7 +34,9 @@ export class VideoWorkerProcessor extends WorkerHost {
     const { taskId } = job.data
 
     try {
-      const task = await this.videoService.getTask(taskId)
+      const task = typeof this.videoService.getTaskForWorker === 'function'
+        ? await this.videoService.getTaskForWorker(taskId)
+        : await (this.videoService as unknown as { getTask: (id: string) => Promise<any> }).getTask(taskId)
 
       switch (step) {
         case 'analyze-source':

@@ -18,23 +18,19 @@ export class ContentMgmtController {
     },
   ) {
     return this.contentMgmtService.setStylePreferences(
-      body.orgId || user.orgId || user.id || '',
+      user.orgId || user.id || '',
       body.preferences,
     )
   }
 
   @Get('style-preferences')
-  async getStylePreferences(
-    @GetToken() user: { orgId?: string, id?: string },
-    @Query('orgId') orgId?: string,
-  ) {
-    return this.contentMgmtService.getStylePreferences(orgId || user.orgId || user.id || '')
+  async getStylePreferences(@GetToken() user: { orgId?: string, id?: string }) {
+    return this.contentMgmtService.getStylePreferences(user.orgId || user.id || '')
   }
 
   @Get()
   async listContent(
     @GetToken() user: { orgId?: string, id?: string },
-    @Query('orgId') orgId?: string,
     @Query('status') status?: VideoTaskStatus,
     @Query('publishStatus') publishStatus?: string,
     @Query('brandId') brandId?: string,
@@ -44,7 +40,7 @@ export class ContentMgmtController {
     @Query('limit') limit?: string,
   ) {
     return this.contentMgmtService.listContent(
-      orgId || user.orgId || user.id || '',
+      user.orgId || user.id || '',
       { status, publishStatus, brandId, startDate, endDate },
       {
         page: page ? Number.parseInt(page, 10) : 1,
@@ -55,6 +51,7 @@ export class ContentMgmtController {
 
   @Post('batch-edit')
   async batchEditCopy(
+    @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: {
       contentIds: string[]
@@ -65,7 +62,7 @@ export class ContentMgmtController {
       }
     },
   ) {
-    return this.contentMgmtService.batchEditCopy(body.contentIds, body.updates)
+    return this.contentMgmtService.batchEditCopy(user.orgId || user.id || '', body.contentIds, body.updates)
   }
 
   @Post('export')
@@ -85,19 +82,23 @@ export class ContentMgmtController {
     },
   ) {
     return this.contentMgmtService.exportContent(
-      body.orgId || user.orgId || user.id || '',
+      user.orgId || user.id || '',
       body.format,
       body.filters || {},
     )
   }
 
   @Get(':id')
-  async getContent(@Param('id') id: string) {
-    return this.contentMgmtService.getContent(id)
+  async getContent(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+  ) {
+    return this.contentMgmtService.getContent(user.orgId || user.id || '', id)
   }
 
   @Patch(':id/copy')
   async editCopy(
+    @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
     @Body()
     body: {
@@ -106,11 +107,18 @@ export class ContentMgmtController {
       hashtags?: string[]
     },
   ) {
-    return this.contentMgmtService.editCopy(id, body.title, body.subtitle, body.hashtags)
+    return this.contentMgmtService.editCopy(
+      user.orgId || user.id || '',
+      id,
+      body.title,
+      body.subtitle,
+      body.hashtags,
+    )
   }
 
   @Post(':id/publish')
   async markPublished(
+    @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
     @Body()
     body: {
@@ -118,6 +126,11 @@ export class ContentMgmtController {
       publishUrl: string
     },
   ) {
-    return this.contentMgmtService.markPublished(id, body.platform, body.publishUrl)
+    return this.contentMgmtService.markPublished(
+      user.orgId || user.id || '',
+      id,
+      body.platform,
+      body.publishUrl,
+    )
   }
 }

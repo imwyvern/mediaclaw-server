@@ -27,12 +27,13 @@ export class NotificationController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.notificationService.getConfig(id)
+  async findOne(@GetToken() user: any, @Param('id') id: string) {
+    return this.notificationService.getConfig(user.orgId || user.id, id)
   }
 
   @Patch(':id')
   async update(
+    @GetToken() user: any,
     @Param('id') id: string,
     @Body() body: {
       channel?: NotificationChannel
@@ -41,16 +42,16 @@ export class NotificationController {
       isActive?: boolean
     },
   ) {
-    return this.notificationService.updateConfig(id, body)
+    return this.notificationService.updateConfig(user.orgId || user.id, id, body)
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string) {
-    return this.notificationService.deleteConfig(id)
+  async remove(@GetToken() user: any, @Param('id') id: string) {
+    return this.notificationService.deleteConfig(user.orgId || user.id, id)
   }
 
   @Post(':id/test')
-  async test(@Param('id') id: string) {
-    return this.notificationService.testConfig(id)
+  async test(@GetToken() user: any, @Param('id') id: string) {
+    return this.notificationService.testConfig(user.orgId || user.id, id)
   }
 }

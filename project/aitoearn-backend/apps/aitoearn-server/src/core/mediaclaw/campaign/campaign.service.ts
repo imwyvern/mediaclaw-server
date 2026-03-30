@@ -29,8 +29,8 @@ export class CampaignService {
     return this.campaignModel.find(query).sort({ createdAt: -1 }).exec()
   }
 
-  async findById(id: string) {
-    const campaign = await this.campaignModel.findById(id).exec()
+  async findById(orgId: string, id: string) {
+    const campaign = await this.findOwnedCampaign(orgId, id)
     if (!campaign) {
       throw new NotFoundException('Campaign not found')
     }
@@ -38,9 +38,10 @@ export class CampaignService {
     return campaign
   }
 
-  async update(id: string, data: Partial<Campaign>) {
-    const campaign = await this.campaignModel.findByIdAndUpdate(
-      id,
+  async update(orgId: string, id: string, data: Partial<Campaign>) {
+    await this.findOwnedCampaign(orgId, id)
+    const campaign = await this.campaignModel.findOneAndUpdate(
+      this.buildOwnedQuery(orgId, id),
       this.normalizePayload(data),
       { new: true },
     ).exec()
@@ -52,8 +53,8 @@ export class CampaignService {
     return campaign
   }
 
-  async delete(id: string) {
-    const campaign = await this.campaignModel.findByIdAndDelete(id).exec()
+  async delete(orgId: string, id: string) {
+    const campaign = await this.campaignModel.findOneAndDelete(this.buildOwnedQuery(orgId, id)).exec()
     if (!campaign) {
       throw new NotFoundException('Campaign not found')
     }
@@ -64,25 +65,25 @@ export class CampaignService {
     }
   }
 
-  async start(id: string) {
-    return this.updateStatus(id, CampaignStatus.ACTIVE, {
+  async start(orgId: string, id: string) {
+    return this.updateStatus(orgId, id, CampaignStatus.ACTIVE, {
       startDate: new Date(),
     })
   }
 
-  async pause(id: string) {
-    return this.updateStatus(id, CampaignStatus.PAUSED)
+  async pause(orgId: string, id: string) {
+    return this.updateStatus(orgId, id, CampaignStatus.PAUSED)
   }
 
-  async complete(id: string) {
-    return this.updateStatus(id, CampaignStatus.COMPLETED, {
+  async complete(orgId: string, id: string) {
+    return this.updateStatus(orgId, id, CampaignStatus.COMPLETED, {
       endDate: new Date(),
     })
   }
 
-  private async updateStatus(id: string, status: CampaignStatus, extra: Partial<Campaign> = {}) {
-    const campaign = await this.campaignModel.findByIdAndUpdate(
-      id,
+  private async updateStatus(orgId: string, id: string, status: CampaignStatus, extra: Partial<Campaign> = {}) {
+    const campaign = await this.campaignModel.findOneAndUpdate(
+      this.buildOwnedQuery(orgId, id),
       {
         status,
         ...this.normalizePayload(extra),
@@ -95,6 +96,17 @@ export class CampaignService {
     }
 
     return campaign
+  }
+
+  private buildOwnedQuery(orgId: string, id: string) {
+    return {
+      _id: new Types.ObjectId(id),
+      orgId: new Types.ObjectId(orgId),
+    }
+  }
+
+  private async findOwnedCampaign(orgId: string, id: string) {
+    return this.campaignModel.findOne(this.buildOwnedQuery(orgId, id)).exec()
   }
 
   private normalizePayload(data: Partial<Campaign>) {

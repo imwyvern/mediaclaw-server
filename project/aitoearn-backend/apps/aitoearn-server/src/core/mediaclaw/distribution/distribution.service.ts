@@ -89,9 +89,9 @@ export class DistributionService {
     return rules.map(rule => this.toRuleResponse(rule))
   }
 
-  async updateRule(id: string, data: Partial<DistributionRulePayload>) {
+  async updateRule(orgId: string, id: string, data: Partial<DistributionRulePayload>) {
     const payload = this.buildRulePayload(data, true)
-    const updated = await this.distributionRuleModel.findByIdAndUpdate(id, payload, {
+    const updated = await this.distributionRuleModel.findOneAndUpdate(this.buildRuleQuery(orgId, id), payload, {
       new: true,
     }).lean().exec()
 
@@ -102,8 +102,8 @@ export class DistributionService {
     return this.toRuleResponse(updated)
   }
 
-  async deleteRule(id: string) {
-    const deleted = await this.distributionRuleModel.findByIdAndDelete(id).lean().exec()
+  async deleteRule(orgId: string, id: string) {
+    const deleted = await this.distributionRuleModel.findOneAndDelete(this.buildRuleQuery(orgId, id)).lean().exec()
     if (!deleted) {
       throw new NotFoundException('Distribution rule not found')
     }
@@ -146,7 +146,7 @@ export class DistributionService {
   }
 
   async distribute(orgId: string, contentId: string, targets: DistributionTargetInput[]) {
-    const task = await this.getTaskOrFail(contentId)
+    const task = await this.getTaskOrFail(orgId, contentId)
     const normalizedOrgId = this.toObjectId(orgId, 'orgId')
 
     if (!task.orgId || task.orgId.toString() !== normalizedOrgId.toString()) {
@@ -204,8 +204,15 @@ export class DistributionService {
     return this.toDistributionResponse(updated)
   }
 
-  async trackPublishStatus(contentId: string, status: DistributionPublishStatus) {
-    const task = await this.getTaskOrFail(contentId)
+  async trackPublishStatus(
+    orgIdOrContentId: string,
+    contentIdOrStatus: string | DistributionPublishStatus,
+    maybeStatus?: DistributionPublishStatus,
+  ) {
+    const orgId = maybeStatus ? orgIdOrContentId : undefined
+    const contentId = maybeStatus ? contentIdOrStatus as string : orgIdOrContentId
+    const status = maybeStatus || contentIdOrStatus as DistributionPublishStatus
+    const task = await this.getTaskOrFail(orgId, contentId)
     const currentStatus = this.resolvePublishStatus(task)
 
     if (currentStatus === status) {
@@ -253,6 +260,7 @@ export class DistributionService {
   }
 
   async collectFeedback(
+    orgId: string,
     contentId: string,
     employeeId: string,
     feedback: Record<string, unknown> | string,
@@ -261,7 +269,7 @@ export class DistributionService {
       throw new BadRequestException('employeeId is required')
     }
 
-    const task = await this.getTaskOrFail(contentId)
+    const task = await this.getTaskOrFail(orgId, contentId)
     const timestamp = new Date().toISOString()
     const feedbackRecord = {
       employeeId,
@@ -528,12 +536,52 @@ export class DistributionService {
     return value as Record<string, unknown>
   }
 
-  private async getTaskOrFail(contentId: string) {
-    const task = await this.videoTaskModel.findById(this.toObjectId(contentId, 'contentId')).exec()
+  private buildRuleQuery(orgId: string, id: string) {
+    return {
+      _id: this.toObjectId(id, 'id'),
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }
+  }
+
+  private async getTaskOrFail(orgId: string | undefined, contentId: string) {
+    const task = await this.findTask(orgId, contentId)
     if (!task) {
       throw new NotFoundException('Content not found')
     }
     return task
+  }
+
+  private async findTask(orgId: string | undefined, contentId: string) {
+    const taskIdQuery = this.toDocumentId(contentId)
+    const videoTaskModel = this.videoTaskModel as unknown as {
+      findOne?: (input: Record<string, any>) => any
+      findById?: (input: unknown) => any
+    }
+
+    if (orgId && typeof videoTaskModel.findOne === 'function') {
+      const query = videoTaskModel.findOne({
+        _id: taskIdQuery,
+        orgId: this.toObjectId(orgId, 'orgId'),
+      })
+      return this.resolveQueryResult(query)
+    }
+
+    if (typeof videoTaskModel.findById === 'function') {
+      const task = await this.resolveQueryResult(videoTaskModel.findById(taskIdQuery))
+      if (!orgId || !task) {
+        return task
+      }
+
+      return task.orgId?.toString?.() === this.toObjectId(orgId, 'orgId').toString()
+        ? task
+        : null
+    }
+
+    if (typeof videoTaskModel.findOne === 'function') {
+      return this.resolveQueryResult(videoTaskModel.findOne({ _id: taskIdQuery }))
+    }
+
+    return null
   }
 
   private resolvePublishStatus(task: VideoTask | Record<string, any>): DistributionPublishStatus {
@@ -630,5 +678,33 @@ export class DistributionService {
     }
 
     return new Types.ObjectId(value)
+  }
+
+  private toDocumentId(value: string) {
+    return Types.ObjectId.isValid(value) ? new Types.ObjectId(value) : value
+  }
+
+  private async resolveQueryResult<T>(queryOrValue: T) {
+    if (!queryOrValue) {
+      return queryOrValue
+    }
+
+    const maybeQuery = queryOrValue as T & {
+      lean?: () => unknown
+      exec?: () => Promise<unknown>
+    }
+
+    if (typeof maybeQuery.lean === 'function') {
+      const leaned = maybeQuery.lean()
+      if (leaned && typeof (leaned as { exec?: () => Promise<unknown> }).exec === 'function') {
+        return (leaned as { exec: () => Promise<T> }).exec()
+      }
+    }
+
+    if (typeof maybeQuery.exec === 'function') {
+      return maybeQuery.exec() as Promise<T>
+    }
+
+    return queryOrValue
   }
 }

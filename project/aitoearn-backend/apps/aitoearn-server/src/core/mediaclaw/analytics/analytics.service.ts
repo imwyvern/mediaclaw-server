@@ -60,7 +60,7 @@ export class AnalyticsService {
     }
   }
 
-  async getVideoStats(taskId: string) {
+  async getVideoStats(orgId: string, taskId: string) {
     if (!Types.ObjectId.isValid(taskId)) {
       throw new NotFoundException('Video task not found')
     }
@@ -76,7 +76,12 @@ export class AnalyticsService {
       comments: number
       engagementScore: number
     }>([
-      { $match: { _id: new Types.ObjectId(taskId) } },
+      {
+        $match: {
+          _id: new Types.ObjectId(taskId),
+          ...this.buildOrgMatch(orgId),
+        },
+      },
       ...this.buildMetricStages(),
       {
         $project: {

@@ -54,12 +54,13 @@ export class PipelineSystemController {
   }
 
   @Get(':id')
-  async getTemplate(@Param('id') id: string) {
-    return this.pipelineSystemService.getTemplate(id)
+  async getTemplate(@GetToken() user: any, @Param('id') id: string) {
+    return this.pipelineSystemService.getTemplate(id, user.id)
   }
 
   @Post(':id/apply')
   async applyTemplate(
+    @GetToken() user: any,
     @Param('id') id: string,
     @Body() body: {
       brandId: string
@@ -76,11 +77,18 @@ export class PipelineSystemController {
       }
     },
   ) {
-    return this.pipelineSystemService.applyTemplate(id, body.brandId, body.overrides)
+    return this.pipelineSystemService.applyTemplate(
+      id,
+      user.id,
+      user.orgId || user.id,
+      body.brandId,
+      body.overrides,
+    )
   }
 
   @Post(':id/learn')
   async learnPreference(
+    @GetToken() user: any,
     @Param('id') id: string,
     @Body() body: {
       source?: string
@@ -91,7 +99,7 @@ export class PipelineSystemController {
       notes?: string
     },
   ) {
-    return this.pipelineSystemService.learnPreference(id, body)
+    return this.pipelineSystemService.learnPreference(user.orgId || user.id, id, body)
   }
 
   @Post(':id/warm-up')
@@ -99,7 +107,7 @@ export class PipelineSystemController {
     @Param('id') id: string,
     @GetToken() user: any,
   ) {
-    return this.pipelineSystemService.warmUp(id, user.id)
+    return this.pipelineSystemService.warmUp(user.orgId || user.id, id, user.id)
   }
 
   private parseBooleanQuery(value?: string) {

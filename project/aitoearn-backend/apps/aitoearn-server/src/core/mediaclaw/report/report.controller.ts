@@ -45,12 +45,12 @@ export class ReportController {
   }
 
   @Get(':id')
-  async detail(@Param('id') id: string) {
-    return this.reportService.getReport(id)
+  async detail(@GetToken() user: any, @Param('id') id: string) {
+    return this.reportService.getReport(user.orgId || user.id, id)
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string) {
-    return this.reportService.deleteReport(id)
+  async remove(@GetToken() user: any, @Param('id') id: string) {
+    return this.reportService.deleteReport(user.orgId || user.id, id)
   }
 }

@@ -36,12 +36,13 @@ export class ContentMgmtService {
   ) {}
 
   async editCopy(
+    orgId: string,
     contentId: string,
     title?: string,
     subtitle?: string,
     hashtags?: string[],
   ) {
-    const task = await this.getTaskOrFail(contentId)
+    const task = await this.getTaskOrFail(orgId, contentId)
     const nextCopy = {
       title: title ?? task.copy?.title ?? '',
       subtitle: subtitle ?? task.copy?.subtitle ?? '',
@@ -67,7 +68,7 @@ export class ContentMgmtService {
     return this.toContentResponse(updated)
   }
 
-  async markPublished(contentId: string, platform: string, publishUrl: string) {
+  async markPublished(orgId: string, contentId: string, platform: string, publishUrl: string) {
     if (!platform?.trim()) {
       throw new BadRequestException('platform is required')
     }
@@ -75,7 +76,7 @@ export class ContentMgmtService {
       throw new BadRequestException('publishUrl is required')
     }
 
-    const task = await this.getTaskOrFail(contentId)
+    const task = await this.getTaskOrFail(orgId, contentId)
     const timestamp = new Date().toISOString()
     const updated = await this.videoTaskModel.findByIdAndUpdate(
       task._id,
@@ -175,7 +176,7 @@ export class ContentMgmtService {
     }
   }
 
-  async batchEditCopy(contentIds: string[], updates: CopyUpdateInput) {
+  async batchEditCopy(orgId: string, contentIds: string[], updates: CopyUpdateInput) {
     if (!Array.isArray(contentIds) || contentIds.length === 0) {
       throw new BadRequestException('contentIds is required')
     }
@@ -199,12 +200,16 @@ export class ContentMgmtService {
 
     const objectIds = contentIds.map(contentId => this.toObjectId(contentId, 'contentId'))
     const result = await this.videoTaskModel.updateMany(
-      { _id: { $in: objectIds } },
+      {
+        _id: { $in: objectIds },
+        orgId: this.toObjectId(orgId, 'orgId'),
+      },
       { $set: setPayload },
     ).exec()
 
     const updatedItems = await this.videoTaskModel.find({
       _id: { $in: objectIds },
+      orgId: this.toObjectId(orgId, 'orgId'),
     }).lean().exec()
 
     return {
@@ -244,8 +249,11 @@ export class ContentMgmtService {
     throw new BadRequestException('format must be csv or json')
   }
 
-  async getContent(contentId: string) {
-    const task = await this.videoTaskModel.findById(this.toObjectId(contentId, 'contentId')).lean().exec()
+  async getContent(orgId: string, contentId: string) {
+    const task = await this.videoTaskModel.findOne({
+      _id: this.toObjectId(contentId, 'contentId'),
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }).lean().exec()
     if (!task) {
       throw new NotFoundException('Content not found')
     }
@@ -365,8 +373,11 @@ export class ContentMgmtService {
     return `"${text.replace(/"/g, '""')}"`
   }
 
-  private async getTaskOrFail(contentId: string) {
-    const task = await this.videoTaskModel.findById(this.toObjectId(contentId, 'contentId')).exec()
+  private async getTaskOrFail(orgId: string, contentId: string) {
+    const task = await this.videoTaskModel.findOne({
+      _id: this.toObjectId(contentId, 'contentId'),
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }).exec()
     if (!task) {
       throw new NotFoundException('Content not found')
     }
