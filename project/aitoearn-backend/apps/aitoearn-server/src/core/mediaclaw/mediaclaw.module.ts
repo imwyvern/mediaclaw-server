@@ -14,6 +14,7 @@ import {
   Subscription, SubscriptionSchema,
   Invoice, InvoiceSchema,
   Webhook, WebhookSchema,
+  ViralContent, ViralContentSchema,
 } from '@yikart/mongodb'
 
 import { BrandModule } from './brand/brand.module'
@@ -36,6 +37,7 @@ import { CampaignModule } from './campaign/campaign.module'
 import { WebhookModule } from './webhook/webhook.module'
 import { AcquisitionModule } from './acquisition/acquisition.module'
 import { CrawlerModule } from './crawler/crawler.module'
+import { DiscoveryModule } from './discovery/discovery.module'
 
 @Module({
   imports: [
@@ -53,6 +55,7 @@ import { CrawlerModule } from './crawler/crawler.module'
       { name: Subscription.name, schema: SubscriptionSchema },
       { name: Invoice.name, schema: InvoiceSchema },
       { name: Webhook.name, schema: WebhookSchema },
+      { name: ViralContent.name, schema: ViralContentSchema },
     ]),
     BrandModule,
     OrgModule,
@@ -72,6 +75,7 @@ import { CrawlerModule } from './crawler/crawler.module'
     CampaignModule,
     AcquisitionModule,
     CrawlerModule,
+    DiscoveryModule,
     WebhookModule,
     WorkerModule,
   ],

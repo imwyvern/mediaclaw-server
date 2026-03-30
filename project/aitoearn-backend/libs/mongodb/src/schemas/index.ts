@@ -33,6 +33,7 @@ import { PublishInfo, PublishInfoSchema } from './publish-info.schema'
 import { PublishRecord, PublishRecordSchema } from './publish-record.schema'
 import { QrCodeArtImage, QrCodeArtImageSchema } from './qr-code-art-image.schema'
 import { ReplyCommentRecord, ReplyCommentRecordSchema } from './reply-comment-record.schema'
+import { ViralContent, ViralContentSchema } from './viral-content.schema'
 import {
   UserNotificationControl,
   UserNotificationControlSchema,
@@ -74,6 +75,7 @@ export * from './reply-comment-record.schema'
 export * from './timestamp.schema'
 export * from './user-notification-control.schema'
 export * from './user.schema'
+export * from './viral-content.schema'
 export * from './webhook.schema'
 
 export const schemas = [
@@ -107,6 +109,7 @@ export const schemas = [
   { name: EngagementSubTask.name, schema: EngagementSubTaskSchema },
   { name: InteractionRecord.name, schema: InteractionRecordSchema },
   { name: ReplyCommentRecord.name, schema: ReplyCommentRecordSchema },
+  { name: ViralContent.name, schema: ViralContentSchema },
 ] as const
 
 // MediaClaw-specific schemas
