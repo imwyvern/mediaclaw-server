@@ -62,6 +62,10 @@ import { MarketplaceModule } from './marketplace/marketplace.module'
 import { UsageModule } from './usage/usage.module'
 import { ClawHostModule } from './clawhost/clawhost.module'
 
+const workerModuleImports = process.env['MEDIACLAW_ENABLE_WORKER'] === 'false'
+  ? []
+  : [WorkerModule]
+
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -123,7 +127,7 @@ import { ClawHostModule } from './clawhost/clawhost.module'
     UsageModule,
     ClawHostModule,
     WebhookModule,
-    WorkerModule,
+    ...workerModuleImports,
   ],
   exports: [MongooseModule],
 })

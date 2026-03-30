@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: wecom-webhook
+  group_by: ['alertname', 'job']
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 2h
+
+receivers:
+  - name: wecom-webhook
+    webhook_configs:
+      - url: ${WECOM_WEBHOOK_URL}
+        send_resolved: true

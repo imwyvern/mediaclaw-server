@@ -1,0 +1,38 @@
+groups:
+  - name: mediaclaw-platform
+    rules:
+      - alert: MediaClawTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} target is down'
+          description: '{{ $labels.instance }} has not been reachable for at least 2 minutes.'
+
+      - alert: MediaClawHealthEndpointFailed
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Health probe failed'
+          description: '{{ $labels.instance }} did not return an HTTP 2xx response.'
+
+      - alert: MediaClawHostHighCpu
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Host CPU usage is high'
+          description: '{{ $labels.instance }} CPU usage has been above 85% for 10 minutes.'
+
+      - alert: MediaClawHostDiskLow
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Host disk space is running low'
+          description: '{{ $labels.instance }} has less than 15% free disk space remaining.'

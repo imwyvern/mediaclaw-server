@@ -1,0 +1,88 @@
+services:
+  node-exporter:
+    image: prom/node-exporter:latest
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/)
+    pid: host
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /:/host:ro,rslave
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    restart: unless-stopped
+    volumes:
+      - ./docker/monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks:
+      - mediaclaw-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}
+      - --web.enable-lifecycle
+    restart: unless-stopped
+    ports:
+      - ${PROMETHEUS_PORT:-9090}:9090
+    volumes:
+      - ./docker/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      - alertmanager
+      - blackbox-exporter
+    networks:
+      - mediaclaw-net
+
+  grafana:
+    image: grafana/grafana:latest
+    env_file:
+      - .env.production
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    restart: unless-stopped
+    ports:
+      - ${GRAFANA_PORT:-3000}:3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - mediaclaw-net
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --config.expand-env
+      - --storage.path=/alertmanager
+    env_file:
+      - .env.production
+    restart: unless-stopped
+    ports:
+      - ${ALERTMANAGER_PORT:-9093}:9093
+    volumes:
+      - ./docker/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks:
+      - mediaclaw-net
+
+networks:
+  mediaclaw-net:
+    external: true
+    name: mediaclaw-net
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:
