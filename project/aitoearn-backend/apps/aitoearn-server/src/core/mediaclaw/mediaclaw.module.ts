@@ -5,6 +5,7 @@ import {
   AuditLog, AuditLogSchema,
   Brand, BrandSchema,
   Campaign, CampaignSchema,
+  Competitor, CompetitorSchema,
   CopyHistory, CopyHistorySchema,
   Organization, OrganizationSchema,
   MediaClawUser, MediaClawUserSchema,
@@ -42,6 +43,7 @@ import { DataDashboardModule } from './data-dashboard/data-dashboard.module'
 import { DiscoveryModule } from './discovery/discovery.module'
 import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
 import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
+import { CompetitorModule } from './competitor/competitor.module'
 
 @Module({
   imports: [
@@ -51,6 +53,7 @@ import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
       { name: ApiKey.name, schema: ApiKeySchema },
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: Campaign.name, schema: CampaignSchema },
+      { name: Competitor.name, schema: CompetitorSchema },
       { name: CopyHistory.name, schema: CopyHistorySchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
       { name: VideoPack.name, schema: VideoPackSchema },
@@ -84,6 +87,7 @@ import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
     DiscoveryModule,
     ClientMgmtModule,
     TaskMgmtModule,
+    CompetitorModule,
     WebhookModule,
     WorkerModule,
   ],

@@ -8,6 +8,7 @@ import { Blog, BlogSchema } from './blog.schema'
 import { ContentGenerationTask, ContentGenerationTaskSchema } from './content-generation-task.schema'
 import { Campaign, CampaignSchema } from './campaign.schema'
 import { CopyHistory, CopyHistorySchema } from './copy-history.schema'
+import { Competitor, CompetitorSchema } from './competitor.schema'
 import {
   CreditsBalance,
   CreditsBalanceSchema,
@@ -54,6 +55,7 @@ export * from './asset.schema'
 export * from './blog.schema'
 export * from './campaign.schema'
 export * from './content-generation-task.schema'
+export * from './competitor.schema'
 export * from './copy-history.schema'
 export * from './credits-balance.schema'
 export * from './credits-record.schema'
@@ -88,6 +90,7 @@ export const schemas = [
   { name: AiLog.name, schema: AiLogSchema },
   { name: Blog.name, schema: BlogSchema },
   { name: Campaign.name, schema: CampaignSchema },
+  { name: Competitor.name, schema: CompetitorSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },
   { name: Notification.name, schema: NotificationSchema },
   { name: Account.name, schema: AccountSchema },
