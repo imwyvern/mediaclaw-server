@@ -550,6 +550,25 @@ export class ContentMgmtService {
     return this.toContentResponse(task)
   }
 
+  async getDownloadUrl(orgId: string, contentId: string) {
+    const task = await this.getTaskOrFail(orgId, contentId)
+    if (!task.outputVideoUrl?.trim()) {
+      throw new BadRequestException('Content is not ready for download')
+    }
+
+    try {
+      const url = new URL(task.outputVideoUrl)
+      url.searchParams.set('download', '1')
+      if (!url.searchParams.has('filename')) {
+        url.searchParams.set('filename', `mediaclaw-${contentId}.mp4`)
+      }
+      return url.toString()
+    }
+    catch {
+      return task.outputVideoUrl
+    }
+  }
+
   private buildQuery(orgId: string, filters: ContentFilters) {
     const query: Record<string, unknown> = {
       orgId: this.toObjectId(orgId, 'orgId'),

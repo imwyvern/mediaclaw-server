@@ -172,6 +172,7 @@ export class VideoService {
     errorMessage?: string
     quality?: any
     copy?: any
+    deepSynthesis?: Record<string, any>
   }) {
     const timelineEntry = {
       status: this.mapTimelineStatus(status),
@@ -188,6 +189,8 @@ export class VideoService {
       updateSet['quality'] = data.quality
     if (data?.copy)
       updateSet['copy'] = data.copy
+    if (data?.deepSynthesis)
+      updateSet['metadata.compliance.aiDeepSynthesis'] = data.deepSynthesis
 
     if (status === VideoTaskStatus.ANALYZING || status === VideoTaskStatus.EDITING) {
       updateSet['startedAt'] = new Date()

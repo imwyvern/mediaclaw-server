@@ -243,10 +243,17 @@ const testingHarness = vi.hoisted(() => {
   }
 })
 
-vi.mock('@yikart/aitoearn-auth', () => ({
-  GetToken: () => () => undefined,
-  Public: () => () => undefined,
-}))
+vi.mock('@yikart/aitoearn-auth', async (importOriginal) => {
+  const actual = await importOriginal<any>().catch(() => ({}))
+  const { createParamDecorator } = await import('@nestjs/common')
+
+  return {
+    ...actual,
+    GetToken: () => createParamDecorator((_data, ctx) => ctx.switchToHttp().getRequest().user)(),
+    Internal: () => () => undefined,
+    Public: () => () => undefined,
+  }
+})
 
 vi.mock('@yikart/mongodb', () => {
   const entityNames = [

@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common'
 import { join } from 'node:path'
-import { PipelineJobContext } from './pipeline.types'
+import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
+import { PipelineJobContext, PipelineSubtitleRenderResult } from './pipeline.types'
 import { escapeDrawtext, normalizeHexColor, pathExists, runCommand } from './pipeline.utils'
 
 @Injectable()
 export class SubtitleService {
-  async renderSubtitles(context: PipelineJobContext) {
+  constructor(
+    private readonly deepSynthesisMarkerService: DeepSynthesisMarkerService,
+  ) {}
+
+  async renderSubtitles(context: PipelineJobContext): Promise<PipelineSubtitleRenderResult> {
     const inputPath = context.composedVideoPath
     if (!inputPath) {
       throw new Error('composedVideoPath is required before subtitle rendering')
@@ -13,14 +18,16 @@ export class SubtitleService {
 
     const outputPath = join(context.workspaceDir, 'subtitled.mp4')
     const drawtextAvailable = await this.hasDrawtext()
+    const deepSynthesisMarker = context.deepSynthesisMarker
+      || this.deepSynthesisMarkerService.createMarker(context.taskId, context.brand)
 
     if (drawtextAvailable) {
-      await this.renderWithDrawtext(context, inputPath, outputPath)
-      return outputPath
+      await this.renderWithDrawtext(context, inputPath, outputPath, deepSynthesisMarker)
+      return { outputPath, deepSynthesisMarker }
     }
 
-    await this.renderWithOverlay(context, inputPath, outputPath)
-    return outputPath
+    await this.renderWithOverlay(context, inputPath, outputPath, deepSynthesisMarker)
+    return { outputPath, deepSynthesisMarker }
   }
 
   private async hasDrawtext() {
@@ -33,14 +40,19 @@ export class SubtitleService {
     }
   }
 
-  private async renderWithDrawtext(context: PipelineJobContext, inputPath: string, outputPath: string) {
+  private async renderWithDrawtext(
+    context: PipelineJobContext,
+    inputPath: string,
+    outputPath: string,
+    deepSynthesisMarker = this.deepSynthesisMarkerService.createMarker(context.taskId, context.brand),
+  ) {
     const subtitleStyle = context.brand.subtitleStyle
     const textColor = normalizeHexColor(this.readString(subtitleStyle, 'textColor'), '#FFFFFF')
     const accentColor = normalizeHexColor(this.readString(subtitleStyle, 'accentColor'), '#F8D34B')
     const fontSize = this.readNumber(subtitleStyle, 'fontSize') || 54
     const fontFile = await this.resolveFontFile(context)
-    const watermarkText = escapeDrawtext(context.brand.name)
-    const aiLabelText = escapeDrawtext('AI Deep Synthesis')
+    const watermarkText = escapeDrawtext(deepSynthesisMarker.watermarkText)
+    const aiLabelText = escapeDrawtext(deepSynthesisMarker.visibleLabel)
 
     const filterParts = [
       `drawbox=x=40:y=h-260:w=w-80:h=180:color=black@0.35:t=fill`,
@@ -68,17 +80,21 @@ export class SubtitleService {
         'yuv420p',
         '-c:a',
         'copy',
-        '-metadata',
-        'comment=AI deep synthesis watermark',
+        ...this.deepSynthesisMarkerService.buildMetadataArgs(deepSynthesisMarker),
         outputPath,
       ],
       { timeoutMs: 180_000 },
     )
   }
 
-  private async renderWithOverlay(context: PipelineJobContext, inputPath: string, outputPath: string) {
+  private async renderWithOverlay(
+    context: PipelineJobContext,
+    inputPath: string,
+    outputPath: string,
+    deepSynthesisMarker = this.deepSynthesisMarkerService.createMarker(context.taskId, context.brand),
+  ) {
     const overlayPath = join(context.workspaceDir, 'subtitle-overlay.png')
-    const primarySubtitle = context.subtitles[0]?.text || context.brand.name
+    const primarySubtitle = context.subtitles[0]?.text || deepSynthesisMarker.watermarkText
     const scriptPath = join(__dirname, 'subtitle-overlay.py')
     await runCommand(
       'python3',
@@ -91,9 +107,9 @@ export class SubtitleService {
         '--text',
         primarySubtitle,
         '--ai-label',
-        'AI Deep Synthesis',
+        deepSynthesisMarker.visibleLabel,
         '--watermark',
-        context.brand.name,
+        deepSynthesisMarker.watermarkText,
         '--output',
         overlayPath,
       ],
@@ -116,6 +132,7 @@ export class SubtitleService {
         'yuv420p',
         '-c:a',
         'copy',
+        ...this.deepSynthesisMarkerService.buildMetadataArgs(deepSynthesisMarker),
         outputPath,
       ],
       { timeoutMs: 180_000 },

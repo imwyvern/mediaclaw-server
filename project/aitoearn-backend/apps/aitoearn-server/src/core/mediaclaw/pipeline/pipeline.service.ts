@@ -5,6 +5,7 @@ import { copyFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Model, Types } from 'mongoose'
 import { BrandEditService } from './brand-edit.service'
+import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { DedupService } from './dedup.service'
 import { FrameExtractService } from './frame-extract.service'
 import {
@@ -28,6 +29,7 @@ export class PipelineService {
     private readonly frameExtractService: FrameExtractService,
     private readonly brandEditService: BrandEditService,
     private readonly videoGenService: VideoGenService,
+    private readonly deepSynthesisMarkerService: DeepSynthesisMarkerService,
     private readonly subtitleService: SubtitleService,
     private readonly dedupService: DedupService,
     private readonly qualityCheckService: QualityCheckService,
@@ -139,11 +141,15 @@ export class PipelineService {
   async renderVideo(task: VideoTask, context: PipelineJobContext): Promise<PipelineJobContext> {
     const segmentVideoPaths = await this.videoGenService.generateSegments(context)
     const composedVideoPath = await this.videoGenService.composeSegments(context, segmentVideoPaths)
-    const subtitledVideoPath = await this.subtitleService.renderSubtitles({
+    const deepSynthesisMarker = context.deepSynthesisMarker
+      || this.deepSynthesisMarkerService.createMarker(task._id.toString(), context.brand)
+    const subtitleResult = await this.subtitleService.renderSubtitles({
       ...context,
       segmentVideoPaths,
       composedVideoPath,
+      deepSynthesisMarker,
     })
+    const subtitledVideoPath = subtitleResult.outputPath
     const finalVideoPath = join(context.workspaceDir, 'final.mp4')
 
     await this.dedupService.applyVideoPostProcess({
@@ -162,6 +168,7 @@ export class PipelineService {
       subtitledVideoPath,
       finalVideoPath,
       outputVideoUrl,
+      deepSynthesisMarker: subtitleResult.deepSynthesisMarker,
     }
   }
 

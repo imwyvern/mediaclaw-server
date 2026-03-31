@@ -58,6 +58,7 @@ export class VideoWorkerProcessor extends WorkerHost {
           context = await this.requirePipelineService().renderVideo(task, this.requireContext(context))
           await this.videoService.updateStatus(taskId, VideoTaskStatus.RENDERING, {
             outputVideoUrl: context.outputVideoUrl,
+            deepSynthesis: context.deepSynthesisMarker?.manifest,
           })
           break
         case 'quality-check': {

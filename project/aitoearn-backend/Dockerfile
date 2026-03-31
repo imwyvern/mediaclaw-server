@@ -8,16 +8,14 @@ RUN apt-get update \
 
 RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml nx.json tsconfig.base.json ./
-COPY apps ./apps
-COPY libs ./libs
+COPY deps/package.json ./package.json
+COPY deps/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY deps/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY deps/.npmrc ./.npmrc
+COPY deps/apps ./apps
+COPY deps/libs ./libs
 
-RUN pnpm install --frozen-lockfile
-
-FROM deps AS build
-
-RUN npx nx build aitoearn-server --skip-nx-cache \
-  && node -e "const fs = require('node:fs'); const path = 'dist/apps/aitoearn-server/main.js'; fs.writeFileSync(path, `if (!process.argv.includes('-c') && !process.argv.includes('--config')) process.argv.push('-c', 'config.js'); require('./src/main.js');\\n`)"
+RUN pnpm install --prod --frozen-lockfile
 
 FROM node:20-slim AS production
 
@@ -25,15 +23,25 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    fontconfig \
+    libfreetype6 \
+    fonts-noto-cjk \
+    python3 \
+  && fc-cache -f \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/dist/libs ./libs
-COPY --from=build /app/apps/aitoearn-server/config/config.js ./config.js
 COPY package.json ./
+COPY config.js ./config.js
+COPY docker-runtime.cjs ./docker-runtime.cjs
+COPY assets ./assets
+COPY apps ./apps
+COPY libs ./libs
 
 EXPOSE 3002
 
-CMD ["node", "dist/apps/aitoearn-server/main.js"]
+CMD ["node", "docker-runtime.cjs", "apps/aitoearn-server/src/main.js"]

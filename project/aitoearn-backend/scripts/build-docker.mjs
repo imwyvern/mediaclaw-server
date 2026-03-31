@@ -157,7 +157,7 @@ async function createDepsWorkspace(projects, graph, contextDir, verbose = false)
   await fs.ensureDir(depsDir)
 
   // 复制根目录配置文件
-  const rootFiles = ['package.json', '.npmrc']
+  const rootFiles = ['package.json', 'pnpm-lock.yaml', '.npmrc']
   for (const file of rootFiles) {
     if (await fs.pathExists(file)) {
       await fs.copy(file, path.join(depsDir, file))
@@ -363,7 +363,7 @@ async function generateConfig(projects, graph, contextDir, verbose = false) {
   if (verbose)
     console.info(chalk.yellow('生成 Monorepo 配置...'))
 
-  const rootFiles = ['package.json', 'pnpm-workspace.yaml', '.npmrc']
+  const rootFiles = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', 'docker-runtime.cjs']
 
   for (const file of rootFiles) {
     if (await fs.pathExists(file)) {

@@ -61,6 +61,28 @@ export interface PipelineQualityReport {
   errors: string[]
 }
 
+export interface PipelineDeepSynthesisManifest {
+  standard: string
+  label: string
+  watermarkText: string
+  brandName: string
+  taskId: string
+  appliedAt: string
+  metadata: Record<string, string>
+}
+
+export interface PipelineDeepSynthesisMarker {
+  visibleLabel: string
+  watermarkText: string
+  metadata: Record<string, string>
+  manifest: PipelineDeepSynthesisManifest
+}
+
+export interface PipelineSubtitleRenderResult {
+  outputPath: string
+  deepSynthesisMarker: PipelineDeepSynthesisMarker
+}
+
 export interface PipelineJobContext {
   taskId: string
   workspaceDir: string
@@ -79,4 +101,5 @@ export interface PipelineJobContext {
   subtitledVideoPath?: string
   finalVideoPath?: string
   outputVideoUrl?: string
+  deepSynthesisMarker?: PipelineDeepSynthesisMarker
 }

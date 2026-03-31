@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import { Brand, BrandSchema, Pipeline, PipelineSchema } from '@yikart/mongodb'
 import { BrandEditService } from './brand-edit.service'
+import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { DedupService } from './dedup.service'
 import { FrameExtractService } from './frame-extract.service'
 import { PipelineController } from './pipeline.controller'
@@ -22,6 +23,7 @@ import { VideoGenService } from './video-gen.service'
     PipelineService,
     FrameExtractService,
     BrandEditService,
+    DeepSynthesisMarkerService,
     VideoGenService,
     SubtitleService,
     DedupService,

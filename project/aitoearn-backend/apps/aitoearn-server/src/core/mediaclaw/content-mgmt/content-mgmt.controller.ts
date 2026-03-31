@@ -1,6 +1,7 @@
-import { Body, Get, Param, Patch, Post, Put, Query } from '@nestjs/common'
+import { Body, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { VideoTaskStatus } from '@yikart/mongodb'
+import { Response } from 'express'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { ContentMgmtService } from './content-mgmt.service'
 
@@ -96,6 +97,16 @@ export class ContentMgmtController {
       body.format,
       body.filters || {},
     )
+  }
+
+  @Get(':id/download')
+  async downloadContent(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+    @Res() response: Response,
+  ) {
+    const url = await this.contentMgmtService.getDownloadUrl(user.orgId || user.id || '', id)
+    return response.redirect(302, url)
   }
 
   @Get(':id')
