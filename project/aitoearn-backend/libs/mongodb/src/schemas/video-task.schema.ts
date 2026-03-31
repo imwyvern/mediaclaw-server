@@ -51,8 +51,14 @@ class CopyContent {
   @Prop({ type: [String], default: [] })
   hashtags: string[]
 
+  @Prop({ type: [String], default: [] })
+  blueWords: string[]
+
   @Prop({ type: String, default: '' })
   commentGuide: string
+
+  @Prop({ type: [String], default: [] })
+  commentGuides: string[]
 }
 
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'video_tasks' })

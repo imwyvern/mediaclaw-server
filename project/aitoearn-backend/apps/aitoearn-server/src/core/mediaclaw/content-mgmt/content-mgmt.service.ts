@@ -24,6 +24,8 @@ interface CopyUpdateInput {
   title?: string
   subtitle?: string
   hashtags?: string[]
+  blueWords?: string[]
+  commentGuides?: string[]
 }
 
 @Injectable()
@@ -47,7 +49,9 @@ export class ContentMgmtService {
       title: title ?? task.copy?.title ?? '',
       subtitle: subtitle ?? task.copy?.subtitle ?? '',
       hashtags: hashtags ?? task.copy?.hashtags ?? [],
+      blueWords: task.copy?.blueWords ?? [],
       commentGuide: task.copy?.commentGuide ?? '',
+      commentGuides: task.copy?.commentGuides ?? [],
     }
 
     const updated = await this.videoTaskModel.findByIdAndUpdate(
@@ -191,6 +195,13 @@ export class ContentMgmtService {
     if ('hashtags' in updates) {
       setPayload['copy.hashtags'] = updates.hashtags ?? []
     }
+    if ('blueWords' in updates) {
+      setPayload['copy.blueWords'] = updates.blueWords ?? []
+    }
+    if ('commentGuides' in updates) {
+      setPayload['copy.commentGuides'] = updates.commentGuides ?? []
+      setPayload['copy.commentGuide'] = (updates.commentGuides ?? []).join('\n')
+    }
 
     if (Object.keys(setPayload).length === 0) {
       throw new BadRequestException('updates is required')
@@ -311,7 +322,9 @@ export class ContentMgmtService {
         title: task['copy']?.['title'] || '',
         subtitle: task['copy']?.['subtitle'] || '',
         hashtags: task['copy']?.['hashtags'] || [],
+        blueWords: task['copy']?.['blueWords'] || [],
         commentGuide: task['copy']?.['commentGuide'] || '',
+        commentGuides: task['copy']?.['commentGuides'] || [],
       },
       publishInfo: task['metadata']?.['publishInfo'] || null,
       publishStatus: task['metadata']?.['distribution']?.['publishStatus'] || null,
