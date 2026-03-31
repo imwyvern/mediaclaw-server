@@ -1,0 +1,22 @@
+{
+  "name": "mediaclaw-client",
+  "command": "./scripts/mc-api.sh",
+  "endpoint": {
+    "baseUrl": "${MEDIACLAW_BASE_URL:-https://api.mediaclaw.com}"
+  },
+  "env": [
+    "MEDIACLAW_API_KEY",
+    "MEDIACLAW_AGENT_ID"
+  ],
+  "autoCheck": {
+    "enabled": true,
+    "intervalSeconds": 300,
+    "command": "deliveries --agent ${MEDIACLAW_AGENT_ID}"
+  },
+  "downloadDir": "${MEDIACLAW_DOWNLOAD_DIR:-./downloads/mediaclaw}",
+  "notification": {
+    "onDelivery": true,
+    "onApprovalRequired": true,
+    "onPublished": true
+  }
+}
