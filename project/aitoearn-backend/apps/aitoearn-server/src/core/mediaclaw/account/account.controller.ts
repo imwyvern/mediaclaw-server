@@ -7,6 +7,11 @@ import { McAccountService } from './account.service'
 export class McAccountController {
   constructor(private readonly accountService: McAccountService) {}
 
+  @Get()
+  async getAccount(@GetToken() user: any) {
+    return this.accountService.getInfo(user.id)
+  }
+
   @Get('info')
   async getInfo(@GetToken() user: any) {
     return this.accountService.getInfo(user.id)

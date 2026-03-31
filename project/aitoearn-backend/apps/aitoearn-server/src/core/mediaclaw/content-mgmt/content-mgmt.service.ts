@@ -119,15 +119,17 @@ export class ContentMgmtService {
     title?: string,
     subtitle?: string,
     hashtags?: string[],
+    blueWords?: string[],
+    commentGuides?: string[],
   ) {
     const task = await this.getTaskOrFail(orgId, contentId)
     const nextCopy = {
       title: title ?? task.copy?.title ?? '',
       subtitle: subtitle ?? task.copy?.subtitle ?? '',
       hashtags: hashtags ?? task.copy?.hashtags ?? [],
-      blueWords: task.copy?.blueWords ?? [],
-      commentGuide: task.copy?.commentGuide ?? '',
-      commentGuides: task.copy?.commentGuides ?? [],
+      blueWords: blueWords ?? task.copy?.blueWords ?? [],
+      commentGuide: commentGuides ? commentGuides.join('\n') : task.copy?.commentGuide ?? '',
+      commentGuides: commentGuides ?? task.copy?.commentGuides ?? [],
     }
 
     const updated = await this.videoTaskModel.findByIdAndUpdate(

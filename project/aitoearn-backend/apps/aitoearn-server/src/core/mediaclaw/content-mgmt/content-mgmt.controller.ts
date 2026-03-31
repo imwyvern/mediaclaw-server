@@ -67,6 +67,8 @@ export class ContentMgmtController {
         title?: string
         subtitle?: string
         hashtags?: string[]
+        blueWords?: string[]
+        commentGuides?: string[]
       }
     },
   ) {
@@ -113,6 +115,8 @@ export class ContentMgmtController {
       title?: string
       subtitle?: string
       hashtags?: string[]
+      blueWords?: string[]
+      commentGuides?: string[]
     },
   ) {
     return this.contentMgmtService.editCopy(
@@ -121,6 +125,8 @@ export class ContentMgmtController {
       body.title,
       body.subtitle,
       body.hashtags,
+      body.blueWords,
+      body.commentGuides,
     )
   }
 
@@ -154,6 +160,25 @@ export class ContentMgmtController {
 
   @Post(':id/publish')
   async markPublished(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+    @Body()
+    body: {
+      platform: string
+      publishUrl: string
+    },
+  ) {
+    return this.contentMgmtService.markPublished(
+      user.orgId || user.id || '',
+      id,
+      body.platform,
+      body.publishUrl,
+      user.id || '',
+    )
+  }
+
+  @Post(':id/published')
+  async markPublishedAlias(
     @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
     @Body()
