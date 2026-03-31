@@ -15,6 +15,7 @@
         "main": "apps/aitoearn-server/src/main.ts",
         "assets": [
           "apps/aitoearn-server/*.md",
+          "apps/aitoearn-server/src/core/mediaclaw/pipeline/**/*.py",
           "apps/aitoearn-server/src/views/**/*",
           "apps/aitoearn-server/src/public/**/*"
         ],

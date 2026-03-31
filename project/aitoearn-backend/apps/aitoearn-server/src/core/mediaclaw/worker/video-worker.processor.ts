@@ -4,6 +4,7 @@ import { VideoTaskStatus } from '@yikart/mongodb'
 import { Job, Queue } from 'bullmq'
 import { CopyService } from '../copy/copy.service'
 import { DistributionService } from '../distribution/distribution.service'
+import { PipelineService } from '../pipeline/pipeline.service'
 import { VideoService } from '../video/video.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from './worker.constants'
 
@@ -25,6 +26,7 @@ export class VideoWorkerProcessor extends WorkerHost {
     private readonly videoService: VideoService,
     private readonly copyService: CopyService,
     private readonly distributionService: DistributionService,
+    private readonly pipelineService?: PipelineService,
   ) {
     super()
   }
@@ -32,6 +34,7 @@ export class VideoWorkerProcessor extends WorkerHost {
   async process(job: Job<VideoWorkerJobData>): Promise<void> {
     const step = job.name as VideoWorkerStep
     const { taskId } = job.data
+    let context = job.data.context
 
     try {
       const task = typeof this.videoService.getTaskForWorker === 'function'
@@ -41,51 +44,47 @@ export class VideoWorkerProcessor extends WorkerHost {
       switch (step) {
         case 'analyze-source':
           await this.videoService.updateStatus(taskId, VideoTaskStatus.ANALYZING)
-          await this.sleep()
+          context = await this.requirePipelineService().analyzeSource(task)
           break
         case 'edit-frames':
           await this.videoService.updateStatus(taskId, VideoTaskStatus.EDITING)
-          await this.sleep()
+          context = await this.requirePipelineService().editFrames(this.requireContext(context))
           break
         case 'render-video':
           await this.videoService.updateStatus(taskId, VideoTaskStatus.RENDERING)
-          await this.sleep()
+          context = await this.requirePipelineService().renderVideo(task, this.requireContext(context))
           await this.videoService.updateStatus(taskId, VideoTaskStatus.RENDERING, {
-            outputVideoUrl: task.outputVideoUrl || `${task.sourceVideoUrl}?processed=${taskId}`,
+            outputVideoUrl: context.outputVideoUrl,
           })
           break
-        case 'quality-check':
+        case 'quality-check': {
           await this.videoService.updateStatus(taskId, VideoTaskStatus.QUALITY_CHECK)
-          await this.sleep()
+          const report = await this.requirePipelineService().runQualityCheck(this.requireContext(context))
           await this.videoService.updateStatus(taskId, VideoTaskStatus.QUALITY_CHECK, {
-            quality: {
-              width: 1080,
-              height: 1920,
-              duration: 15,
-              fileSize: 1024 * 1024 * 8,
-              hasSubtitles: true,
-            },
+            quality: report.metrics,
           })
           break
+        }
         case 'generate-copy': {
           await this.videoService.updateStatus(taskId, VideoTaskStatus.GENERATING_COPY)
-          await this.sleep()
+          const outputVideoUrl = context?.outputVideoUrl || task.outputVideoUrl || task.sourceVideoUrl
           const copy = await this.copyService.generateCopy(
             task.brandId?.toString(),
-            task.outputVideoUrl || task.sourceVideoUrl,
+            outputVideoUrl,
             {
               ...task.metadata,
               taskId,
             },
           )
           const completedTask = await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
-            outputVideoUrl: task.outputVideoUrl || `${task.sourceVideoUrl}?processed=${taskId}`,
+            outputVideoUrl,
             quality: task.quality,
             copy,
           })
           if (completedTask) {
             await this.distributionService.notifyTaskComplete(completedTask)
           }
+          await this.pipelineService?.cleanupWorkspace(context)
           this.logger.log(`Video task completed: ${taskId}`)
           return
         }
@@ -99,7 +98,14 @@ export class VideoWorkerProcessor extends WorkerHost {
         return
       }
 
-      await this.workerQueue.add(nextStep, { taskId }, { jobId: `${taskId}:${nextStep}` })
+      await this.workerQueue.add(
+        nextStep,
+        {
+          taskId,
+          context,
+        },
+        { jobId: `${taskId}:${nextStep}:${Date.now()}` },
+      )
     }
     catch (error) {
       const attemptsMade = job.attemptsMade + 1
@@ -112,6 +118,7 @@ export class VideoWorkerProcessor extends WorkerHost {
         await this.videoService.updateStatus(taskId, VideoTaskStatus.FAILED, {
           errorMessage: message,
         })
+        await this.pipelineService?.cleanupWorkspace(context)
       }
 
       throw error
@@ -123,7 +130,23 @@ export class VideoWorkerProcessor extends WorkerHost {
     this.logger.error(`Video worker failed for ${job?.data?.taskId}: ${error.message}`)
   }
 
+  private requireContext(context: VideoWorkerJobData['context']) {
+    if (!context) {
+      throw new Error('Pipeline context is missing')
+    }
+
+    return context
+  }
+
+  private requirePipelineService() {
+    if (!this.pipelineService) {
+      throw new Error('Pipeline service is not configured')
+    }
+
+    return this.pipelineService
+  }
+
   private async sleep() {
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    return undefined
   }
 }

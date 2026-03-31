@@ -1,17 +1,25 @@
 import { vi } from 'vitest'
 import { CopyService } from '../copy/copy.service'
 import { DistributionService } from '../distribution/distribution.service'
+import { PipelineService } from '../pipeline/pipeline.service'
 import { describeModuleSpec } from '../testing/module-spec.factory'
 import { VideoService } from '../video/video.service'
 import { VideoWorkerProcessor } from './video-worker.processor'
 import { WorkerModule } from './worker.module'
 
-const { copyServiceMock, distributionServiceMock, videoServiceMock, workerQueueMock } = vi.hoisted(() => ({
+const { copyServiceMock, distributionServiceMock, pipelineServiceMock, videoServiceMock, workerQueueMock } = vi.hoisted(() => ({
   copyServiceMock: {
     generateCopy: vi.fn().mockResolvedValue({}),
   },
   distributionServiceMock: {
     notifyTaskComplete: vi.fn().mockResolvedValue(undefined),
+  },
+  pipelineServiceMock: {
+    analyzeSource: vi.fn(),
+    cleanupWorkspace: vi.fn().mockResolvedValue(undefined),
+    editFrames: vi.fn(),
+    renderVideo: vi.fn(),
+    runQualityCheck: vi.fn(),
   },
   videoServiceMock: {
     getTask: vi.fn(),
@@ -58,6 +66,17 @@ vi.mock('../distribution/distribution.module', async () => {
   return { DistributionModule: MockDistributionModule }
 })
 
+vi.mock('../pipeline/pipeline.module', async () => {
+  const { Module } = await import('@nestjs/common')
+  class MockPipelineModule {}
+  Module({
+    providers: [{ provide: PipelineService, useValue: pipelineServiceMock }],
+    exports: [PipelineService],
+  })(MockPipelineModule)
+
+  return { PipelineModule: MockPipelineModule }
+})
+
 vi.mock('../video/video.module', async () => {
   const { Module } = await import('@nestjs/common')
   class MockVideoModule {}
@@ -71,7 +90,7 @@ vi.mock('../video/video.module', async () => {
 
 vi.mock('./video-worker-queue.module', async () => {
   const { Module } = await import('@nestjs/common')
-  const queueToken = 'BullQueue_mediaclaw_video_worker'
+  const queueToken = 'BullQueue_mediaclaw_pipeline'
   class MockVideoWorkerQueueModule {}
   Module({
     providers: [{ provide: queueToken, useValue: workerQueueMock }],
@@ -100,7 +119,11 @@ describeModuleSpec<VideoWorkerProcessor>({
       useValue: distributionServiceMock,
     },
     {
-      provide: 'BullQueue_mediaclaw_video_worker',
+      provide: PipelineService,
+      useValue: pipelineServiceMock,
+    },
+    {
+      provide: 'BullQueue_mediaclaw_pipeline',
       useValue: workerQueueMock,
     },
   ],

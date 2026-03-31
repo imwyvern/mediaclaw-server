@@ -8,5 +8,5 @@ describeModuleSpec<PipelineService>({
   module: PipelineModule,
   service: PipelineService,
   controller: PipelineController,
-  keyMethods: ['create', 'findByOrg', 'archive'],
+  keyMethods: ['create', 'findByOrg', 'analyzeSource', 'renderVideo', 'runQualityCheck', 'archive'],
 })

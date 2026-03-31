@@ -48,7 +48,7 @@ vi.mock('../billing/billing.module', async () => {
 
 vi.mock('../worker/video-worker-queue.module', async () => {
   const { Module } = await import('@nestjs/common')
-  const queueToken = 'BullQueue_mediaclaw_video_worker'
+  const queueToken = 'BullQueue_mediaclaw_pipeline'
   class MockVideoWorkerQueueModule {}
   Module({
     providers: [{ provide: queueToken, useValue: videoWorkerQueueMock }],
@@ -74,7 +74,7 @@ describeModuleSpec<TaskMgmtService>({
       useValue: billingServiceMock,
     },
     {
-      provide: 'BullQueue_mediaclaw_video_worker',
+      provide: 'BullQueue_mediaclaw_pipeline',
       useValue: videoWorkerQueueMock,
     },
   ],

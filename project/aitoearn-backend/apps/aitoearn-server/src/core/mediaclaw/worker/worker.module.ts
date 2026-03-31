@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { CopyModule } from '../copy/copy.module'
 import { DistributionModule } from '../distribution/distribution.module'
+import { PipelineModule } from '../pipeline/pipeline.module'
 import { VideoModule } from '../video/video.module'
 import { VideoWorkerQueueModule } from './video-worker-queue.module'
 import { VideoWorkerProcessor } from './video-worker.processor'
@@ -9,6 +10,7 @@ import { VideoWorkerProcessor } from './video-worker.processor'
   imports: [
     CopyModule,
     DistributionModule,
+    PipelineModule,
     VideoWorkerQueueModule,
     VideoModule,
   ],
