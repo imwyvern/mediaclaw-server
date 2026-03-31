@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { ContentMgmtModule } from '../content-mgmt/content-mgmt.module'
 import { CopyModule } from '../copy/copy.module'
 import { DistributionModule } from '../distribution/distribution.module'
 import { PipelineModule } from '../pipeline/pipeline.module'
@@ -8,6 +9,7 @@ import { VideoWorkerProcessor } from './video-worker.processor'
 
 @Module({
   imports: [
+    ContentMgmtModule,
     CopyModule,
     DistributionModule,
     PipelineModule,

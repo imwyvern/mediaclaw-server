@@ -17,6 +17,7 @@ import {
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { MEDIACLAW_SUCCESS_STATUSES } from '../video-task-status.utils'
 
 interface ReportPeriodInput {
   start: string
@@ -198,7 +199,7 @@ export class ReportService {
             totalVideos: { $sum: 1 },
             completedVideos: {
               $sum: {
-                $cond: [{ $eq: ['$status', VideoTaskStatus.COMPLETED] }, 1, 0],
+                $cond: [{ $in: ['$status', MEDIACLAW_SUCCESS_STATUSES] }, 1, 0],
               },
             },
             failedVideos: {
@@ -227,7 +228,7 @@ export class ReportService {
             totalVideos: { $sum: 1 },
             completedVideos: {
               $sum: {
-                $cond: [{ $eq: ['$status', VideoTaskStatus.COMPLETED] }, 1, 0],
+                $cond: [{ $in: ['$status', MEDIACLAW_SUCCESS_STATUSES] }, 1, 0],
               },
             },
           },

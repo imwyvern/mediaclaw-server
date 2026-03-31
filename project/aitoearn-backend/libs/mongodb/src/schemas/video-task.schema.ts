@@ -5,6 +5,7 @@ import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
 import { WithTimestampSchema } from './timestamp.schema'
 
 export enum VideoTaskStatus {
+  DRAFT = 'draft',
   PENDING = 'pending',
   ANALYZING = 'analyzing',
   EDITING = 'editing',
@@ -12,6 +13,10 @@ export enum VideoTaskStatus {
   QUALITY_CHECK = 'quality_check',
   GENERATING_COPY = 'generating_copy',
   COMPLETED = 'completed',
+  PENDING_REVIEW = 'pending_review',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  PUBLISHED = 'published',
   FAILED = 'failed',
   CANCELLED = 'cancelled',
 }
@@ -20,6 +25,14 @@ export enum VideoTaskType {
   BRAND_REPLACE = 'brand_replace',
   REMIX = 'remix',
   NEW_CONTENT = 'new_content',
+}
+
+export enum VideoTaskApprovalAction {
+  SUBMITTED = 'submitted',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  CHANGES_REQUESTED = 'changes_requested',
+  PUBLISHED = 'published',
 }
 
 @Schema({ _id: false })
@@ -61,6 +74,57 @@ class CopyContent {
   commentGuides: string[]
 }
 
+@Schema({ _id: false })
+class ApprovalHistoryEntry {
+  @Prop({ type: Number, default: 1 })
+  level: number
+
+  @Prop({ type: String, default: '' })
+  reviewerId: string
+
+  @Prop({ type: String, default: '' })
+  reviewerName: string
+
+  @Prop({ type: String, default: '' })
+  reviewerRole: string
+
+  @Prop({ type: String, enum: VideoTaskApprovalAction, default: VideoTaskApprovalAction.SUBMITTED })
+  action: VideoTaskApprovalAction
+
+  @Prop({ type: String, default: '' })
+  comment: string
+
+  @Prop({ type: Date, default: Date.now })
+  at: Date
+}
+
+@Schema({ _id: false })
+class ApprovalState {
+  @Prop({ type: Number, default: 0 })
+  currentLevel: number
+
+  @Prop({ type: Number, default: 0 })
+  maxLevel: number
+
+  @Prop({ type: [String], default: [] })
+  pendingRoles: string[]
+
+  @Prop({ type: String, enum: VideoTaskApprovalAction, default: VideoTaskApprovalAction.SUBMITTED })
+  lastAction: VideoTaskApprovalAction
+
+  @Prop({ type: String, default: '' })
+  lastComment: string
+
+  @Prop({ type: Date, default: null })
+  submittedAt: Date | null
+
+  @Prop({ type: Date, default: null })
+  reviewedAt: Date | null
+
+  @Prop({ type: [ApprovalHistoryEntry], default: [] })
+  history: ApprovalHistoryEntry[]
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'video_tasks' })
 export class VideoTask extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -96,6 +160,9 @@ export class VideoTask extends WithTimestampSchema {
   @Prop({ type: CopyContent, default: () => ({}) })
   copy: CopyContent
 
+  @Prop({ type: ApprovalState, default: null })
+  approval: ApprovalState | null
+
   @Prop({ type: Number, default: 1 })
   creditsConsumed: number
 
@@ -119,6 +186,9 @@ export class VideoTask extends WithTimestampSchema {
 
   @Prop({ type: Date, default: null })
   completedAt: Date | null
+
+  @Prop({ type: Date, default: null })
+  publishedAt: Date | null
 }
 
 export const VideoTaskSchema = SchemaFactory.createForClass(VideoTask)

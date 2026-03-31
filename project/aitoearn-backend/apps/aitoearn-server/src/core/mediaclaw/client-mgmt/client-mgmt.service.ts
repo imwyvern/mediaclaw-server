@@ -19,6 +19,10 @@ import {
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import {
+  MEDIACLAW_PENDING_TASK_STATUSES,
+  MEDIACLAW_SUCCESS_STATUSES,
+} from '../video-task-status.utils'
 
 interface OrgFilters {
   status?: OrgStatus
@@ -123,7 +127,7 @@ export class ClientMgmtService {
             totalTasks: { $sum: 1 },
             completedTasks: {
               $sum: {
-                $cond: [{ $eq: ['$status', VideoTaskStatus.COMPLETED] }, 1, 0],
+                $cond: [{ $in: ['$status', MEDIACLAW_SUCCESS_STATUSES] }, 1, 0],
               },
             },
             failedTasks: {
@@ -137,14 +141,7 @@ export class ClientMgmtService {
                   {
                     $in: [
                       '$status',
-                      [
-                        VideoTaskStatus.PENDING,
-                        VideoTaskStatus.ANALYZING,
-                        VideoTaskStatus.EDITING,
-                        VideoTaskStatus.RENDERING,
-                        VideoTaskStatus.QUALITY_CHECK,
-                        VideoTaskStatus.GENERATING_COPY,
-                      ],
+                      MEDIACLAW_PENDING_TASK_STATUSES,
                     ],
                   },
                   1,

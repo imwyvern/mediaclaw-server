@@ -49,6 +49,14 @@ export class ContentMgmtController {
     )
   }
 
+  @Get('pending')
+  async listPendingContent(@GetToken() user: { orgId?: string, id?: string }) {
+    return this.contentMgmtService.listPendingContent(
+      user.orgId || user.id || '',
+      user.id || '',
+    )
+  }
+
   @Post('batch-edit')
   async batchEditCopy(
     @GetToken() user: { orgId?: string, id?: string },
@@ -116,6 +124,34 @@ export class ContentMgmtController {
     )
   }
 
+  @Post(':id/approve')
+  async approveContent(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+    @Body() body: { comment?: string },
+  ) {
+    return this.contentMgmtService.approveContent(
+      user.orgId || user.id || '',
+      id,
+      user.id || '',
+      body.comment,
+    )
+  }
+
+  @Post(':id/review')
+  async reviewContent(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+    @Body() body: { action: 'approve' | 'reject' | 'changes_requested', comment?: string },
+  ) {
+    return this.contentMgmtService.reviewContent(
+      user.orgId || user.id || '',
+      id,
+      user.id || '',
+      body,
+    )
+  }
+
   @Post(':id/publish')
   async markPublished(
     @GetToken() user: { orgId?: string, id?: string },
@@ -131,6 +167,7 @@ export class ContentMgmtController {
       id,
       body.platform,
       body.publishUrl,
+      user.id || '',
     )
   }
 }

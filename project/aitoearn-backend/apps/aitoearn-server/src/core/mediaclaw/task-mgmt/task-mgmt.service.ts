@@ -355,6 +355,12 @@ export class TaskMgmtService {
     switch (status) {
       case VideoTaskStatus.COMPLETED:
         return 'completed'
+      case VideoTaskStatus.APPROVED:
+        return 'approved'
+      case VideoTaskStatus.REJECTED:
+        return 'rejected'
+      case VideoTaskStatus.PUBLISHED:
+        return 'published'
       case VideoTaskStatus.FAILED:
         return 'failed'
       case VideoTaskStatus.CANCELLED:

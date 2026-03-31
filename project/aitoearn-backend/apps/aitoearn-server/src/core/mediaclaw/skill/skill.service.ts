@@ -1,7 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Brand, Pipeline, PipelineStatus, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
+import { Brand, Pipeline, PipelineStatus, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { MEDIACLAW_DISTRIBUTABLE_STATUSES } from '../video-task-status.utils'
 
 interface SkillScope {
   orgId: string
@@ -156,7 +157,7 @@ export class SkillService {
     }
 
     return this.videoTaskModel.find({
-      status: VideoTaskStatus.COMPLETED,
+      status: { $in: MEDIACLAW_DISTRIBUTABLE_STATUSES },
       $and: [scopeFilter, deliveryFilter],
     })
       .sort({ completedAt: -1, createdAt: -1 })

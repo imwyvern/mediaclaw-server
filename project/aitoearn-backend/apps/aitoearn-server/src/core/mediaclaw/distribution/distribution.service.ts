@@ -13,6 +13,7 @@ import {
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { isDistributableVideoTaskStatus } from '../video-task-status.utils'
 import { WebhookService } from '../webhook/webhook.service'
 
 export enum DistributionPublishStatus {
@@ -153,8 +154,8 @@ export class DistributionService {
       throw new BadRequestException('Content does not belong to the organization')
     }
 
-    if (task.status !== VideoTaskStatus.COMPLETED) {
-      throw new BadRequestException('Only completed content can be distributed')
+    if (!isDistributableVideoTaskStatus(task.status)) {
+      throw new BadRequestException('Only completed or approved content can be distributed')
     }
 
     const normalizedTargets = this.normalizeTargets(targets)
@@ -590,7 +591,11 @@ export class DistributionService {
       return fromMetadata
     }
 
-    if (task.status === VideoTaskStatus.COMPLETED) {
+    if (task.status === VideoTaskStatus.PUBLISHED) {
+      return DistributionPublishStatus.PUBLISHED
+    }
+
+    if (isDistributableVideoTaskStatus(task.status)) {
       return DistributionPublishStatus.COMPLETED
     }
 

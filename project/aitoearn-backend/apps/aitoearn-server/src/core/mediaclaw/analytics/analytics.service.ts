@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { VideoTask, VideoTaskStatus } from '@yikart/mongodb'
 import { Model, PipelineStage, Types } from 'mongoose'
+import { MEDIACLAW_SUCCESS_STATUSES } from '../video-task-status.utils'
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly'
 
@@ -30,7 +31,7 @@ export class AnalyticsService {
           creditsUsed: { $sum: { $ifNull: ['$creditsConsumed', 0] } },
           successCount: {
             $sum: {
-              $cond: [{ $eq: ['$status', VideoTaskStatus.COMPLETED] }, 1, 0],
+              $cond: [{ $in: ['$status', MEDIACLAW_SUCCESS_STATUSES] }, 1, 0],
             },
           },
           avgProductionTimeMs: { $avg: '$productionTimeMs' },
@@ -149,7 +150,7 @@ export class AnalyticsService {
           totalVideos: { $sum: 1 },
           completedVideos: {
             $sum: {
-              $cond: [{ $eq: ['$status', VideoTaskStatus.COMPLETED] }, 1, 0],
+              $cond: [{ $in: ['$status', MEDIACLAW_SUCCESS_STATUSES] }, 1, 0],
             },
           },
           creditsUsed: { $sum: { $ifNull: ['$creditsConsumed', 0] } },
@@ -206,7 +207,7 @@ export class AnalyticsService {
       {
         $match: {
           ...this.buildOrgMatch(orgId),
-          status: VideoTaskStatus.COMPLETED,
+          status: { $in: MEDIACLAW_SUCCESS_STATUSES },
         },
       },
       ...this.buildMetricStages(),

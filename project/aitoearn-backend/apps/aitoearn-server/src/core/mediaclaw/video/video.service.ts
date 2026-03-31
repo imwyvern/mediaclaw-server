@@ -301,6 +301,14 @@ export class VideoService {
     switch (status) {
       case VideoTaskStatus.PENDING:
         return 'queued'
+      case VideoTaskStatus.PENDING_REVIEW:
+        return 'pending_review'
+      case VideoTaskStatus.APPROVED:
+        return 'approved'
+      case VideoTaskStatus.REJECTED:
+        return 'rejected'
+      case VideoTaskStatus.PUBLISHED:
+        return 'published'
       case VideoTaskStatus.COMPLETED:
         return 'completed'
       case VideoTaskStatus.FAILED:

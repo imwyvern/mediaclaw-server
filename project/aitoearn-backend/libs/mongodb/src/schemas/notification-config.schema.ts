@@ -14,6 +14,11 @@ export enum NotificationChannel {
 export enum NotificationEvent {
   TASK_COMPLETED = 'task.completed',
   TASK_FAILED = 'task.failed',
+  CONTENT_PENDING_REVIEW = 'content.pending_review',
+  CONTENT_APPROVED = 'content.approved',
+  CONTENT_REJECTED = 'content.rejected',
+  CONTENT_CHANGES_REQUESTED = 'content.changes_requested',
+  CONTENT_PUBLISHED = 'content.published',
   SUBSCRIPTION_EXPIRING = 'subscription.expiring',
   CREDIT_LOW = 'credit.low',
 }

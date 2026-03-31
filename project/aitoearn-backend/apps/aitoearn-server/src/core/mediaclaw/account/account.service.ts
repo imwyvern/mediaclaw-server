@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { MediaClawUser, PackStatus, VideoPack, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
 import { Model } from 'mongoose'
+import { MEDIACLAW_SUCCESS_STATUSES } from '../video-task-status.utils'
 
 @Injectable()
 export class McAccountService {
@@ -48,7 +49,10 @@ export class McAccountService {
       }).exec(),
 
       this.videoTaskModel.countDocuments({ userId }),
-      this.videoTaskModel.countDocuments({ userId, status: VideoTaskStatus.COMPLETED }),
+      this.videoTaskModel.countDocuments({
+        userId,
+        status: { $in: MEDIACLAW_SUCCESS_STATUSES },
+      }),
       this.videoTaskModel.countDocuments({ userId, status: VideoTaskStatus.FAILED }),
     ])
 

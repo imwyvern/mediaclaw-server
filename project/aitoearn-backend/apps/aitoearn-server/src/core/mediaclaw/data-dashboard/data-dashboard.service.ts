@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Organization, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
 import { Model, PipelineStage, Types } from 'mongoose'
+import { MEDIACLAW_SUCCESS_STATUSES } from '../video-task-status.utils'
 
 interface DateRangeInput {
   startDate?: string
@@ -51,7 +52,7 @@ export class DataDashboardService {
           totalVideos: { $sum: 1 },
           completedVideos: {
             $sum: {
-              $cond: [{ $eq: ['$status', VideoTaskStatus.COMPLETED] }, 1, 0],
+              $cond: [{ $in: ['$status', MEDIACLAW_SUCCESS_STATUSES] }, 1, 0],
             },
           },
           totalViews: { $sum: '$views' },

@@ -1,7 +1,8 @@
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq'
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, Optional } from '@nestjs/common'
 import { VideoTaskStatus } from '@yikart/mongodb'
 import { Job, Queue } from 'bullmq'
+import { ContentMgmtService } from '../content-mgmt/content-mgmt.service'
 import { CopyService } from '../copy/copy.service'
 import { DistributionService } from '../distribution/distribution.service'
 import { PipelineService } from '../pipeline/pipeline.service'
@@ -27,6 +28,8 @@ export class VideoWorkerProcessor extends WorkerHost {
     private readonly copyService: CopyService,
     private readonly distributionService: DistributionService,
     private readonly pipelineService?: PipelineService,
+    @Optional()
+    private readonly contentMgmtService?: ContentMgmtService,
   ) {
     super()
   }
@@ -82,7 +85,10 @@ export class VideoWorkerProcessor extends WorkerHost {
             copy,
           })
           if (completedTask) {
-            await this.distributionService.notifyTaskComplete(completedTask)
+            const reviewAwareTask = this.contentMgmtService
+              ? await this.contentMgmtService.initializeWorkflowForTask(taskId)
+              : completedTask
+            await this.distributionService.notifyTaskComplete(reviewAwareTask as any)
           }
           await this.pipelineService?.cleanupWorkspace(context)
           this.logger.log(`Video task completed: ${taskId}`)
