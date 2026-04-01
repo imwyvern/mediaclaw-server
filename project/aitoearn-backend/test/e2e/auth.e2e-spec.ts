@@ -119,6 +119,59 @@ function createSubscriptionDocument(orgId: Types.ObjectId, overrides: Record<str
 }
 
 describe('MediaClaw Auth E2E', () => {
+  it('应在 console mock 模式下输出可测试的短信验证码日志', async () => {
+    const previousSmsMode = process.env['MEDIACLAW_SMS_MODE']
+    process.env['MEDIACLAW_SMS_MODE'] = 'console'
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const userModel = {
+      findOne: vi.fn(),
+      create: vi.fn(),
+      findById: vi.fn(),
+      findByIdAndUpdate: vi.fn(),
+    }
+    const videoPackModel = {
+      create: vi.fn(),
+    }
+    const jwtService = {
+      sign: vi.fn(),
+      verify: vi.fn(),
+    }
+
+    try {
+      const service = new McAuthService(
+        userModel as any,
+        videoPackModel as any,
+        jwtService as any,
+      )
+
+      await expect(service.sendSmsCode('13800138000')).resolves.toMatchObject({
+        success: true,
+        message: 'Code sent',
+        code: expect.stringMatching(/^\d{6}$/),
+      })
+
+      const mockPayload = JSON.parse(consoleSpy.mock.calls[0]?.[0] as string)
+      expect(mockPayload).toMatchObject({
+        type: 'sms.otp.mock',
+        channel: 'mediaclaw',
+        phone: '13800138000',
+      })
+      expect(mockPayload.code).toMatch(/^\d{6}$/)
+      expect(mockPayload.expiresAt).toBeTruthy()
+    }
+    finally {
+      consoleSpy.mockRestore()
+
+      if (previousSmsMode === undefined) {
+        delete process.env['MEDIACLAW_SMS_MODE']
+      }
+      else {
+        process.env['MEDIACLAW_SMS_MODE'] = previousSmsMode
+      }
+    }
+  })
+
   it('应完成短信登录流并创建试用视频包', async () => {
     const userModel = {
       findOne: vi.fn().mockReturnValue(createExecQuery(null)),
@@ -145,9 +198,10 @@ describe('MediaClaw Auth E2E', () => {
     )
 
     const phone = '13800138000'
-    await expect(service.sendSmsCode(phone)).resolves.toEqual({
+    await expect(service.sendSmsCode(phone)).resolves.toMatchObject({
       success: true,
       message: 'Code sent',
+      code: expect.stringMatching(/^\d{6}$/),
     })
 
     const code = (service as any).otpStore.get(phone)?.code as string
