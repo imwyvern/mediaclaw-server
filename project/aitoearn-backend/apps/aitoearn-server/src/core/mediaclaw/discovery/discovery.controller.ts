@@ -1,11 +1,15 @@
 import { Body, Get, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { ContentRemixService } from './content-remix.service'
 import { DiscoveryService } from './discovery.service'
 
 @MediaClawApiController('api/v1/discovery')
 export class DiscoveryController {
-  constructor(private readonly discoveryService: DiscoveryService) {}
+  constructor(
+    private readonly discoveryService: DiscoveryService,
+    private readonly contentRemixService: ContentRemixService,
+  ) {}
 
   @Get('pool')
   async getRecommendationPool(
@@ -43,5 +47,23 @@ export class DiscoveryController {
     taskId?: string
   }) {
     return this.discoveryService.markRemixed(body.contentId || '', body.taskId || '')
+  }
+
+  @Post('analyze-viral-elements')
+  async analyzeViralElements(@Body() body: {
+    contentId?: string
+  }) {
+    return this.contentRemixService.analyzeViralElements(body.contentId || '')
+  }
+
+  @Post('generate-remix-brief')
+  async generateRemixBrief(@Body() body: {
+    contentId?: string
+    brandId?: string
+  }) {
+    return this.contentRemixService.generateRemixBrief(
+      body.contentId || '',
+      body.brandId || '',
+    )
   }
 }

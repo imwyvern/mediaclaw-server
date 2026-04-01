@@ -13,6 +13,7 @@ import {
   ViralContentSchema,
 } from '@yikart/mongodb'
 import { AcquisitionModule } from '../acquisition/acquisition.module'
+import { ContentRemixService } from './content-remix.service'
 import { DiscoveryController } from './discovery.controller'
 import { DiscoveryService } from './discovery.service'
 
@@ -28,7 +29,7 @@ import { DiscoveryService } from './discovery.service'
     ]),
   ],
   controllers: [DiscoveryController],
-  providers: [DiscoveryService],
-  exports: [DiscoveryService],
+  providers: [DiscoveryService, ContentRemixService],
+  exports: [DiscoveryService, ContentRemixService],
 })
 export class DiscoveryModule {}
