@@ -11,15 +11,16 @@ interface CrawlQuery {
   depth: number
 }
 
-interface CrawlSeedResult {
+export interface CrawlSeedResult {
   platform: string
+  videoId: string
   title: string
   author: string
   contentUrl: string
   thumbnailUrl: string
 }
 
-interface CrawlRouteDecision {
+export interface CrawlRouteDecision {
   mode: 'tikhub_only' | 'tikhub_plus_media_crawler_pro'
   reason: string
   tikhubResultCount: number
@@ -40,7 +41,7 @@ interface CrawlRouteDecision {
   }
 }
 
-interface CrawlJobData {
+export interface CrawlJobData {
   platform: string
   keyword: string
   depth: number
@@ -77,6 +78,7 @@ export class CrawlerService {
       route,
       seedResults: route.tikhubResponse.items.map(item => ({
         platform: item.platform,
+        videoId: item.videoId,
         title: item.title,
         author: item.author,
         contentUrl: item.contentUrl,
@@ -125,16 +127,20 @@ export class CrawlerService {
   async getCrawlResults(jobId: string) {
     const job = await this.findJob(jobId)
     const state = await job.getState()
-    const results = Array.isArray(job.returnvalue) && job.returnvalue.length > 0
+    const results = job.returnvalue
       ? job.returnvalue
       : job.data.seedResults
+    const total = Array.isArray(results)
+      ? results.length
+      : Number((results as Record<string, unknown>)?.['persisted'] && (results as Record<string, any>)['persisted']['upsertedCount'])
+        || job.data.seedResults.length
 
     return {
       jobId,
       queueName: MEDIACLAW_CRAWL_QUEUE,
       state,
       route: job.data.route,
-      total: results.length,
+      total,
       results,
     }
   }
