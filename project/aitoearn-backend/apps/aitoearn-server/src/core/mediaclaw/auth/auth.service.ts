@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { InjectModel } from '@nestjs/mongoose'
+import { AliSmsService } from '@yikart/ali-sms'
 import { McUserType, MediaClawUser, UserRole, VideoPack } from '@yikart/mongodb'
 import { Model } from 'mongoose'
 
@@ -15,6 +16,7 @@ export class McAuthService {
     @InjectModel(MediaClawUser.name) private readonly userModel: Model<MediaClawUser>,
     @InjectModel(VideoPack.name) private readonly videoPackModel: Model<VideoPack>,
     private readonly jwtService: JwtService,
+    @Optional() private readonly aliSmsService?: AliSmsService,
   ) {}
 
   validatePhoneNumber(phone: string) {
@@ -35,14 +37,19 @@ export class McAuthService {
       throw new BadRequestException('Please wait before requesting another code')
     }
 
-    const code = Math.random().toString().slice(2, 8)
+    const code = this.generateOtpCode()
+    const expiresAt = Date.now() + 5 * 60 * 1000
     this.otpStore.set(phone, {
       code,
-      expiresAt: Date.now() + 5 * 60 * 1000, // 5 min expiry
+      expiresAt,
     })
 
-    // TODO: Integrate with AliSms service for real SMS
-    this.logger.log(`SMS verification code generated for ${this.maskPhone(phone)}`)
+    await this.deliverSmsCode(phone, code, expiresAt)
+
+    // In console/mock mode, return the code to the frontend for easy testing
+    if (this.shouldUseConsoleSms()) {
+      return { success: true, message: 'Code sent', code }
+    }
 
     return { success: true, message: 'Code sent' }
   }
@@ -181,5 +188,56 @@ export class McAuthService {
     }
 
     return `${phone.slice(0, 3)}****${phone.slice(-4)}`
+  }
+
+  private generateOtpCode() {
+    return Math.floor(100000 + Math.random() * 900000).toString()
+  }
+
+  private logConsoleSmsOtp(phone: string, code: string, expiresAt: number) {
+    const expiresAtIso = new Date(expiresAt).toISOString()
+    const logPayload = {
+      type: 'sms.otp.mock',
+      channel: 'mediaclaw',
+      mode: 'console',
+      phone,
+      code,
+      expiresAt: expiresAtIso,
+    }
+
+    console.log(JSON.stringify(logPayload))
+    console.log(`[MEDIACLAW_TEMP_SMS_OTP] phone=${phone} code=${code} expiresAt=${expiresAtIso}`)
+    this.logger.warn(`TEMP SMS OTP for manual testing: phone=${phone} code=${code} expiresAt=${expiresAtIso}`)
+  }
+
+  private async deliverSmsCode(phone: string, code: string, expiresAt: number) {
+    if (this.shouldUseConsoleSms()) {
+      this.logConsoleSmsOtp(phone, code, expiresAt)
+      return
+    }
+
+    if (!this.aliSmsService) {
+      throw new BadRequestException('SMS service not configured')
+    }
+
+    const sent = await this.aliSmsService.sendSms(phone, { code })
+    if (!sent) {
+      this.otpStore.delete(phone)
+      throw new BadRequestException('Failed to send verification code')
+    }
+
+    this.logger.log(`SMS verification code delivered for ${this.maskPhone(phone)}`)
+  }
+
+  private shouldUseConsoleSms() {
+    const smsMode = process.env['MEDIACLAW_SMS_MODE']?.trim().toLowerCase()
+    if (smsMode === 'console' || smsMode === 'mock') {
+      return true
+    }
+
+    return !process.env['ALI_SMS_ACCESS_KEY_ID']?.trim()
+      || !process.env['ALI_SMS_ACCESS_KEY_SECRET']?.trim()
+      || !process.env['ALI_SMS_SIGN_NAME']?.trim()
+      || !process.env['ALI_SMS_TEMPLATE_CODE']?.trim()
   }
 }
