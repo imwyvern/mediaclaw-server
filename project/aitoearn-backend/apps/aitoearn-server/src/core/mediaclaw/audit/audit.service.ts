@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { AuditLog } from '@yikart/mongodb'
-import { Model, Types } from 'mongoose'
+import { FilterQuery, Model, Types } from 'mongoose'
 
 interface AuditEvent {
   orgId: string
@@ -14,7 +14,7 @@ interface AuditEvent {
   userAgent?: string
 }
 
-interface AuditFilters {
+export interface AuditFilters {
   action?: string
   resource?: string
   resourceId?: string
@@ -68,8 +68,27 @@ export class AuditService {
     const page = Math.max(1, Number(pagination.page) || 1)
     const limit = Math.max(1, Math.min(Number(pagination.limit) || 20, 100))
     const skip = (page - 1) * limit
+    const query = this.buildQuery(orgId, filters)
 
-    const query: Record<string, any> = {
+    const [items, total] = await Promise.all([
+      this.auditLogModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean().exec(),
+      this.auditLogModel.countDocuments(query),
+    ])
+
+    return {
+      items: items.map(item => this.serializeLog(item)),
+      total,
+      page,
+      limit,
+    }
+  }
+
+  buildQuery(orgId: string, filters: AuditFilters = {}): FilterQuery<AuditLog> {
+    if (!Types.ObjectId.isValid(orgId)) {
+      throw new BadRequestException('orgId is invalid')
+    }
+
+    const query: FilterQuery<AuditLog> = {
       orgId: new Types.ObjectId(orgId),
     }
 
@@ -99,27 +118,31 @@ export class AuditService {
       }
     }
 
-    const [items, total] = await Promise.all([
-      this.auditLogModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean().exec(),
-      this.auditLogModel.countDocuments(query),
-    ])
+    return query
+  }
 
+  createExportCursor(orgId: string, filters: AuditFilters = {}) {
+    const query = this.buildQuery(orgId, filters)
+    return this.auditLogModel.find(query).sort({ createdAt: -1 }).lean().cursor()
+  }
+
+  serializeLog(item: Record<string, any>) {
     return {
-      items: items.map(item => ({
-        id: item._id?.toString(),
-        orgId: item.orgId?.toString() || null,
-        userId: item.userId,
-        action: item.action,
-        resource: item.resource,
-        resourceId: item.resourceId,
-        details: item.details,
-        ipAddress: item.ipAddress,
-        userAgent: item.userAgent,
-        createdAt: item.createdAt,
-      })),
-      total,
-      page,
-      limit,
+      id: item['_id']?.toString?.() || '',
+      orgId: item['orgId']?.toString?.() || null,
+      userId: item['userId'] || '',
+      userName: item['userName'] || '',
+      action: item['action'] || '',
+      resource: item['resource'] || '',
+      target: item['target'] || '',
+      resourceId: item['resourceId'] || '',
+      details: item['details'] || {},
+      meta: item['meta'] || {},
+      ip: item['ip'] || '',
+      ipAddress: item['ipAddress'] || '',
+      userAgent: item['userAgent'] || '',
+      createdAt: item['createdAt'] || null,
+      updatedAt: item['updatedAt'] || null,
     }
   }
 }
