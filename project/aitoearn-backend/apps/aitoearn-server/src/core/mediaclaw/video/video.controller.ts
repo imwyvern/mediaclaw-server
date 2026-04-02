@@ -4,7 +4,7 @@ import { VideoTaskStatus, VideoTaskType } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { VideoService } from './video.service'
 
-@MediaClawApiController('api/v1/video')
+@MediaClawApiController(['api/v1/video', 'api/v1/videos'])
 export class VideoController {
   constructor(private readonly videoService: VideoService) {}
 
@@ -14,9 +14,39 @@ export class VideoController {
     pipelineId?: string
     taskType: VideoTaskType
     sourceVideoUrl: string
+    source?: {
+      type?: string
+      url?: string
+      videoId?: string
+    }
     metadata?: Record<string, any>
   }) {
     return this.videoService.createTask(user.orgId || user.id, user.id, body)
+  }
+
+  @Post('batches')
+  async createBatch(@GetToken() user: any, @Body() body: {
+    brandId?: string
+    batchName: string
+    tasks: Array<{
+      brandId?: string
+      pipelineId?: string
+      taskType: VideoTaskType
+      sourceVideoUrl: string
+      source?: {
+        type?: string
+        url?: string
+        videoId?: string
+      }
+      metadata?: Record<string, any>
+    }>
+  }) {
+    return this.videoService.createBatch(user.orgId || user.id, user.id, body)
+  }
+
+  @Get('batches/:id')
+  async getBatchStatus(@GetToken() user: any, @Param('id') id: string) {
+    return this.videoService.getBatchStatus(user.orgId || user.id, id)
   }
 
   @Get()
@@ -30,9 +60,14 @@ export class VideoController {
     return this.videoService.listTasks(user.orgId || user.id, user.id, {
       status,
       brandId,
-      page: page ? Number.parseInt(page) : 1,
-      limit: limit ? Number.parseInt(limit) : 20,
+      page: page ? Number.parseInt(page, 10) : 1,
+      limit: limit ? Number.parseInt(limit, 10) : 20,
     })
+  }
+
+  @Get(':id/iterations')
+  async getIterations(@GetToken() user: any, @Param('id') id: string) {
+    return this.videoService.getIterations(user.orgId || user.id, id)
   }
 
   @Get(':id')
