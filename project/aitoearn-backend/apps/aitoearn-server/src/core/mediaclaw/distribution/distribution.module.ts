@@ -6,6 +6,7 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { EmployeeDispatchModule } from '../employee-dispatch/employee-dispatch.module'
 import { WebhookModule } from '../webhook/webhook.module'
 import { DistributionController } from './distribution.controller'
 import { DistributionService } from './distribution.service'
@@ -17,6 +18,7 @@ import { DistributionService } from './distribution.service'
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
     WebhookModule,
+    EmployeeDispatchModule,
   ],
   controllers: [DistributionController],
   providers: [DistributionService],

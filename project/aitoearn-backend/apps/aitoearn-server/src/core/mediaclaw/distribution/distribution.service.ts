@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
@@ -15,6 +16,7 @@ import {
 import { Model, Types } from 'mongoose'
 import { isDistributableVideoTaskStatus } from '../video-task-status.utils'
 import { WebhookService } from '../webhook/webhook.service'
+import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 
 export enum DistributionPublishStatus {
   COMPLETED = 'completed',
@@ -65,6 +67,8 @@ export class DistributionService {
     @InjectModel(VideoTask.name)
     private readonly videoTaskModel: Model<VideoTask>,
     private readonly webhookService: WebhookService,
+    @Optional()
+    private readonly employeeDispatchService?: EmployeeDispatchService,
   ) {}
 
   async createRule(orgId: string, data: DistributionRulePayload) {
@@ -303,20 +307,33 @@ export class DistributionService {
   }
 
   async notifyTaskComplete(task: VideoTask) {
+    const taskId = task._id?.toString()
+    const orgId = task.orgId?.toString() || null
+    const employeeDispatch = this.employeeDispatchService
+      ? await this.employeeDispatchService.dispatchToEmployee(task).catch((error) => {
+          this.logger.warn({
+            message: 'Employee dispatch failed after task completion',
+            taskId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          return null
+        })
+      : null
+
     this.logger.log({
       message: 'MediaClaw task completion notification queued',
-      taskId: task._id?.toString(),
+      taskId,
       userId: task.userId,
-      orgId: task.orgId?.toString() || null,
+      orgId,
       outputVideoUrl: task.outputVideoUrl,
-      channel: 'stub',
+      employeeDispatch,
       target: task.metadata?.['webhookUrl'] || task.metadata?.['imGroupId'] || null,
     })
 
     await this.webhookService.trigger('task.completed', {
-      taskId: task._id?.toString(),
+      taskId,
       userId: task.userId,
-      orgId: task.orgId?.toString() || null,
+      orgId,
       brandId: task.brandId?.toString() || null,
       pipelineId: task.pipelineId?.toString() || null,
       status: task.status,
@@ -325,6 +342,7 @@ export class DistributionService {
       copy: task.copy,
       quality: task.quality,
       metadata: task.metadata,
+      employeeDispatch,
     })
   }
 

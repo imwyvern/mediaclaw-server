@@ -3,16 +3,15 @@ import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { DistributionRuleType } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
-import {
-  DistributionPublishStatus,
-
-  DistributionService,
-
-} from './distribution.service'
+import { EmployeeDispatchService } from './employee-dispatch.service'
+import { DistributionPublishStatus, DistributionService } from './distribution.service'
 
 @MediaClawApiController('api/v1/distribution')
 export class DistributionController {
-  constructor(private readonly distributionService: DistributionService) {}
+  constructor(
+    private readonly distributionService: DistributionService,
+    private readonly employeeDispatchService: EmployeeDispatchService,
+  ) {}
 
   @Post()
   async createRule(
@@ -22,9 +21,45 @@ export class DistributionController {
       orgId?: string
     },
   ) {
-    return this.distributionService.createRule(
+    return this.distributionService.createRule(user.orgId || user.id || '', body)
+  }
+
+  @Get('employee-assignments')
+  async listAssignments(@GetToken() user: { orgId?: string, id?: string }) {
+    return this.employeeDispatchService.listAssignments(user.orgId || user.id || '')
+  }
+
+  @Post('employee-assignments')
+  async assignEmployee(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: { employeeId: string, platformAccountId: string },
+  ) {
+    return this.employeeDispatchService.assignEmployee(
       user.orgId || user.id || '',
-      body,
+      body.employeeId,
+      body.platformAccountId,
+    )
+  }
+
+  @Post('employee-dispatch/:contentId')
+  async dispatchToEmployee(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('contentId') contentId: string,
+  ) {
+    return this.employeeDispatchService.dispatchToEmployee(contentId, user.orgId || user.id || '')
+  }
+
+  @Post('employee-assignments/:id/confirm')
+  async confirmPublished(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+    @Body() body: { publishUrl: string, contentId?: string },
+  ) {
+    return this.employeeDispatchService.confirmPublished(
+      user.orgId || user.id || '',
+      id,
+      body.publishUrl,
+      body.contentId,
     )
   }
 
@@ -59,10 +94,7 @@ export class DistributionController {
       content: Record<string, unknown>
     },
   ) {
-    return this.distributionService.evaluateRules(
-      user.orgId || user.id || '',
-      body.content,
-    )
+    return this.distributionService.evaluateRules(user.orgId || user.id || '', body.content)
   }
 
   @Post('push')

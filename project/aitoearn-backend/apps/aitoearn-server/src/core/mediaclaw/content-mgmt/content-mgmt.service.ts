@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
@@ -19,6 +20,7 @@ import {
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 import { NotificationService } from '../notification/notification.service'
 import { WebhookService } from '../webhook/webhook.service'
 
@@ -67,6 +69,8 @@ export class ContentMgmtService {
     private readonly mediaClawUserModel: Model<MediaClawUser>,
     private readonly notificationService: NotificationService,
     private readonly webhookService: WebhookService,
+    @Optional()
+    private readonly employeeDispatchService?: EmployeeDispatchService,
   ) {}
 
   async initializeWorkflowForTask(taskId: string) {
@@ -365,6 +369,10 @@ export class ContentMgmtService {
 
     if (!updated) {
       throw new NotFoundException('Content not found')
+    }
+
+    if (this.employeeDispatchService) {
+      await this.employeeDispatchService.confirmPublished(orgId, contentId).catch(() => undefined)
     }
 
     await this.emitContentEvent(updated, NotificationEvent.CONTENT_PUBLISHED, {

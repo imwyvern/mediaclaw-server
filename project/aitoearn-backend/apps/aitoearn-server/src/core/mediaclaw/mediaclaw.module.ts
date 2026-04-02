@@ -41,6 +41,8 @@ import {
   ReportSchema,
   Subscription,
   SubscriptionSchema,
+  UsageHistory,
+  UsageHistorySchema,
   VideoPack,
   VideoPackSchema,
   VideoTask,
@@ -70,6 +72,7 @@ import { CrawlerModule } from './crawler/crawler.module'
 import { DataDashboardModule } from './data-dashboard/data-dashboard.module'
 import { DiscoveryModule } from './discovery/discovery.module'
 import { DistributionModule } from './distribution/distribution.module'
+import { EmployeeDispatchModule } from './employee-dispatch/employee-dispatch.module'
 import { HealthModule } from './health/health.module'
 import { MarketplaceModule } from './marketplace/marketplace.module'
 import { NotificationModule } from './notification/notification.module'
@@ -79,6 +82,7 @@ import { PipelineSystemModule } from './pipeline-system/pipeline-system.module'
 import { PipelineModule } from './pipeline/pipeline.module'
 import { PlatformAccountModule } from './platform-account/platform-account.module'
 import { ReportModule } from './report/report.module'
+import { SettingsModule } from './settings/settings.module'
 import { SkillModule } from './skill/skill.module'
 import { TaskMgmtModule } from './task-mgmt/task-mgmt.module'
 import { UsageModule } from './usage/usage.module'
@@ -114,6 +118,7 @@ const workerModuleImports = process.env['MEDIACLAW_ENABLE_WORKER'] === 'false'
       { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
       { name: PaymentOrder.name, schema: PaymentOrderSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
+      { name: UsageHistory.name, schema: UsageHistorySchema },
       { name: Invoice.name, schema: InvoiceSchema },
       { name: Webhook.name, schema: WebhookSchema },
       { name: ViralContent.name, schema: ViralContentSchema },
@@ -129,7 +134,9 @@ const workerModuleImports = process.env['MEDIACLAW_ENABLE_WORKER'] === 'false'
     McAccountModule,
     CopyModule,
     DistributionModule,
+    EmployeeDispatchModule,
     MediaClawApiKeyModule,
+    SettingsModule,
     SkillModule,
     AnalyticsModule,
     AuditModule,

@@ -10,6 +10,7 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { EmployeeDispatchModule } from '../employee-dispatch/employee-dispatch.module'
 import { NotificationModule } from '../notification/notification.module'
 import { WebhookModule } from '../webhook/webhook.module'
 import { ContentMgmtController } from './content-mgmt.controller'
@@ -25,6 +26,7 @@ import { ContentMgmtService } from './content-mgmt.service'
     ]),
     NotificationModule,
     WebhookModule,
+    EmployeeDispatchModule,
   ],
   controllers: [ContentMgmtController],
   providers: [ContentMgmtService],
