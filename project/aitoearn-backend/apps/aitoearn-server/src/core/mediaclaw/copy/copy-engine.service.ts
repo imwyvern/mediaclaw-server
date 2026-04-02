@@ -1,9 +1,11 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { Brand, CopyHistory } from '@yikart/mongodb'
+import { Brand, CopyHistory, OrgApiKeyProvider, UsageHistoryType } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { ByokService } from '../settings/byok.service'
+import { UsageService } from '../usage/usage.service'
 
 export interface GeneratedCopy {
   title: string
@@ -13,6 +15,8 @@ export interface GeneratedCopy {
   commentGuide: string
   commentGuides: string[]
 }
+
+type CopyProvider = 'deepseek' | 'gemini' | 'heuristic'
 
 interface CopyHistoryPayload extends GeneratedCopy {
   orgId?: string | null
@@ -34,12 +38,31 @@ interface GeneratedCopyDraft {
   commentGuides?: unknown
 }
 
+interface CopyTokenUsage {
+  inputTokens: number
+  outputTokens: number
+  model: string
+  cost: number
+}
+
+interface CopyLlmResult {
+  draft: GeneratedCopyDraft | null
+  tokenUsage: CopyTokenUsage
+  provider: CopyProvider
+}
+
 interface DeepSeekResponse {
   choices?: Array<{
     message?: {
       content?: string
     }
   }>
+  model?: string
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  }
 }
 
 interface GeminiResponse {
@@ -50,6 +73,12 @@ interface GeminiResponse {
       }>
     }
   }>
+  modelVersion?: string
+  usageMetadata?: {
+    promptTokenCount?: number
+    candidatesTokenCount?: number
+    totalTokenCount?: number
+  }
 }
 
 @Injectable()
@@ -59,6 +88,8 @@ export class CopyEngineService {
   constructor(
     @InjectModel(Brand.name) private readonly brandModel: Model<Brand>,
     @InjectModel(CopyHistory.name) private readonly copyHistoryModel: Model<CopyHistory>,
+    @Optional() private readonly usageService?: UsageService,
+    @Optional() private readonly byokService?: ByokService,
   ) {}
 
   async generateCopy(
@@ -88,7 +119,7 @@ export class CopyEngineService {
       ? await this.getHistoricalExamples(brand.orgId.toString())
       : []
 
-    const llmDraft = await this.generateWithProvider({
+    const llmResult = await this.generateWithProvider({
       brandName,
       toneKeywords,
       avoidKeywords,
@@ -103,7 +134,7 @@ export class CopyEngineService {
     })
 
     const generated = this.normalizeGeneratedCopy({
-      draft: llmDraft,
+      draft: llmResult.draft,
       brandName,
       scene,
       toneKeywords,
@@ -111,9 +142,15 @@ export class CopyEngineService {
       dedupDuplicate: dedup.isDuplicate,
     })
 
+    await this.recordLlmUsage(
+      llmResult,
+      metadata,
+      this.normalizeObjectIdString(brand?._id) || this.normalizeObjectIdString(brandId),
+    )
+
     await this.recordCopyHistory({
       orgId: brand?.orgId?.toString(),
-      taskId: typeof metadata['taskId'] === 'string' ? metadata['taskId'] : null,
+      taskId: this.normalizeObjectIdString(metadata['taskId']),
       ...generated,
     })
 
@@ -235,49 +272,50 @@ export class CopyEngineService {
     historyExamples: HistoricalCopyExample[]
     dedupMatches: Array<{ title: string, subtitle: string }>
     metadata: Record<string, any>
-  }): Promise<GeneratedCopyDraft | null> {
-    const provider = this.resolveProvider()
+  }): Promise<CopyLlmResult> {
+    const provider = await this.resolveProvider(input.metadata)
     const prompt = this.buildPrompt(input)
 
     try {
       switch (provider) {
         case 'deepseek':
-          return await this.generateWithDeepSeek(prompt)
+          return await this.generateWithDeepSeek(prompt, input.metadata)
         case 'gemini':
-          return await this.generateWithGemini(prompt)
+          return await this.generateWithGemini(prompt, input.metadata)
         default:
-          return null
+          return this.createEmptyLlmResult('heuristic')
       }
     }
     catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown copy provider error'
       this.logger.warn(`文案 LLM 调用失败，降级为 heuristic: ${message}`)
-      return null
+      return this.createEmptyLlmResult('heuristic')
     }
   }
 
-  private resolveProvider() {
+  private async resolveProvider(metadata: Record<string, any>): Promise<CopyProvider> {
     const configuredProvider = process.env['MEDIACLAW_COPY_PROVIDER']?.trim().toLowerCase()
-    if (configuredProvider === 'deepseek' && process.env['MEDIACLAW_DEEPSEEK_API_KEY']?.trim()) {
+    const deepseekKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
+    const geminiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
+    if (configuredProvider === 'deepseek' && deepseekKey) {
       return 'deepseek'
     }
-    if (configuredProvider === 'gemini' && process.env['MEDIACLAW_GEMINI_API_KEY']?.trim()) {
+    if (configuredProvider === 'gemini' && geminiKey) {
       return 'gemini'
     }
     if (configuredProvider === 'heuristic') {
       return 'heuristic'
     }
 
-    if (process.env['MEDIACLAW_DEEPSEEK_API_KEY']?.trim()) {
+    if (deepseekKey) {
       return 'deepseek'
     }
-    if (process.env['MEDIACLAW_GEMINI_API_KEY']?.trim()) {
+    if (geminiKey) {
       return 'gemini'
     }
 
     return 'heuristic'
   }
-
   private buildPrompt(input: {
     brandName: string
     toneKeywords: string[]
@@ -317,10 +355,10 @@ export class CopyEngineService {
     ].join('\n')
   }
 
-  private async generateWithDeepSeek(prompt: string): Promise<GeneratedCopyDraft | null> {
-    const apiKey = process.env['MEDIACLAW_DEEPSEEK_API_KEY']?.trim()
+  private async generateWithDeepSeek(prompt: string, metadata: Record<string, any>): Promise<CopyLlmResult> {
+    const apiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
     if (!apiKey) {
-      return null
+      return this.createEmptyLlmResult('heuristic')
     }
 
     const baseUrl = process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com'
@@ -346,14 +384,26 @@ export class CopyEngineService {
       },
     )
 
-    const content = response.choices?.[0]?.message?.content
-    return content ? this.parseDraft(content) : null
+    const content = response.choices?.[0]?.message?.content || ''
+
+    return {
+      draft: content ? this.parseDraft(content) : null,
+      tokenUsage: this.buildTokenUsage({
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        totalTokens: response.usage?.total_tokens,
+        model: response.model || model,
+        prompt,
+        completion: content,
+      }),
+      provider: 'deepseek',
+    }
   }
 
-  private async generateWithGemini(prompt: string): Promise<GeneratedCopyDraft | null> {
-    const apiKey = process.env['MEDIACLAW_GEMINI_API_KEY']?.trim()
+  private async generateWithGemini(prompt: string, metadata: Record<string, any>): Promise<CopyLlmResult> {
+    const apiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
     if (!apiKey) {
-      return null
+      return this.createEmptyLlmResult('heuristic')
     }
 
     const baseUrl = process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta'
@@ -381,10 +431,37 @@ export class CopyEngineService {
       },
     )
 
-    const text = response.candidates?.[0]?.content?.parts?.[0]?.text
-    return text ? this.parseDraft(text) : null
+    const text = response.candidates?.[0]?.content?.parts?.[0]?.text || ''
+
+    return {
+      draft: text ? this.parseDraft(text) : null,
+      tokenUsage: this.buildTokenUsage({
+        inputTokens: response.usageMetadata?.promptTokenCount,
+        outputTokens: response.usageMetadata?.candidatesTokenCount,
+        totalTokens: response.usageMetadata?.totalTokenCount,
+        model: response.modelVersion || model,
+        prompt,
+        completion: text,
+      }),
+      provider: 'gemini',
+    }
   }
 
+  private async resolveApiKey(
+    metadata: Record<string, any>,
+    provider: OrgApiKeyProvider,
+    fallbackEnvName: string,
+  ) {
+    const orgId = this.readMetadataObjectId(metadata, 'orgId')
+    if (this.byokService) {
+      const key = await this.byokService.getProviderRuntimeKey(orgId, provider, fallbackEnvName)
+      if (key) {
+        return key
+      }
+    }
+
+    return process.env[fallbackEnvName]?.trim() || ''
+  }
   private normalizeGeneratedCopy(input: {
     draft: GeneratedCopyDraft | null
     brandName: string
@@ -505,6 +582,122 @@ export class CopyEngineService {
     }
 
     return normalized.slice(0, 3)
+  }
+
+  private createEmptyLlmResult(provider: CopyProvider): CopyLlmResult {
+    return {
+      draft: null,
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        model: '',
+        cost: 0,
+      },
+      provider,
+    }
+  }
+
+  private buildTokenUsage(input: {
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    model?: string
+    cost?: number
+    prompt?: string
+    completion?: string
+  }): CopyTokenUsage {
+    let inputTokens = this.normalizeTokenCount(input.inputTokens)
+    let outputTokens = this.normalizeTokenCount(input.outputTokens)
+    const totalTokens = this.normalizeTokenCount(input.totalTokens)
+
+    if (inputTokens <= 0 && input.prompt) {
+      inputTokens = this.estimateTokenCount(input.prompt)
+    }
+
+    if (outputTokens <= 0 && input.completion) {
+      outputTokens = this.estimateTokenCount(input.completion)
+    }
+
+    if (totalTokens > 0 && inputTokens <= 0) {
+      inputTokens = Math.max(totalTokens - outputTokens, 0)
+    }
+
+    if (totalTokens > 0 && outputTokens <= 0) {
+      outputTokens = Math.max(totalTokens - inputTokens, 0)
+    }
+
+    return {
+      inputTokens,
+      outputTokens,
+      model: input.model?.trim() || '',
+      cost: this.normalizeCost(input.cost),
+    }
+  }
+
+  private estimateTokenCount(text: string) {
+    const normalized = text.trim()
+    if (!normalized) {
+      return 0
+    }
+
+    return Math.max(1, Math.ceil(normalized.length / 4))
+  }
+
+  private normalizeTokenCount(value: unknown) {
+    const normalized = Number(value || 0)
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      return 0
+    }
+
+    return Math.trunc(normalized)
+  }
+
+  private normalizeCost(value: unknown) {
+    const normalized = Number(value || 0)
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      return 0
+    }
+
+    return Number(normalized.toFixed(6))
+  }
+
+  private async recordLlmUsage(
+    result: CopyLlmResult,
+    metadata: Record<string, any>,
+    brandId: string | null,
+  ) {
+    if (!this.usageService) {
+      return
+    }
+
+    const userId = this.readMetadataObjectId(metadata, 'userId')
+    if (!userId) {
+      return
+    }
+
+    const hasTokenUsage = result.tokenUsage.inputTokens > 0 || result.tokenUsage.outputTokens > 0
+    if (!hasTokenUsage && result.provider === 'heuristic') {
+      return
+    }
+
+    try {
+      await this.usageService.recordTokenUsage(
+        userId,
+        this.readMetadataObjectId(metadata, 'orgId'),
+        UsageHistoryType.COPY_GENERATION,
+        result.tokenUsage,
+        {
+          taskId: this.readMetadataObjectId(metadata, 'taskId'),
+          brandId,
+          provider: result.provider,
+          source: 'copy-engine',
+        },
+      )
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown token usage error'
+      this.logger.warn(`记录文案 token 用量失败: ${message}`)
+    }
   }
 
   private coerceText(value: unknown) {
@@ -655,6 +848,31 @@ export class CopyEngineService {
   private readMetadataString(metadata: Record<string, any>, key: string) {
     const value = metadata[key]
     return typeof value === 'string' ? value.trim() : ''
+  }
+
+  private readMetadataObjectId(metadata: Record<string, any>, key: string) {
+    return this.normalizeObjectIdString(metadata[key])
+  }
+
+  private normalizeObjectIdString(value: unknown) {
+    if (!value) {
+      return null
+    }
+
+    if (typeof value === 'string') {
+      return Types.ObjectId.isValid(value) ? value : null
+    }
+
+    if (value instanceof Types.ObjectId) {
+      return value.toString()
+    }
+
+    if (typeof (value as { toString?: () => string }).toString === 'function') {
+      const normalized = (value as { toString: () => string }).toString()
+      return Types.ObjectId.isValid(normalized) ? normalized : null
+    }
+
+    return null
   }
 
   private async requestJson<T>(

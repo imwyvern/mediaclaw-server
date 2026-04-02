@@ -1,39 +1,76 @@
-import { BadRequestException, Get, Query } from '@nestjs/common'
+import { Get, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { UsageHistoryType } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { UsageService } from './usage.service'
 
-@MediaClawApiController('api/v1/usage')
+@MediaClawApiController('api/v1/account')
 export class UsageController {
   constructor(private readonly usageService: UsageService) {}
 
   @Get()
-  async summary(
-    @GetToken() user: any,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-  ) {
-    return this.usageService.getUsageSummary(user.orgId || user.id, {
-      startDate,
-      endDate,
+  async account(@GetToken() user: { id: string, orgId?: string | null }) {
+    return this.usageService.getAccountOverview({
+      userId: user.id,
+      orgId: user.orgId || null,
     })
   }
 
-  @Get('quota')
-  async quota(@GetToken() user: any) {
-    return this.usageService.getQuotaStatus(user.orgId || user.id)
+  @Get('usage')
+  async summary(
+    @GetToken() user: { id: string, orgId?: string | null },
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
+    const monthStart = new Date()
+    monthStart.setUTCDate(1)
+    monthStart.setUTCHours(0, 0, 0, 0)
+
+    return this.usageService.getUsageSummary(
+      {
+        userId: user.id,
+        orgId: user.orgId || null,
+      },
+      start || monthStart,
+      end || new Date(),
+    )
   }
 
-  @Get('rate-limit')
-  async rateLimit(
-    @GetToken() user: any,
-    @Query('apiKey') apiKey?: string,
+  @Get('usage/timeline')
+  async timeline(
+    @GetToken() user: { id: string, orgId?: string | null },
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+    @Query('granularity') granularity?: 'day' | 'week' | 'month',
   ) {
-    const resolvedApiKey = apiKey || user.apiKeyId || ''
-    if (!resolvedApiKey) {
-      throw new BadRequestException('apiKey is required')
-    }
+    return this.usageService.getUsageTimeline(
+      {
+        userId: user.id,
+        orgId: user.orgId || null,
+      },
+      start,
+      end,
+      granularity || 'day',
+    )
+  }
 
-    return this.usageService.getRateLimitStatus(resolvedApiKey)
+  @Get('usage/detail')
+  async detail(
+    @GetToken() user: { id: string, orgId?: string | null },
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('type') type?: UsageHistoryType,
+  ) {
+    return this.usageService.getUsageDetail(
+      {
+        userId: user.id,
+        orgId: user.orgId || null,
+      },
+      {
+        page: page ? Number.parseInt(page, 10) : 1,
+        limit: limit ? Number.parseInt(limit, 10) : 20,
+        type,
+      },
+    )
   }
 }
