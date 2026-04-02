@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, Optional } from '@nestjs/common'
+import { OrgApiKeyProvider } from '@yikart/mongodb'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PipelineFrameArtifact, PipelineJobContext } from './pipeline.types'
 import { downloadFile, requestJson, runCommand } from './pipeline.utils'
+import { ByokService } from '../settings/byok.service'
 
 interface KlingCreateResponse {
   id?: string
@@ -21,8 +23,12 @@ interface KlingStatusResponse {
 export class VideoGenService {
   private readonly logger = new Logger(VideoGenService.name)
 
+  constructor(
+    @Optional() private readonly byokService?: ByokService,
+  ) {}
+
   async generateSegments(context: PipelineJobContext) {
-    const provider = this.resolveProvider()
+    const provider = await this.resolveProvider(context.orgId)
     const segmentDurationSeconds = this.resolveSegmentDuration(context)
     const segmentPaths: string[] = []
 
@@ -132,20 +138,34 @@ export class VideoGenService {
     return finalOutputPath
   }
 
-  private resolveProvider() {
+  private async resolveProvider(orgId?: string | null) {
     const provider = process.env['MEDIACLAW_VIDEO_GEN_PROVIDER']?.trim().toLowerCase()
-    const apiKey = process.env['MEDIACLAW_KLING_API_KEY']?.trim()
+    const apiKey = await this.resolveApiKey(orgId)
     if (provider === 'vectorengine' && apiKey) {
       return 'vectorengine'
     }
 
     if (provider === 'vectorengine' && !apiKey) {
-      this.logger.warn('MEDIACLAW_KLING_API_KEY 缺失，视频生成降级为 mock 模式')
+      this.logger.warn('视频生成缺少可用 API key，降级为 mock 模式')
     }
 
     return 'mock'
   }
 
+  private async resolveApiKey(orgId?: string | null) {
+    if (this.byokService) {
+      const key = await this.byokService.getProviderRuntimeKey(
+        orgId,
+        OrgApiKeyProvider.KLING,
+        'MEDIACLAW_KLING_API_KEY',
+      )
+      if (key) {
+        return key
+      }
+    }
+
+    return process.env['MEDIACLAW_KLING_API_KEY']?.trim() || ''
+  }
   private resolveSegmentDuration(context: PipelineJobContext) {
     const segmentCount = context.frameArtifacts.length || 3
     return Number(Math.max(context.targetDurationSeconds / segmentCount, 3).toFixed(3))
@@ -189,7 +209,7 @@ export class VideoGenService {
     const baseUrl = process.env['MEDIACLAW_KLING_BASE_URL']?.trim() || 'https://api.vectorengine.ai'
     const createPath = process.env['MEDIACLAW_KLING_CREATE_PATH']?.trim() || '/v1/videos'
     const statusPathTemplate = process.env['MEDIACLAW_KLING_STATUS_PATH']?.trim() || '/v1/videos/{taskId}'
-    const apiKey = process.env['MEDIACLAW_KLING_API_KEY']?.trim()
+    const apiKey = await this.resolveApiKey(context.orgId)
     const model = process.env['MEDIACLAW_KLING_MODEL']?.trim() || 'kling-v3-omni'
     if (!apiKey) {
       await this.generateMockSegment(context, frame, outputPath, durationSeconds)
@@ -198,12 +218,13 @@ export class VideoGenService {
 
     const inputPath = frame.editedPath || frame.sourcePath
     const imageBase64 = (await readFile(inputPath)).toString('base64')
-    const prompt = [
+    const prompt = context.prompts['render-video'] || [
       `Generate a short branded video clip for ${context.brand.name}.`,
       `Use the ${frame.label} frame as the driving image.`,
       `Keep it vertical ${context.renderWidth}x${context.renderHeight}.`,
       `The brand text will be added after subtitle rendering, so keep lower thirds clean.`,
     ].join(' ')
+    context.prompts['render-video'] = prompt
 
     const createResponse = await requestJson<KlingCreateResponse>(
       `${baseUrl.replace(/\/+$/, '')}${createPath}`,

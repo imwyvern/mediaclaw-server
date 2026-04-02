@@ -85,6 +85,7 @@ export interface PipelineSubtitleRenderResult {
 
 export interface PipelineJobContext {
   taskId: string
+  orgId?: string | null
   workspaceDir: string
   sourceVideoPath: string
   sourceMetadata: PipelineVideoMetadata
@@ -97,6 +98,7 @@ export interface PipelineJobContext {
   subtitles: PipelineSubtitleVariant[]
   dedupStrategy: PipelineDedupStrategy
   preserveSourceAudio: boolean
+  prompts: Record<string, string>
   composedVideoPath?: string
   subtitledVideoPath?: string
   finalVideoPath?: string

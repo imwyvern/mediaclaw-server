@@ -6,6 +6,7 @@ import { ContentMgmtService } from '../content-mgmt/content-mgmt.service'
 import { CopyService } from '../copy/copy.service'
 import { DistributionService } from '../distribution/distribution.service'
 import { PipelineService } from '../pipeline/pipeline.service'
+import { PromptOptimizerService } from '../pipeline/prompt-optimizer.service'
 import { VideoService } from '../video/video.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from './worker.constants'
 
@@ -30,6 +31,8 @@ export class VideoWorkerProcessor extends WorkerHost {
     private readonly pipelineService?: PipelineService,
     @Optional()
     private readonly contentMgmtService?: ContentMgmtService,
+    @Optional()
+    private readonly promptOptimizerService?: PromptOptimizerService,
   ) {
     super()
   }
@@ -39,6 +42,11 @@ export class VideoWorkerProcessor extends WorkerHost {
     const { taskId } = job.data
     let context = job.data.context
 
+    await this.videoService.startIterationStep(taskId, step, {
+      attempt: job.attemptsMade + 1,
+      hasContext: Boolean(context),
+    })
+
     try {
       const task = typeof this.videoService.getTaskForWorker === 'function'
         ? await this.videoService.getTaskForWorker(taskId)
@@ -46,31 +54,37 @@ export class VideoWorkerProcessor extends WorkerHost {
 
       switch (step) {
         case 'analyze-source':
-          await this.videoService.updateStatus(taskId, VideoTaskStatus.ANALYZING)
+          await this.videoService.updateStatus(taskId, VideoTaskStatus.ANALYZING, { step })
           context = await this.requirePipelineService().analyzeSource(task)
           break
         case 'edit-frames':
-          await this.videoService.updateStatus(taskId, VideoTaskStatus.EDITING)
+          await this.videoService.updateStatus(taskId, VideoTaskStatus.EDITING, { step })
           context = await this.requirePipelineService().editFrames(this.requireContext(context))
           break
         case 'render-video':
-          await this.videoService.updateStatus(taskId, VideoTaskStatus.RENDERING)
+          await this.videoService.updateStatus(taskId, VideoTaskStatus.RENDERING, { step })
           context = await this.requirePipelineService().renderVideo(task, this.requireContext(context))
           await this.videoService.updateStatus(taskId, VideoTaskStatus.RENDERING, {
+            step,
             outputVideoUrl: context.outputVideoUrl,
             deepSynthesis: context.deepSynthesisMarker?.manifest,
           })
           break
         case 'quality-check': {
-          await this.videoService.updateStatus(taskId, VideoTaskStatus.QUALITY_CHECK)
+          await this.videoService.updateStatus(taskId, VideoTaskStatus.QUALITY_CHECK, { step })
           const report = await this.requirePipelineService().runQualityCheck(this.requireContext(context))
           await this.videoService.updateStatus(taskId, VideoTaskStatus.QUALITY_CHECK, {
+            step,
             quality: report.metrics,
           })
+          context = {
+            ...this.requireContext(context),
+            qualityReport: report,
+          } as any
           break
         }
         case 'generate-copy': {
-          await this.videoService.updateStatus(taskId, VideoTaskStatus.GENERATING_COPY)
+          await this.videoService.updateStatus(taskId, VideoTaskStatus.GENERATING_COPY, { step })
           const outputVideoUrl = context?.outputVideoUrl || task.outputVideoUrl || task.sourceVideoUrl
           const copy = await this.copyService.generateCopy(
             task.brandId?.toString(),
@@ -78,12 +92,21 @@ export class VideoWorkerProcessor extends WorkerHost {
             {
               ...task.metadata,
               taskId,
+              userId: task.userId,
+              orgId: task.orgId?.toString() || null,
+              brandId: task.brandId?.toString() || null,
             },
           )
           const completedTask = await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
+            step,
             outputVideoUrl,
             quality: task.quality,
             copy,
+          })
+          await this.videoService.completeIterationStep(taskId, step, {
+            outputVideoUrl,
+            title: copy.title,
+            hashtags: copy.hashtags,
           })
           if (completedTask) {
             const reviewAwareTask = this.contentMgmtService
@@ -99,6 +122,12 @@ export class VideoWorkerProcessor extends WorkerHost {
           this.logger.warn(`Unknown worker step received: ${job.name}`)
           return
       }
+
+      await this.videoService.completeIterationStep(taskId, step, this.buildStepOutput(step, context))
+      await this.videoService.updateTaskMetadata(taskId, {
+        pipelineContext: this.serializeContext(context),
+        failedStep: null,
+      })
 
       const nextStep = NEXT_STEP_MAP[step]
       if (!nextStep) {
@@ -120,12 +149,27 @@ export class VideoWorkerProcessor extends WorkerHost {
       const message = error instanceof Error ? error.message : 'Unknown worker error'
 
       await this.videoService.recordRetry(taskId, attemptsMade, message)
+      await this.videoService.failIterationStep(taskId, step, message, this.buildStepOutput(step, context))
+      await this.videoService.updateTaskMetadata(taskId, {
+        pipelineContext: this.serializeContext(context),
+        failedStep: step,
+      })
 
       if (attemptsMade >= maxAttempts) {
+        await this.promptOptimizerService?.analyzeFailure(taskId).catch((analysisError) => {
+          this.logger.warn(`Prompt optimizer analyzeFailure failed for ${taskId}: ${analysisError instanceof Error ? analysisError.message : String(analysisError)}`)
+        })
         await this.videoService.updateStatus(taskId, VideoTaskStatus.FAILED, {
           errorMessage: message,
+          step,
+          metadata: {
+            failedStep: step,
+          },
         })
-        await this.pipelineService?.cleanupWorkspace(context)
+
+        if (!this.promptOptimizerService || !context) {
+          await this.pipelineService?.cleanupWorkspace(context)
+        }
       }
 
       throw error
@@ -153,7 +197,47 @@ export class VideoWorkerProcessor extends WorkerHost {
     return this.pipelineService
   }
 
-  private async sleep() {
-    return undefined
+  private buildStepOutput(step: VideoWorkerStep, context: VideoWorkerJobData['context']) {
+    if (!context) {
+      return {}
+    }
+
+    switch (step) {
+      case 'analyze-source':
+        return {
+          durationSeconds: context.sourceMetadata?.durationSeconds || 0,
+          renderWidth: context.renderWidth,
+          renderHeight: context.renderHeight,
+          frameCount: context.frameArtifacts?.length || 0,
+        }
+      case 'edit-frames':
+        return {
+          frameCount: context.frameArtifacts?.length || 0,
+          brandName: context.brand?.name || '',
+        }
+      case 'render-video':
+        return {
+          outputVideoUrl: context.outputVideoUrl || '',
+          segmentCount: context.segmentVideoPaths?.length || 0,
+        }
+      case 'quality-check':
+        return {
+          finalVideoPath: context.finalVideoPath || '',
+        }
+      case 'generate-copy':
+        return {
+          outputVideoUrl: context.outputVideoUrl || '',
+        }
+      default:
+        return {}
+    }
+  }
+
+  private serializeContext(context: VideoWorkerJobData['context']) {
+    if (!context) {
+      return null
+    }
+
+    return JSON.parse(JSON.stringify(context))
   }
 }

@@ -110,6 +110,7 @@ export class PipelineService {
 
     return {
       taskId: task._id.toString(),
+      orgId: task.orgId?.toString() || null,
       workspaceDir,
       sourceVideoPath,
       sourceMetadata,
@@ -127,6 +128,7 @@ export class PipelineService {
         sourceMetadata.hasAudio,
       ),
       preserveSourceAudio: sourceMetadata.hasAudio && this.readBoolean(task.metadata, 'reuseSourceAudio', true),
+      prompts: {},
     }
   }
 

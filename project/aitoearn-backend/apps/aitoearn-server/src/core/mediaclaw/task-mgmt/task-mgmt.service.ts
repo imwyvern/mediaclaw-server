@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
@@ -15,6 +16,7 @@ import {
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import { BillingService } from '../billing/billing.service'
+import { UsageService } from '../usage/usage.service'
 import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData } from '../worker/worker.constants'
 
 interface CreateTaskParams {
@@ -57,6 +59,8 @@ export class TaskMgmtService {
     private readonly billingService: BillingService,
     @InjectQueue(VIDEO_WORKER_QUEUE)
     private readonly videoWorkerQueue: Queue<VideoWorkerJobData>,
+    @Optional()
+    private readonly usageService?: UsageService,
   ) {}
 
   async createTask(orgId: string, params: CreateTaskParams) {
@@ -72,15 +76,14 @@ export class TaskMgmtService {
     await this.ensurePipelineBelongsToOrg(params.pipelineId, normalizedOrgId)
 
     const taskObjectId = new Types.ObjectId()
-    const charged = await this.billingService.deductCredit(
+    const requestedDurationSec = this.resolveRequestedDuration(params.metadata)
+    const chargeResult = await this.chargeTaskCredits(
       params.requestedBy,
+      normalizedOrgId.toString(),
       taskObjectId.toString(),
-      1,
+      requestedDurationSec,
+      params.metadata,
     )
-
-    if (!charged) {
-      throw new BadRequestException('Insufficient credits')
-    }
 
     const createdAt = new Date().toISOString()
     const timeline = [
@@ -88,28 +91,64 @@ export class TaskMgmtService {
       this.createTimelineEntry('queued', createdAt, 'Queued for processing', VideoTaskStatus.PENDING),
     ]
 
-    const task = await this.videoTaskModel.create({
-      _id: taskObjectId,
-      userId: params.requestedBy,
-      orgId: normalizedOrgId,
-      brandId: params.brandId ? this.toObjectId(params.brandId, 'brandId') : null,
-      pipelineId: params.pipelineId ? this.toObjectId(params.pipelineId, 'pipelineId') : null,
-      taskType: params.taskType,
-      status: VideoTaskStatus.PENDING,
-      sourceVideoUrl: params.sourceVideoUrl || '',
-      creditsConsumed: 1,
-      creditCharged: true,
-      metadata: {
-        ...(params.metadata || {}),
-        timeline,
-      },
-    })
+    let task: VideoTask | null = null
 
-    await this.videoWorkerQueue.add(
-      'analyze-source',
-      { taskId: task._id.toString() },
-      { jobId: `${task._id.toString()}:analyze-source` },
-    )
+    try {
+      task = await this.videoTaskModel.create({
+        _id: taskObjectId,
+        userId: params.requestedBy,
+        orgId: normalizedOrgId,
+        brandId: params.brandId ? this.toObjectId(params.brandId, 'brandId') : null,
+        pipelineId: params.pipelineId ? this.toObjectId(params.pipelineId, 'pipelineId') : null,
+        taskType: params.taskType,
+        status: VideoTaskStatus.PENDING,
+        sourceVideoUrl: params.sourceVideoUrl || '',
+        creditsConsumed: chargeResult.units,
+        creditCharged: true,
+        metadata: {
+          ...(params.metadata || {}),
+          timeline,
+          billing: {
+            packId: chargeResult.packId,
+            usageHistoryId: chargeResult.usageHistoryId,
+            requestedDurationSec,
+            chargedAt: createdAt,
+          },
+        },
+      })
+
+      await this.videoWorkerQueue.add(
+        'analyze-source',
+        { taskId: task._id.toString() },
+        { jobId: `${task._id.toString()}:analyze-source` },
+      )
+    }
+    catch (error) {
+      await this.refundTaskCredits(
+        params.requestedBy,
+        normalizedOrgId.toString(),
+        taskObjectId.toString(),
+        chargeResult.units,
+        {
+          reason: 'task_create_failed',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      )
+
+      if (task) {
+        await this.videoTaskModel.findByIdAndUpdate(task._id, {
+          $set: {
+            status: VideoTaskStatus.FAILED,
+            creditCharged: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            completedAt: new Date(),
+            'metadata.creditRefundedAt': new Date().toISOString(),
+          },
+        }).exec()
+      }
+
+      throw error
+    }
 
     return task
   }
@@ -173,7 +212,15 @@ export class TaskMgmtService {
     await this.removeQueuedJobs(task._id.toString())
 
     if (task.creditCharged) {
-      await this.billingService.refundCredit(task.userId, task.creditsConsumed || 1)
+      await this.refundTaskCredits(
+        task.userId,
+        task.orgId?.toString() || null,
+        task._id.toString(),
+        task.creditsConsumed || 1,
+        {
+          reason: 'task_cancelled',
+        },
+      )
     }
 
     const updated = await this.videoTaskModel.findByIdAndUpdate(
@@ -277,6 +324,81 @@ export class TaskMgmtService {
       taskId: task._id.toString(),
       timeline: this.normalizeTimeline(task),
     }
+  }
+
+  private async chargeTaskCredits(
+    userId: string,
+    orgId: string,
+    taskId: string,
+    durationSec: number,
+    metadata?: Record<string, any>,
+  ) {
+    if (this.usageService) {
+      return this.usageService.chargeVideo(userId, orgId, durationSec, {
+        videoTaskId: taskId,
+        metadata: {
+          ...(metadata || {}),
+          taskId,
+        },
+      })
+    }
+
+    const credits = this.resolveCreditUnits(durationSec)
+    const charged = await this.billingService.deductCredit(userId, taskId, credits)
+
+    if (!charged) {
+      throw new BadRequestException('Insufficient credits')
+    }
+
+    return {
+      usageHistoryId: null,
+      packId: null,
+      units: credits,
+    }
+  }
+
+  private async refundTaskCredits(
+    userId: string,
+    orgId: string,
+    taskId: string,
+    credits: number,
+    metadata: Record<string, any>,
+  ) {
+    if (this.usageService) {
+      return this.usageService.refundVideoCharge(userId, orgId, taskId, metadata)
+    }
+
+    return this.billingService.refundCredit(userId, credits)
+  }
+
+  private resolveRequestedDuration(metadata?: Record<string, any>) {
+    const candidates = [
+      metadata?.['targetDurationSeconds'],
+      metadata?.['durationSeconds'],
+      metadata?.['targetDuration'],
+      metadata?.['videoDurationSec'],
+      metadata?.['duration'],
+    ]
+
+    for (const candidate of candidates) {
+      const value = Number(candidate)
+      if (Number.isFinite(value) && value > 0) {
+        return value
+      }
+    }
+
+    return 15
+  }
+
+  private resolveCreditUnits(duration: number) {
+    if (duration <= 15) {
+      return 1
+    }
+    if (duration <= 30) {
+      return 2
+    }
+
+    return 4
   }
 
   private buildTaskQuery(orgId: string, filters: TaskFilters) {
