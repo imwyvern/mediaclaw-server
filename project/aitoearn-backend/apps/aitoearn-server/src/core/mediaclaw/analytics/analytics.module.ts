@@ -1,6 +1,13 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
-import { VideoTask, VideoTaskSchema } from '@yikart/mongodb'
+import {
+  VideoAnalytics,
+  VideoAnalyticsSchema,
+  VideoTask,
+  VideoTaskSchema,
+} from '@yikart/mongodb'
+import { AcquisitionModule } from '../acquisition/acquisition.module'
+import { AnalyticsCollectorService } from './analytics-collector.service'
 import { AnalyticsController } from './analytics.controller'
 import { AnalyticsService } from './analytics.service'
 
@@ -8,10 +15,12 @@ import { AnalyticsService } from './analytics.service'
   imports: [
     MongooseModule.forFeature([
       { name: VideoTask.name, schema: VideoTaskSchema },
+      { name: VideoAnalytics.name, schema: VideoAnalyticsSchema },
     ]),
+    AcquisitionModule,
   ],
   controllers: [AnalyticsController],
-  providers: [AnalyticsService],
-  exports: [AnalyticsService],
+  providers: [AnalyticsService, AnalyticsCollectorService],
+  exports: [AnalyticsService, AnalyticsCollectorService],
 })
 export class AnalyticsModule {}
