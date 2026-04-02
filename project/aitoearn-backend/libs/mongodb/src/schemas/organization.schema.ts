@@ -23,6 +23,55 @@ export enum OrgStatus {
   TRIAL = 'trial',
 }
 
+export enum OrgApiKeyProvider {
+  KLING = 'kling',
+  GEMINI = 'gemini',
+  DEEPSEEK = 'deepseek',
+  VCE = 'vce',
+}
+
+@Schema({ _id: false })
+class OrganizationVideoCredits {
+  @Prop({ type: Number, default: 0 })
+  quota: number
+
+  @Prop({ type: Number, default: 0 })
+  purchased: number
+
+  @Prop({ type: Number, default: 0 })
+  used: number
+
+  @Prop({ type: Number, default: 0 })
+  remaining: number
+
+  @Prop({ type: Number, default: 0 })
+  monthlyUsage: number
+
+  @Prop({ type: Number, default: 0 })
+  unitPrice: number
+
+  @Prop({ type: Number, default: 0 })
+  overagePrice: number
+}
+
+@Schema({ _id: false })
+class OrganizationApiKey {
+  @Prop({ type: String, enum: OrgApiKeyProvider, required: true })
+  provider: OrgApiKeyProvider
+
+  @Prop({ type: String, default: '' })
+  encryptedKey: string
+
+  @Prop({ type: Boolean, default: false })
+  isValid: boolean
+
+  @Prop({ type: Date, default: null })
+  lastValidatedAt: Date | null
+
+  @Prop({ type: Date, default: Date.now })
+  addedAt: Date
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'organizations' })
 export class Organization extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -58,8 +107,24 @@ export class Organization extends WithTimestampSchema {
   @Prop({ type: Date, default: null })
   subscriptionExpiresAt: Date | null
 
+  @Prop({ type: String, default: '' })
+  planId: string
+
+  @Prop({ type: OrganizationVideoCredits, default: () => ({}) })
+  videoCredits: OrganizationVideoCredits
+
+  @Prop({ type: [String], default: [] })
+  defaultPlatforms: string[]
+
+  @Prop({ type: String, default: 'Asia/Shanghai' })
+  timezone: string
+
+  @Prop({ type: [OrganizationApiKey], default: [] })
+  apiKeys: OrganizationApiKey[]
+
   @Prop({ type: Object, default: {} })
   settings: Record<string, any>
 }
 
 export const OrganizationSchema = SchemaFactory.createForClass(Organization)
+OrganizationSchema.index({ 'apiKeys.provider': 1 })
