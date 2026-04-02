@@ -85,6 +85,8 @@ export class PublishRecord extends WithTimestampSchema {
 
   @Prop({
     required: true,
+    type: String,
+    enum: AccountType,
   })
   accountType: AccountType
 

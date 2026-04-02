@@ -30,6 +30,7 @@ export class InteractionRecord extends WithTimestampSchema {
 
   @Prop({
     required: true,
+    type: String,
     enum: AccountType,
   })
   type: AccountType

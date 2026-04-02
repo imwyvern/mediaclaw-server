@@ -32,6 +32,7 @@ export class Account extends WithTimestampSchema {
 
   @Prop({
     required: true,
+    type: String,
     enum: AccountType,
     index: true,
   })
@@ -40,12 +41,14 @@ export class Account extends WithTimestampSchema {
   @Prop({
     required: true,
     index: true,
+    type: String,
   })
   uid: string
 
   @Prop({
     required: false,
     index: true,
+    type: String,
   })
   account: string
 
@@ -58,16 +61,19 @@ export class Account extends WithTimestampSchema {
 
   @Prop({
     required: false,
+    type: String,
   })
   avatar?: string
 
   @Prop({
     required: true,
+    type: String,
   })
   nickname: string
 
   @Prop({
     required: false,
+    type: String,
     enum: ClientType,
   })
   clientType?: ClientType
@@ -99,36 +105,42 @@ export class Account extends WithTimestampSchema {
 
   @Prop({
     required: true,
+    type: Number,
     default: 0,
   })
   fansCount: number
 
   @Prop({
     required: true,
+    type: Number,
     default: 0,
   })
   readCount: number
 
   @Prop({
     required: true,
+    type: Number,
     default: 0,
   })
   likeCount: number
 
   @Prop({
     required: true,
+    type: Number,
     default: 0,
   })
   collectCount: number
 
   @Prop({
     required: true,
+    type: Number,
     default: 0,
   })
   forwardCount: number
 
   @Prop({
     required: true,
+    type: Number,
     default: 0,
   })
   commentCount: number
@@ -141,12 +153,14 @@ export class Account extends WithTimestampSchema {
 
   @Prop({
     required: true,
+    type: Number,
     default: 0,
   })
   workCount: number
 
   @Prop({
     required: true,
+    type: Number,
     default: 0,
   })
   income: number
@@ -156,6 +170,7 @@ export class Account extends WithTimestampSchema {
 
   @Prop({
     required: true,
+    type: Number,
     default: AccountStatus.NORMAL,
     index: true,
   })

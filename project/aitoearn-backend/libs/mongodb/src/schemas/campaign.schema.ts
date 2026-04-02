@@ -23,6 +23,39 @@ class CampaignSchedule {
   timezone: string
 }
 
+@Schema({ _id: false })
+class CampaignPhase {
+  @Prop({ type: String, default: '' })
+  name: string
+
+  @Prop({ type: String, default: 'pending' })
+  status: string
+
+  @Prop({ type: Date, default: null })
+  startedAt: Date | null
+
+  @Prop({ type: Date, default: null })
+  completedAt: Date | null
+
+  @Prop({ type: Object, default: {} })
+  metadata: Record<string, any>
+}
+
+@Schema({ _id: false })
+class CampaignAnalyticsSnapshot {
+  @Prop({ type: Number, default: 0 })
+  views: number
+
+  @Prop({ type: Number, default: 0 })
+  likes: number
+
+  @Prop({ type: Number, default: 0 })
+  comments: number
+
+  @Prop({ type: Number, default: 0 })
+  publishedVideos: number
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'campaigns' })
 export class Campaign extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -49,6 +82,9 @@ export class Campaign extends WithTimestampSchema {
   @Prop({ type: [String], default: [] })
   targetPlatforms: string[]
 
+  @Prop({ type: [CampaignPhase], default: [] })
+  phases: CampaignPhase[]
+
   @Prop({ type: Number, default: 0 })
   totalPlanned: number
 
@@ -57,6 +93,18 @@ export class Campaign extends WithTimestampSchema {
 
   @Prop({ type: Number, default: 0 })
   totalPublished: number
+
+  @Prop({ type: Number, default: 0 })
+  quotaBudget: number
+
+  @Prop({ type: Number, default: 0 })
+  quotaUsed: number
+
+  @Prop({ type: String, default: '' })
+  createdBy: string
+
+  @Prop({ type: CampaignAnalyticsSnapshot, default: () => ({}) })
+  analytics: CampaignAnalyticsSnapshot
 
   @Prop({ type: Date, default: null })
   startDate: Date | null

@@ -15,6 +15,9 @@ export class AuditLog extends WithTimestampSchema {
   @Prop({ type: String, default: '' })
   userId: string
 
+  @Prop({ type: String, default: '' })
+  userName: string
+
   @Prop({ required: true, type: String, index: true })
   action: string
 
@@ -22,10 +25,19 @@ export class AuditLog extends WithTimestampSchema {
   resource: string
 
   @Prop({ type: String, default: '' })
+  target: string
+
+  @Prop({ type: String, default: '' })
   resourceId: string
 
   @Prop({ type: Object, default: {} })
   details: Record<string, any>
+
+  @Prop({ type: Object, default: {} })
+  meta: Record<string, any>
+
+  @Prop({ type: String, default: '' })
+  ip: string
 
   @Prop({ type: String, default: '' })
   ipAddress: string
