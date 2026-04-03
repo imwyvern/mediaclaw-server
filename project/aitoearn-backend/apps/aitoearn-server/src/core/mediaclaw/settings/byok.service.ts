@@ -1,15 +1,22 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { OrgApiKeyProvider, Organization } from '@yikart/mongodb'
+import {
+  OrgApiKeyProvider,
+  Organization,
+  OrganizationApiKeyEntry,
+  OrganizationApiKeyMap,
+} from '@yikart/mongodb'
 import axios from 'axios'
 import { Model, Types } from 'mongoose'
 import { MediaclawConfigService } from '../mediaclaw-config.service'
-import { getRequiredEnv } from '../mediaclaw-env.util'
 
-interface AddApiKeyInput {
+type ConfigKeyInput = string | readonly string[]
+
+interface SetApiKeyInput {
   provider: OrgApiKeyProvider
-  apiKey: string
+  key?: string
+  apiKey?: string
   validateNow?: boolean
 }
 
@@ -19,6 +26,15 @@ interface ValidationResult {
   message: string
 }
 
+const SUPPORTED_API_KEY_PROVIDERS = [
+  OrgApiKeyProvider.KLING,
+  OrgApiKeyProvider.GEMINI,
+  OrgApiKeyProvider.DEEPSEEK,
+  OrgApiKeyProvider.OPENAI,
+  OrgApiKeyProvider.TIKHUB,
+  OrgApiKeyProvider.VCE,
+] as const
+
 @Injectable()
 export class ByokService {
   constructor(
@@ -27,121 +43,64 @@ export class ByokService {
     private readonly configService: MediaclawConfigService,
   ) {}
 
-  async addKey(orgId: string, input: AddApiKeyInput) {
+  async setApiKey(
+    orgId: string,
+    provider: OrgApiKeyProvider,
+    plainKey: string,
+    validateNow = true,
+  ) {
     const organization = await this.findOrganization(orgId)
-    const provider = this.normalizeProvider(input.provider)
-    const apiKey = input.apiKey?.trim()
+    const normalizedProvider = this.normalizeProvider(provider)
+    const normalizedKey = plainKey.trim()
 
-    if (!apiKey) {
-      throw new BadRequestException('apiKey is required')
+    if (!normalizedKey) {
+      throw new BadRequestException('key is required')
     }
 
-    const validation = input.validateNow === false
-      ? {
+    const currentApiKeys = this.readApiKeyMap(organization.apiKeys)
+    const validation = validateNow
+      ? await this.safeValidateKey(normalizedProvider, normalizedKey)
+      : {
           isValid: false,
           lastValidatedAt: new Date(),
           message: 'Validation skipped',
         }
-      : await this.safeValidateKey(provider, apiKey)
 
-    const nextApiKeys = (organization.apiKeys || []).filter(item => item.provider !== provider)
-    nextApiKeys.push({
-      provider,
-      encryptedKey: this.encryptKey(apiKey),
+    currentApiKeys[normalizedProvider] = {
+      encryptedKey: this.encryptKey(normalizedKey),
+      addedAt: currentApiKeys[normalizedProvider]?.addedAt || new Date(),
+      lastUsedAt: currentApiKeys[normalizedProvider]?.lastUsedAt || null,
       isValid: validation.isValid,
       lastValidatedAt: validation.lastValidatedAt,
-      addedAt: new Date(),
-    } as any)
+    }
 
-    organization.apiKeys = nextApiKeys as any
+    organization.set('apiKeys', currentApiKeys)
     await organization.save()
 
     return {
       orgId: organization._id.toString(),
-      ...this.serializeApiKey(nextApiKeys.find(item => item.provider === provider), validation.message),
+      key: this.serializeApiKey(normalizedProvider, currentApiKeys[normalizedProvider], validation.message),
     }
   }
 
-  async validateKey(orgId: string, provider: OrgApiKeyProvider) {
-    const organization = await this.findOrganization(orgId)
-    const normalizedProvider = this.normalizeProvider(provider)
-    const current = (organization.apiKeys || []).find(item => item.provider === normalizedProvider)
-
-    if (!current) {
-      throw new NotFoundException('API key not found')
-    }
-
-    const validation = await this.safeValidateKey(normalizedProvider, this.decryptKey(current.encryptedKey))
-    const nextApiKeys = (organization.apiKeys || []).map((item) => {
-      if (item.provider !== normalizedProvider) {
-        return item
-      }
-
-      return {
-        ...item,
-        isValid: validation.isValid,
-        lastValidatedAt: validation.lastValidatedAt,
-      }
-    })
-
-    organization.apiKeys = nextApiKeys as any
-    await organization.save()
-
-    return {
-      orgId: organization._id.toString(),
-      ...this.serializeApiKey(nextApiKeys.find(item => item.provider === normalizedProvider), validation.message),
-    }
+  async addKey(orgId: string, input: SetApiKeyInput) {
+    return this.setApiKey(
+      orgId,
+      input.provider,
+      input.key?.trim() || input.apiKey?.trim() || '',
+      input.validateNow !== false,
+    )
   }
 
-  async getKeyStatus(orgId: string, provider?: OrgApiKeyProvider) {
-    const organization = await this.findOrganization(orgId)
-    const keys = organization.apiKeys || []
-
-    if (provider) {
-      const current = keys.find(item => item.provider === this.normalizeProvider(provider))
-      if (!current) {
-        throw new NotFoundException('API key not found')
-      }
-
-      return {
-        orgId: organization._id.toString(),
-        key: this.serializeApiKey(current),
-      }
-    }
-
-    return {
-      orgId: organization._id.toString(),
-      keys: keys.map(item => this.serializeApiKey(item)),
-    }
-  }
-
-  async getKey(orgId: string, provider?: OrgApiKeyProvider) {
-    return this.getKeyStatus(orgId, provider)
-  }
-
-  async getProviderRuntimeKey(
-    orgId: string | null | undefined,
-    provider: OrgApiKeyProvider,
-    fallbackEnvName?: string | readonly string[],
-  ) {
-    if (orgId && Types.ObjectId.isValid(orgId)) {
-      try {
-        const key = await this.getDecryptedKey(orgId, provider)
-        if (key?.trim()) {
-          return key.trim()
-        }
-      }
-      catch {
-        // Ignore missing org-scoped keys and fall back to platform defaults.
-      }
-    }
-
-    return fallbackEnvName ? this.configService.getString(fallbackEnvName, '') : ''
+  async getApiKey(orgId: string, provider: OrgApiKeyProvider) {
+    return this.resolveApiKey(orgId, provider)
   }
 
   async getDecryptedKey(orgId: string, provider: OrgApiKeyProvider) {
     const organization = await this.findOrganization(orgId)
-    const current = (organization.apiKeys || []).find(item => item.provider === this.normalizeProvider(provider))
+    const normalizedProvider = this.normalizeProvider(provider)
+    const apiKeys = this.readApiKeyMap(organization.apiKeys)
+    const current = apiKeys[normalizedProvider]
 
     if (!current?.encryptedKey) {
       return null
@@ -150,16 +109,70 @@ export class ByokService {
     return this.decryptKey(current.encryptedKey)
   }
 
-  async removeKey(orgId: string, provider: OrgApiKeyProvider) {
+  async listApiKeys(orgId: string) {
+    const organization = await this.findOrganization(orgId)
+    const apiKeys = this.readApiKeyMap(organization.apiKeys)
+
+    return {
+      orgId: organization._id.toString(),
+      keys: SUPPORTED_API_KEY_PROVIDERS.map(provider =>
+        this.serializeApiKey(provider, apiKeys[provider]),
+      ),
+    }
+  }
+
+  async getKeyStatus(orgId: string, provider?: OrgApiKeyProvider) {
+    if (!provider) {
+      return this.listApiKeys(orgId)
+    }
+
     const organization = await this.findOrganization(orgId)
     const normalizedProvider = this.normalizeProvider(provider)
-    const nextApiKeys = (organization.apiKeys || []).filter(item => item.provider !== normalizedProvider)
+    const apiKeys = this.readApiKeyMap(organization.apiKeys)
 
-    if (nextApiKeys.length === (organization.apiKeys || []).length) {
+    return {
+      orgId: organization._id.toString(),
+      key: this.serializeApiKey(normalizedProvider, apiKeys[normalizedProvider]),
+    }
+  }
+
+  async validateKey(orgId: string, provider: OrgApiKeyProvider) {
+    const organization = await this.findOrganization(orgId)
+    const normalizedProvider = this.normalizeProvider(provider)
+    const apiKeys = this.readApiKeyMap(organization.apiKeys)
+    const current = apiKeys[normalizedProvider]
+
+    if (!current?.encryptedKey) {
       throw new NotFoundException('API key not found')
     }
 
-    organization.apiKeys = nextApiKeys as any
+    const validation = await this.safeValidateKey(normalizedProvider, this.decryptKey(current.encryptedKey))
+    apiKeys[normalizedProvider] = {
+      ...current,
+      isValid: validation.isValid,
+      lastValidatedAt: validation.lastValidatedAt,
+    }
+
+    organization.set('apiKeys', apiKeys)
+    await organization.save()
+
+    return {
+      orgId: organization._id.toString(),
+      key: this.serializeApiKey(normalizedProvider, apiKeys[normalizedProvider], validation.message),
+    }
+  }
+
+  async removeApiKey(orgId: string, provider: OrgApiKeyProvider) {
+    const organization = await this.findOrganization(orgId)
+    const normalizedProvider = this.normalizeProvider(provider)
+    const apiKeys = this.readApiKeyMap(organization.apiKeys)
+
+    if (!apiKeys[normalizedProvider]) {
+      throw new NotFoundException('API key not found')
+    }
+
+    delete apiKeys[normalizedProvider]
+    organization.set('apiKeys', apiKeys)
     await organization.save()
 
     return {
@@ -167,6 +180,46 @@ export class ByokService {
       provider: normalizedProvider,
       deleted: true,
     }
+  }
+
+  async removeKey(orgId: string, provider: OrgApiKeyProvider) {
+    return this.removeApiKey(orgId, provider)
+  }
+
+  async resolveApiKey(
+    orgId: string | null | undefined,
+    provider: OrgApiKeyProvider,
+    fallbackEnvName?: ConfigKeyInput,
+  ) {
+    const normalizedProvider = this.normalizeProvider(provider)
+
+    if (orgId && Types.ObjectId.isValid(orgId)) {
+      const organization = await this.organizationModel.findById(new Types.ObjectId(orgId)).exec()
+      if (organization) {
+        const apiKeys = this.readApiKeyMap(organization.apiKeys)
+        const current = apiKeys[normalizedProvider]
+        if (current?.encryptedKey) {
+          const decrypted = this.decryptKey(current.encryptedKey)
+          apiKeys[normalizedProvider] = {
+            ...current,
+            lastUsedAt: new Date(),
+          }
+          organization.set('apiKeys', apiKeys)
+          await organization.save()
+          return decrypted
+        }
+      }
+    }
+
+    return this.resolvePlatformDefaultKey(normalizedProvider, fallbackEnvName)
+  }
+
+  async getProviderRuntimeKey(
+    orgId: string | null | undefined,
+    provider: OrgApiKeyProvider,
+    fallbackEnvName?: ConfigKeyInput,
+  ) {
+    return this.resolveApiKey(orgId, provider, fallbackEnvName)
   }
 
   private async findOrganization(orgId: string) {
@@ -183,11 +236,73 @@ export class ByokService {
   }
 
   private normalizeProvider(provider: OrgApiKeyProvider) {
-    if (!Object.values(OrgApiKeyProvider).includes(provider)) {
+    if (!SUPPORTED_API_KEY_PROVIDERS.includes(provider)) {
       throw new BadRequestException('Unsupported provider')
     }
 
     return provider
+  }
+
+  private readApiKeyMap(raw: unknown): OrganizationApiKeyMap {
+    if (!raw) {
+      return {}
+    }
+
+    if (Array.isArray(raw)) {
+      const migrated: OrganizationApiKeyMap = {}
+      for (const item of raw) {
+        if (!item || typeof item !== 'object') {
+          continue
+        }
+
+        const candidate = item as Record<string, unknown>
+        const providerValue = candidate['provider']
+        if (typeof providerValue !== 'string' || !SUPPORTED_API_KEY_PROVIDERS.includes(providerValue as OrgApiKeyProvider)) {
+          continue
+        }
+
+        const entry = this.normalizeApiKeyEntry(candidate)
+        if (entry) {
+          migrated[providerValue as OrgApiKeyProvider] = entry
+        }
+      }
+      return migrated
+    }
+
+    if (typeof raw !== 'object') {
+      return {}
+    }
+
+    const map: OrganizationApiKeyMap = {}
+    const payload = raw as Record<string, unknown>
+    for (const provider of SUPPORTED_API_KEY_PROVIDERS) {
+      const entry = payload[provider]
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        continue
+      }
+
+      const normalizedEntry = this.normalizeApiKeyEntry(entry as Record<string, unknown>)
+      if (normalizedEntry) {
+        map[provider] = normalizedEntry
+      }
+    }
+
+    return map
+  }
+
+  private normalizeApiKeyEntry(raw: Record<string, unknown>): OrganizationApiKeyEntry | undefined {
+    const encryptedKey = this.readString(raw['encryptedKey'])
+    if (!encryptedKey) {
+      return undefined
+    }
+
+    return {
+      encryptedKey,
+      addedAt: this.readDate(raw['addedAt']) || new Date(),
+      lastUsedAt: this.readDate(raw['lastUsedAt']),
+      isValid: typeof raw['isValid'] === 'boolean' ? raw['isValid'] : undefined,
+      lastValidatedAt: this.readDate(raw['lastValidatedAt']),
+    }
   }
 
   private async safeValidateKey(provider: OrgApiKeyProvider, apiKey: string): Promise<ValidationResult> {
@@ -210,6 +325,8 @@ export class ByokService {
       case OrgApiKeyProvider.GEMINI:
         return this.validateGemini(apiKey)
       case OrgApiKeyProvider.KLING:
+      case OrgApiKeyProvider.OPENAI:
+      case OrgApiKeyProvider.TIKHUB:
       case OrgApiKeyProvider.VCE:
         return {
           isValid: apiKey.length >= 16,
@@ -294,26 +411,91 @@ export class ByokService {
     }
   }
 
+  private resolvePlatformDefaultKey(provider: OrgApiKeyProvider, fallbackEnvName?: ConfigKeyInput) {
+    const envCandidates = fallbackEnvName
+      ? [...this.normalizeConfigKeys(fallbackEnvName), ...this.defaultFallbackEnvNames(provider)]
+      : this.defaultFallbackEnvNames(provider)
+
+    return this.configService.getString(envCandidates, '')
+  }
+
+  private defaultFallbackEnvNames(provider: OrgApiKeyProvider) {
+    switch (provider) {
+      case OrgApiKeyProvider.KLING:
+        return ['KLING_API_KEY', 'MEDIACLAW_KLING_API_KEY']
+      case OrgApiKeyProvider.GEMINI:
+        return ['MEDIACLAW_GEMINI_API_KEY', 'GEMINI_API_KEY']
+      case OrgApiKeyProvider.DEEPSEEK:
+        return ['MEDIACLAW_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY']
+      case OrgApiKeyProvider.OPENAI:
+        return ['OPENAI_API_KEY', 'MEDIACLAW_OPENAI_API_KEY']
+      case OrgApiKeyProvider.TIKHUB:
+        return ['TIKHUB_API_KEY', 'MEDIACLAW_TIKHUB_API_KEY']
+      case OrgApiKeyProvider.VCE:
+        return ['VCE_GEMINI_API_KEY', 'MEDIACLAW_VCE_API_KEY']
+      default:
+        return []
+    }
+  }
+
+  private normalizeConfigKeys(keys: ConfigKeyInput) {
+    return Array.isArray(keys) ? [...keys] : [keys]
+  }
+
   private encryptKey(apiKey: string) {
-    const secret = getRequiredEnv('MEDIACLAW_BYOK_SECRET')
-    const key = createHash('sha256').update(secret).digest()
-    const iv = randomBytes(16)
-    const cipher = createCipheriv('aes-256-cbc', key, iv)
+    const key = this.resolveEncryptionKey()
+    const iv = randomBytes(12)
+    const cipher = createCipheriv('aes-256-gcm', key, iv)
     const encrypted = Buffer.concat([
       cipher.update(apiKey, 'utf8'),
       cipher.final(),
-    ]).toString('base64')
+    ])
+    const authTag = cipher.getAuthTag()
 
-    return `${iv.toString('base64')}:${encrypted}`
+    return ['v2', iv.toString('base64'), authTag.toString('base64'), encrypted.toString('base64')].join(':')
   }
 
   private decryptKey(payload: string) {
+    if (payload.startsWith('v2:')) {
+      return this.decryptGcmPayload(payload)
+    }
+
+    return this.decryptLegacyPayload(payload)
+  }
+
+  private decryptGcmPayload(payload: string) {
+    const segments = payload.split(':')
+    if (segments.length !== 4) {
+      throw new BadRequestException('Stored API key payload is invalid')
+    }
+
+    const [, ivBase64, authTagBase64, encryptedBase64] = segments
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      this.resolveEncryptionKey(),
+      Buffer.from(ivBase64, 'base64'),
+    )
+    decipher.setAuthTag(Buffer.from(authTagBase64, 'base64'))
+
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(encryptedBase64, 'base64')),
+      decipher.final(),
+    ])
+
+    return decrypted.toString('utf8')
+  }
+
+  private decryptLegacyPayload(payload: string) {
     const [ivBase64, encrypted] = payload.split(':')
     if (!ivBase64 || !encrypted) {
       throw new BadRequestException('Stored API key payload is invalid')
     }
 
-    const secret = getRequiredEnv('MEDIACLAW_BYOK_SECRET')
+    const secret = process.env['MEDIACLAW_BYOK_SECRET']?.trim()
+    if (!secret) {
+      throw new InternalServerErrorException('BYOK encryption not configured: set BYOK_ENCRYPTION_KEY')
+    }
+
     const key = createHash('sha256').update(secret).digest()
     const decipher = createDecipheriv('aes-256-cbc', key, Buffer.from(ivBase64, 'base64'))
     const decrypted = Buffer.concat([
@@ -324,27 +506,51 @@ export class ByokService {
     return decrypted.toString('utf8')
   }
 
-  private serializeApiKey(
-    apiKey: {
-      provider: OrgApiKeyProvider
-      encryptedKey?: string
-      isValid?: boolean
-      lastValidatedAt?: Date | null
-      addedAt?: Date | null
-    } | undefined,
-    validationMessage?: string,
-  ) {
-    if (!apiKey) {
-      throw new NotFoundException('API key not found')
+  private resolveEncryptionKey() {
+    const configuredKey = process.env['BYOK_ENCRYPTION_KEY']?.trim()
+    if (!configuredKey) {
+      throw new InternalServerErrorException('BYOK encryption not configured: set BYOK_ENCRYPTION_KEY')
     }
 
+    return this.normalizeEncryptionKey(configuredKey)
+  }
+
+  private normalizeEncryptionKey(input: string) {
+    if (/^[a-fA-F0-9]{64}$/.test(input)) {
+      return Buffer.from(input, 'hex')
+    }
+
+    const utf8Buffer = Buffer.from(input, 'utf8')
+    if (utf8Buffer.length === 32) {
+      return utf8Buffer
+    }
+
+    try {
+      const base64Buffer = Buffer.from(input, 'base64')
+      if (base64Buffer.length === 32 && base64Buffer.toString('base64').replace(/=+$/, '') === input.replace(/=+$/, '')) {
+        return base64Buffer
+      }
+    }
+    catch {
+      // Ignore invalid base64 and fall back to hashing.
+    }
+
+    return createHash('sha256').update(input).digest()
+  }
+
+  private serializeApiKey(
+    provider: OrgApiKeyProvider,
+    apiKey: OrganizationApiKeyEntry | undefined,
+    validationMessage?: string,
+  ) {
     return {
-      provider: apiKey.provider,
-      hasKey: Boolean(apiKey.encryptedKey),
-      maskedKey: apiKey.encryptedKey ? this.maskKey(this.decryptKey(apiKey.encryptedKey)) : null,
-      isValid: Boolean(apiKey.isValid),
-      lastValidatedAt: apiKey.lastValidatedAt || null,
-      addedAt: apiKey.addedAt || null,
+      provider,
+      hasKey: Boolean(apiKey?.encryptedKey),
+      maskedKey: apiKey?.encryptedKey ? this.maskKey(this.decryptKey(apiKey.encryptedKey)) : null,
+      isValid: Boolean(apiKey?.isValid),
+      lastValidatedAt: apiKey?.lastValidatedAt || null,
+      addedAt: apiKey?.addedAt || null,
+      lastUsedAt: apiKey?.lastUsedAt || null,
       validationMessage: validationMessage || null,
     }
   }
@@ -356,5 +562,18 @@ export class ByokService {
     }
 
     return `****${trimmed.slice(-4)}`
+  }
+
+  private readString(value: unknown) {
+    return typeof value === 'string' ? value.trim() : ''
+  }
+
+  private readDate(value: unknown) {
+    if (!value) {
+      return null
+    }
+
+    const date = value instanceof Date ? value : new Date(String(value))
+    return Number.isNaN(date.getTime()) ? null : date
   }
 }

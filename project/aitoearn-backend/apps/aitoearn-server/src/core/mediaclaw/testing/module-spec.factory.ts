@@ -188,7 +188,7 @@ const testingHarness = vi.hoisted(() => {
       'SUBSCRIPTION_EXPIRING',
       'CREDIT_LOW',
     ]),
-    OrgApiKeyProvider: createEnum(['KLING', 'GEMINI', 'DEEPSEEK', 'VCE']),
+    OrgApiKeyProvider: createEnum(['KLING', 'GEMINI', 'DEEPSEEK', 'OPENAI', 'TIKHUB', 'VCE']),
     OrgStatus: createEnum(['ACTIVE', 'SUSPENDED', 'TRIAL']),
     OrgType: createEnum(['INDIVIDUAL', 'TEAM', 'PROFESSIONAL', 'ENTERPRISE']),
     PackStatus: createEnum(['ACTIVE', 'DEPLETED', 'EXPIRED', 'REFUNDED']),

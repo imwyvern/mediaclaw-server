@@ -3,13 +3,45 @@ import { JwtService } from '@nestjs/jwt'
 import { InjectModel } from '@nestjs/mongoose'
 import { AliSmsService } from '@yikart/ali-sms'
 import { McUserType, MediaClawUser, UserRole, VideoPack } from '@yikart/mongodb'
+import axios from 'axios'
 import { Model } from 'mongoose'
+
+interface WechatOauthConfig {
+  appId: string
+  appSecret: string
+  redirectUri: string
+  scope: string
+}
+
+interface WechatTokenResponse {
+  access_token?: string
+  expires_in?: number
+  refresh_token?: string
+  openid?: string
+  scope?: string
+  unionid?: string
+  errcode?: number
+  errmsg?: string
+}
+
+interface WechatUserInfoResponse {
+  openid?: string
+  nickname?: string
+  sex?: number
+  province?: string
+  city?: string
+  country?: string
+  headimgurl?: string
+  privilege?: string[]
+  unionid?: string
+  errcode?: number
+  errmsg?: string
+}
 
 @Injectable()
 export class McAuthService {
   private readonly logger = new Logger(McAuthService.name)
 
-  // In-memory OTP store (TODO: move to Redis for production)
   private otpStore = new Map<string, { code: string, expiresAt: number }>()
 
   constructor(
@@ -25,13 +57,9 @@ export class McAuthService {
     }
   }
 
-  /**
-   * Send SMS verification code
-   */
   async sendSmsCode(phone: string) {
     this.validatePhoneNumber(phone)
 
-    // Rate limit: 1 code per 60s
     const existing = this.otpStore.get(phone)
     if (existing && existing.expiresAt - Date.now() > 4 * 60 * 1000) {
       throw new BadRequestException('Please wait before requesting another code')
@@ -46,7 +74,6 @@ export class McAuthService {
 
     await this.deliverSmsCode(phone, code, expiresAt)
 
-    // In console/mock mode, return the code to the frontend for easy testing
     if (this.shouldUseConsoleSms()) {
       return { success: true, message: 'Code sent', code }
     }
@@ -63,13 +90,9 @@ export class McAuthService {
     this.otpStore.delete(phone)
   }
 
-  /**
-   * Verify SMS code and login/register
-   */
   async verifySmsCode(phone: string, code: string) {
     await this.consumeSmsCode(phone, code)
 
-    // Find or create user
     let user = await this.userModel.findOne({ phone }).exec()
     let isNewUser = false
 
@@ -78,25 +101,14 @@ export class McAuthService {
       user = await this.userModel.create({
         phone,
         name: `用户${phone.slice(-4)}`,
-        role: UserRole.ADMIN, // First user = admin of their own account
+        role: UserRole.ADMIN,
         userType: McUserType.INDIVIDUAL,
         orgMemberships: [],
         isActive: true,
         lastLoginAt: new Date(),
       })
 
-      // Create trial pack (1 free video)
-      await this.videoPackModel.create({
-        userId: user._id.toString(),
-        packType: 'trial_free',
-        totalCredits: 1,
-        remainingCredits: 1,
-        priceCents: 0,
-        status: 'active',
-        purchasedAt: new Date(),
-        expiresAt: null,
-      })
-
+      await this.createTrialPack(user._id.toString())
       this.logger.log(`New user registered: ${phone}, trial pack created`)
     }
     else {
@@ -112,21 +124,44 @@ export class McAuthService {
     return this.buildAuthResult(user, isNewUser)
   }
 
-  /**
-   * WeChat OAuth callback
-   */
-  async wechatCallback(_code: string) {
-    // TODO: Implement WeChat OAuth flow
-    // 1. Exchange code for access_token + openid
-    // 2. Get user info
-    // 3. Find or create user by IM binding
-    // 4. Generate JWT
-    throw new BadRequestException('WeChat OAuth not yet implemented')
+  getWechatLoginUrl(redirectUri?: string, state?: string) {
+    const config = this.getWechatOauthConfig(true, redirectUri)
+    const resolvedRedirectUri = config.redirectUri || ''
+    const params = new URLSearchParams({
+      appid: config.appId,
+      redirect_uri: resolvedRedirectUri,
+      response_type: 'code',
+      scope: config.scope,
+      state: state?.trim() || 'mediaclaw',
+    })
+
+    const redirectUrl = `https://open.weixin.qq.com/connect/oauth2/authorize?${params.toString()}#wechat_redirect`
+
+    return {
+      url: redirectUrl,
+      redirectUrl,
+    }
   }
 
-  /**
-   * Refresh access token
-   */
+  async wechatCallback(code: string) {
+    const normalizedCode = code.trim()
+    if (!normalizedCode) {
+      throw new BadRequestException('code is required')
+    }
+
+    const config = this.getWechatOauthConfig(false)
+    const tokenData = await this.exchangeWechatCode(config, normalizedCode)
+    const userInfo = await this.fetchWechatUserInfo(tokenData.access_token || '', tokenData.openid || '')
+    const authUser = await this.findOrCreateWechatUser({
+      openId: tokenData.openid || '',
+      unionId: userInfo.unionid || tokenData.unionid || '',
+      nickname: userInfo.nickname || '',
+      avatarUrl: userInfo.headimgurl || '',
+    })
+
+    return this.buildAuthResult(authUser.user, authUser.isNewUser)
+  }
+
   async refreshToken(token: string) {
     try {
       const payload = this.jwtService.verify(token)
@@ -180,6 +215,227 @@ export class McAuthService {
       userType: user.userType,
       avatarUrl: user.avatarUrl,
     }
+  }
+
+  private getWechatOauthConfig(requireRedirectUri = false, redirectUri?: string): WechatOauthConfig {
+    const appId = process.env['WECHAT_APP_ID']?.trim()
+    const appSecret = process.env['WECHAT_APP_SECRET']?.trim()
+
+    if (!appId || !appSecret) {
+      throw new BadRequestException('WeChat OAuth not configured: set WECHAT_APP_ID and WECHAT_APP_SECRET')
+    }
+
+    const resolvedRedirectUri = redirectUri?.trim()
+      || process.env['WECHAT_OAUTH_REDIRECT_URI']?.trim()
+      || process.env['MEDIACLAW_WECHAT_REDIRECT_URI']?.trim()
+
+    if (requireRedirectUri && !resolvedRedirectUri) {
+      throw new BadRequestException(
+        'WeChat OAuth redirect URI not configured: provide redirectUri or set WECHAT_OAUTH_REDIRECT_URI',
+      )
+    }
+
+    return {
+      appId,
+      appSecret,
+      redirectUri: resolvedRedirectUri || '',
+      scope: process.env['WECHAT_OAUTH_SCOPE']?.trim() || 'snsapi_userinfo',
+    }
+  }
+
+  private async exchangeWechatCode(config: WechatOauthConfig, code: string) {
+    try {
+      const response = await axios.get<WechatTokenResponse>(
+        'https://api.weixin.qq.com/sns/oauth2/access_token',
+        {
+          timeout: 10000,
+          params: {
+            appid: config.appId,
+            secret: config.appSecret,
+            code,
+            grant_type: 'authorization_code',
+          },
+        },
+      )
+      this.assertWechatSuccess(response.data, 'WeChat OAuth token exchange failed')
+
+      if (!response.data.access_token || !response.data.openid) {
+        throw new BadRequestException('WeChat OAuth token exchange failed: missing access_token or openid')
+      }
+
+      return response.data
+    }
+    catch (error) {
+      throw this.wrapWechatHttpError(error, 'WeChat OAuth token exchange failed')
+    }
+  }
+
+  private async fetchWechatUserInfo(accessToken: string, openId: string) {
+    try {
+      const response = await axios.get<WechatUserInfoResponse>('https://api.weixin.qq.com/sns/userinfo', {
+        timeout: 10000,
+        params: {
+          access_token: accessToken,
+          openid: openId,
+          lang: 'zh_CN',
+        },
+      })
+      this.assertWechatSuccess(response.data, 'WeChat user info fetch failed')
+      return response.data
+    }
+    catch (error) {
+      throw this.wrapWechatHttpError(error, 'WeChat user info fetch failed')
+    }
+  }
+
+  private async findOrCreateWechatUser(input: {
+    openId: string
+    unionId?: string
+    nickname?: string
+    avatarUrl?: string
+  }) {
+    const conditions: Array<Record<string, string>> = [
+      { wechatOpenId: input.openId },
+    ]
+    if (input.unionId) {
+      conditions.push({ wechatUnionId: input.unionId })
+    }
+
+    let user = await this.userModel.findOne(
+      conditions.length === 1 ? conditions[0] : { $or: conditions },
+    ).exec()
+    let isNewUser = false
+
+    const resolvedName = input.nickname?.trim() || `微信用户${input.openId.slice(-6)}`
+    const resolvedAvatarUrl = input.avatarUrl?.trim() || ''
+    const lastLoginAt = new Date()
+
+    if (!user) {
+      isNewUser = true
+      user = await this.userModel.create({
+        name: resolvedName,
+        avatarUrl: resolvedAvatarUrl,
+        wechatOpenId: input.openId,
+        wechatUnionId: input.unionId?.trim() || undefined,
+        role: UserRole.ADMIN,
+        userType: McUserType.INDIVIDUAL,
+        orgMemberships: [],
+        imBindings: [
+          {
+            platform: 'wechat',
+            platformUserId: input.openId,
+            displayName: resolvedName,
+            boundAt: lastLoginAt,
+          },
+        ],
+        isActive: true,
+        lastLoginAt,
+      })
+
+      await this.createTrialPack(user._id.toString())
+      this.logger.log(`New WeChat user registered: ${input.openId}`)
+    }
+    else {
+      const nextBindings = this.mergeWechatBindings(user.imBindings, input.openId, resolvedName)
+      const updatedUser = await this.userModel.findByIdAndUpdate(user._id, {
+        $set: {
+          name: resolvedName,
+          avatarUrl: resolvedAvatarUrl,
+          wechatOpenId: input.openId,
+          wechatUnionId: input.unionId?.trim() || user.wechatUnionId,
+          isActive: true,
+          lastLoginAt,
+          imBindings: nextBindings,
+        },
+      }, { new: true }).exec()
+
+      if (updatedUser) {
+        user = updatedUser
+      }
+    }
+
+    return {
+      user,
+      isNewUser,
+    }
+  }
+
+  private mergeWechatBindings(bindings: unknown, openId: string, displayName: string) {
+    const normalizedBindings = Array.isArray(bindings)
+      ? bindings
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+          .map(item => ({
+            platform: typeof item['platform'] === 'string' ? item['platform'] : '',
+            platformUserId: typeof item['platformUserId'] === 'string' ? item['platformUserId'] : '',
+            displayName: typeof item['displayName'] === 'string' ? item['displayName'] : '',
+            boundAt: item['boundAt'] instanceof Date ? item['boundAt'] : new Date(),
+          }))
+      : []
+
+    const existingIndex = normalizedBindings.findIndex(item =>
+      item.platform === 'wechat' && item.platformUserId === openId,
+    )
+
+    if (existingIndex >= 0) {
+      normalizedBindings[existingIndex] = {
+        ...normalizedBindings[existingIndex],
+        displayName,
+      }
+      return normalizedBindings
+    }
+
+    return [
+      ...normalizedBindings,
+      {
+        platform: 'wechat',
+        platformUserId: openId,
+        displayName,
+        boundAt: new Date(),
+      },
+    ]
+  }
+
+  private assertWechatSuccess(
+    payload: WechatTokenResponse | WechatUserInfoResponse,
+    fallbackMessage: string,
+  ) {
+    if (payload.errcode) {
+      throw new BadRequestException(`${fallbackMessage}: ${payload.errmsg || payload.errcode}`)
+    }
+  }
+
+  private wrapWechatHttpError(error: unknown, fallbackMessage: string) {
+    if (axios.isAxiosError(error)) {
+      const responseData = error.response?.data
+      if (responseData && typeof responseData === 'object') {
+        const payload = responseData as Record<string, unknown>
+        const message = typeof payload['errmsg'] === 'string'
+          ? payload['errmsg']
+          : typeof payload['message'] === 'string'
+            ? payload['message']
+            : error.message
+        return new BadRequestException(`${fallbackMessage}: ${message}`)
+      }
+
+      return new BadRequestException(`${fallbackMessage}: ${error.message}`)
+    }
+
+    return error instanceof Error
+      ? new BadRequestException(`${fallbackMessage}: ${error.message}`)
+      : new BadRequestException(fallbackMessage)
+  }
+
+  private async createTrialPack(userId: string) {
+    await this.videoPackModel.create({
+      userId,
+      packType: 'trial_free',
+      totalCredits: 1,
+      remainingCredits: 1,
+      priceCents: 0,
+      status: 'active',
+      purchasedAt: new Date(),
+      expiresAt: null,
+    })
   }
 
   private maskPhone(phone: string) {

@@ -26,9 +26,27 @@ export class McAuthController {
   }
 
   @Public()
+  @Get('wechat/login')
+  async wechatLogin(
+    @Query('redirectUri') redirectUri?: string,
+    @Query('state') state?: string,
+  ) {
+    return this.authService.getWechatLoginUrl(redirectUri, state)
+  }
+
+  @Public()
+  @Get('wechat/callback')
+  async wechatCallbackByQuery(@Query('code') code?: string) {
+    return this.authService.wechatCallback(code || '')
+  }
+
+  @Public()
   @Post('wechat/callback')
-  async wechatCallback(@Query('code') code: string) {
-    return this.authService.wechatCallback(code)
+  async wechatCallback(
+    @Body('code') codeFromBody?: string,
+    @Query('code') codeFromQuery?: string,
+  ) {
+    return this.authService.wechatCallback(codeFromBody || codeFromQuery || '')
   }
 
   @Public()

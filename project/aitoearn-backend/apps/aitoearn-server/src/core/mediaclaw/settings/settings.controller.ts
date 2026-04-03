@@ -9,11 +9,12 @@ export class SettingsController {
   constructor(private readonly byokService: ByokService) {}
 
   @Post()
-  async addKey(
+  async setApiKey(
     @GetToken() user: { id: string, orgId?: string | null },
     @Body() body: {
       provider: OrgApiKeyProvider
-      apiKey: string
+      key?: string
+      apiKey?: string
       validateNow?: boolean
     },
   ) {
@@ -21,7 +22,7 @@ export class SettingsController {
   }
 
   @Get()
-  async listKeys(
+  async listApiKeys(
     @GetToken() user: { id: string, orgId?: string | null },
     @Query('provider') provider?: OrgApiKeyProvider,
   ) {
@@ -29,15 +30,15 @@ export class SettingsController {
   }
 
   @Delete(':provider')
-  async removeKey(
+  async removeApiKey(
     @GetToken() user: { id: string, orgId?: string | null },
     @Param('provider') provider: OrgApiKeyProvider,
   ) {
-    return this.byokService.removeKey(user.orgId || user.id, provider)
+    return this.byokService.removeApiKey(user.orgId || user.id, provider)
   }
 
   @Post(':provider/validate')
-  async validateKey(
+  async validateApiKey(
     @GetToken() user: { id: string, orgId?: string | null },
     @Param('provider') provider: OrgApiKeyProvider,
   ) {

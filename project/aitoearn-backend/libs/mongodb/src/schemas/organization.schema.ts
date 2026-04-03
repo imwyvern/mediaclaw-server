@@ -27,8 +27,20 @@ export enum OrgApiKeyProvider {
   KLING = 'kling',
   GEMINI = 'gemini',
   DEEPSEEK = 'deepseek',
+  OPENAI = 'openai',
+  TIKHUB = 'tikhub',
   VCE = 'vce',
 }
+
+export interface OrganizationApiKeyEntry {
+  encryptedKey: string
+  addedAt: Date
+  lastUsedAt?: Date | null
+  isValid?: boolean
+  lastValidatedAt?: Date | null
+}
+
+export type OrganizationApiKeyMap = Partial<Record<OrgApiKeyProvider, OrganizationApiKeyEntry>>
 
 @Schema({ _id: false })
 class OrganizationVideoCredits {
@@ -52,24 +64,6 @@ class OrganizationVideoCredits {
 
   @Prop({ type: Number, default: 0 })
   overagePrice: number
-}
-
-@Schema({ _id: false })
-class OrganizationApiKey {
-  @Prop({ type: String, enum: OrgApiKeyProvider, required: true })
-  provider: OrgApiKeyProvider
-
-  @Prop({ type: String, default: '' })
-  encryptedKey: string
-
-  @Prop({ type: Boolean, default: false })
-  isValid: boolean
-
-  @Prop({ type: Date, default: null })
-  lastValidatedAt: Date | null
-
-  @Prop({ type: Date, default: Date.now })
-  addedAt: Date
 }
 
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'organizations' })
@@ -119,12 +113,11 @@ export class Organization extends WithTimestampSchema {
   @Prop({ type: String, default: 'Asia/Shanghai' })
   timezone: string
 
-  @Prop({ type: [OrganizationApiKey], default: [] })
-  apiKeys: OrganizationApiKey[]
+  @Prop({ type: Object, default: {} })
+  apiKeys: OrganizationApiKeyMap
 
   @Prop({ type: Object, default: {} })
   settings: Record<string, any>
 }
 
 export const OrganizationSchema = SchemaFactory.createForClass(Organization)
-OrganizationSchema.index({ 'apiKeys.provider': 1 })

@@ -30,7 +30,7 @@ export class OrgMembership {
 @Schema({ _id: false })
 class ImBinding {
   @Prop({ type: String, required: true })
-  platform: string // 'openclaw' | 'wechat' | 'feishu' | 'dingtalk'
+  platform: string
 
   @Prop({ type: String, required: true })
   platformUserId: string
@@ -47,8 +47,8 @@ export class MediaClawUser extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
   _id: MongooseSchema.Types.ObjectId
 
-  @Prop({ type: String, default: '', index: true })
-  phone: string
+  @Prop({ type: String, index: true })
+  phone?: string
 
   @Prop({ type: String, default: '' })
   email: string
@@ -58,6 +58,12 @@ export class MediaClawUser extends WithTimestampSchema {
 
   @Prop({ type: String, default: '' })
   avatarUrl: string
+
+  @Prop({ type: String, index: true })
+  wechatOpenId?: string
+
+  @Prop({ type: String, index: true })
+  wechatUnionId?: string
 
   @Prop({ type: MongooseSchema.Types.ObjectId, default: null, index: true })
   orgId: MongooseSchema.Types.ObjectId | null
@@ -75,7 +81,7 @@ export class MediaClawUser extends WithTimestampSchema {
   imBindings: ImBinding[]
 
   @Prop({ type: String, default: '' })
-  supabaseUserId: string // ShipAny PG user_uuid for dual-DB sync
+  supabaseUserId: string
 
   @Prop({ type: Boolean, default: true })
   isActive: boolean
@@ -87,5 +93,7 @@ export class MediaClawUser extends WithTimestampSchema {
 export const MediaClawUserSchema = SchemaFactory.createForClass(MediaClawUser)
 MediaClawUserSchema.index({ phone: 1 }, { unique: true, sparse: true })
 MediaClawUserSchema.index({ email: 1 }, { sparse: true })
+MediaClawUserSchema.index({ wechatOpenId: 1 }, { unique: true, sparse: true })
+MediaClawUserSchema.index({ wechatUnionId: 1 }, { unique: true, sparse: true })
 MediaClawUserSchema.index({ 'orgMemberships.orgId': 1 })
 MediaClawUserSchema.index({ 'imBindings.platform': 1, 'imBindings.platformUserId': 1 })
