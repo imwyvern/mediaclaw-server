@@ -7,8 +7,8 @@ export const VIDEO_WORKER_STEPS = [
   'analyze-source',
   'edit-frames',
   'render-video',
-  'quality-check',
   'generate-copy',
+  'quality-check',
 ] as const
 
 export type VideoWorkerStep = typeof VIDEO_WORKER_STEPS[number]

@@ -4,6 +4,7 @@ import { Brand, Pipeline, PipelineStatus, VideoTask } from '@yikart/mongodb'
 import { copyFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Model, Types } from 'mongoose'
+import type { GeneratedCopy } from '../copy/copy.service'
 import { BrandEditService } from './brand-edit.service'
 import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { DedupService } from './dedup.service'
@@ -133,29 +134,43 @@ export class PipelineService {
   }
 
   async editFrames(context: PipelineJobContext): Promise<PipelineJobContext> {
-    const frameArtifacts = await this.brandEditService.applyBranding(context)
+    const { artifacts, result } = await this.brandEditService.applyBranding(context)
     return {
       ...context,
-      frameArtifacts,
+      frameArtifacts: artifacts,
+      brandEditResult: result,
     }
   }
 
   async renderVideo(task: VideoTask, context: PipelineJobContext): Promise<PipelineJobContext> {
-    const segmentVideoPaths = await this.videoGenService.generateSegments(context)
-    const composedVideoPath = await this.videoGenService.composeSegments(context, segmentVideoPaths)
+    const { segmentPaths, result } = await this.videoGenService.generateSegments(context)
+    const composedVideoPath = await this.videoGenService.composeSegments(context, segmentPaths)
+    const outputVideoUrl = await this.persistOutput(task._id.toString(), composedVideoPath)
+
+    return {
+      ...context,
+      segmentVideoPaths: segmentPaths,
+      composedVideoPath,
+      outputVideoUrl,
+      videoGenResult: result,
+    }
+  }
+
+  async finalizeVideo(task: VideoTask, context: PipelineJobContext, copy: GeneratedCopy): Promise<PipelineJobContext> {
+    const composedVideoPath = this.requirePath(context.composedVideoPath, 'composedVideoPath')
+    const subtitles = this.buildCopySubtitleVariants(copy, context.brand, context.targetDurationSeconds)
     const deepSynthesisMarker = context.deepSynthesisMarker
       || this.deepSynthesisMarkerService.createMarker(task._id.toString(), context.brand)
     const subtitleResult = await this.subtitleService.renderSubtitles({
       ...context,
-      segmentVideoPaths,
+      subtitles,
       composedVideoPath,
       deepSynthesisMarker,
     })
-    const subtitledVideoPath = subtitleResult.outputPath
     const finalVideoPath = join(context.workspaceDir, 'final.mp4')
 
     await this.dedupService.applyVideoPostProcess({
-      inputVideoPath: subtitledVideoPath,
+      inputVideoPath: subtitleResult.outputPath,
       outputVideoPath: finalVideoPath,
       strategy: context.dedupStrategy,
       preserveAudio: context.preserveSourceAudio,
@@ -165,9 +180,8 @@ export class PipelineService {
 
     return {
       ...context,
-      segmentVideoPaths,
-      composedVideoPath,
-      subtitledVideoPath,
+      subtitles,
+      subtitledVideoPath: subtitleResult.outputPath,
       finalVideoPath,
       outputVideoUrl,
       deepSynthesisMarker: subtitleResult.deepSynthesisMarker,
@@ -175,7 +189,7 @@ export class PipelineService {
   }
 
   async runQualityCheck(context: PipelineJobContext): Promise<PipelineQualityReport> {
-    const finalVideoPath = this.requirePath(context.finalVideoPath, 'finalVideoPath')
+    const finalVideoPath = this.requirePath(context.finalVideoPath || context.composedVideoPath, 'finalVideoPath')
     return this.qualityCheckService.assertQuality(
       finalVideoPath,
       context.targetDurationSeconds,
@@ -296,11 +310,37 @@ export class PipelineService {
     ]
   }
 
-  private async persistOutput(taskId: string, finalVideoPath: string) {
+  private buildCopySubtitleVariants(copy: GeneratedCopy, brand: PipelineBrandProfile, targetDurationSeconds: number) {
+    const segmentDuration = targetDurationSeconds / 3
+    const commentGuide = copy.commentGuides[0]
+      || copy.commentGuide.split('\n').map(item => item.trim()).find(Boolean)
+      || brand.slogans[0]
+      || `评论区获取 ${brand.name} 完整方案`
+
+    return [
+      {
+        text: copy.title.trim() || `${brand.name} 爆款改编完成`,
+        startSeconds: 0,
+        endSeconds: segmentDuration,
+      },
+      {
+        text: copy.subtitle.trim() || `${brand.name} 品牌亮点已注入`,
+        startSeconds: segmentDuration,
+        endSeconds: segmentDuration * 2,
+      },
+      {
+        text: commentGuide,
+        startSeconds: segmentDuration * 2,
+        endSeconds: targetDurationSeconds,
+      },
+    ]
+  }
+
+  private async persistOutput(taskId: string, inputVideoPath: string) {
     const outputDir = resolve(process.cwd(), 'tmp', 'mediaclaw-output')
     await ensureDirectory(outputDir)
     const outputPath = join(outputDir, `${taskId}.mp4`)
-    await copyFile(finalVideoPath, outputPath)
+    await copyFile(inputVideoPath, outputPath)
     return buildPublicFileUrl(outputPath)
   }
 

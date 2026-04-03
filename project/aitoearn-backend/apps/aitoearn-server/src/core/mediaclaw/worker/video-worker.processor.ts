@@ -13,8 +13,8 @@ import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from './worke
 const NEXT_STEP_MAP: Partial<Record<VideoWorkerStep, VideoWorkerStep>> = {
   'analyze-source': 'edit-frames',
   'edit-frames': 'render-video',
-  'render-video': 'quality-check',
-  'quality-check': 'generate-copy',
+  'render-video': 'generate-copy',
+  'generate-copy': 'quality-check',
 }
 
 @Injectable()
@@ -41,6 +41,7 @@ export class VideoWorkerProcessor extends WorkerHost {
     const step = job.name as VideoWorkerStep
     const { taskId } = job.data
     let context = job.data.context
+    let completedTask: Awaited<ReturnType<VideoService['updateStatus']>> | null = null
 
     await this.videoService.startIterationStep(taskId, step, {
       attempt: job.attemptsMade + 1,
@@ -67,22 +68,14 @@ export class VideoWorkerProcessor extends WorkerHost {
           await this.videoService.updateStatus(taskId, VideoTaskStatus.RENDERING, {
             step,
             outputVideoUrl: context.outputVideoUrl,
-            deepSynthesis: context.deepSynthesisMarker?.manifest,
+            metadata: {
+              pipeline: {
+                brandEdit: context.brandEditResult || null,
+                videoGeneration: context.videoGenResult || null,
+              },
+            },
           })
           break
-        case 'quality-check': {
-          await this.videoService.updateStatus(taskId, VideoTaskStatus.QUALITY_CHECK, { step })
-          const report = await this.requirePipelineService().runQualityCheck(this.requireContext(context))
-          await this.videoService.updateStatus(taskId, VideoTaskStatus.QUALITY_CHECK, {
-            step,
-            quality: report.metrics,
-          })
-          context = {
-            ...this.requireContext(context),
-            qualityReport: report,
-          } as any
-          break
-        }
         case 'generate-copy': {
           await this.videoService.updateStatus(taskId, VideoTaskStatus.GENERATING_COPY, { step })
           const outputVideoUrl = context?.outputVideoUrl || task.outputVideoUrl || task.sourceVideoUrl
@@ -97,26 +90,36 @@ export class VideoWorkerProcessor extends WorkerHost {
               brandId: task.brandId?.toString() || null,
             },
           )
-          const completedTask = await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
+          context = await this.requirePipelineService().finalizeVideo(task, this.requireContext(context), copy)
+          await this.videoService.updateStatus(taskId, VideoTaskStatus.GENERATING_COPY, {
             step,
-            outputVideoUrl,
-            quality: task.quality,
+            outputVideoUrl: context.outputVideoUrl,
             copy,
+            deepSynthesis: context.deepSynthesisMarker?.manifest,
+            metadata: {
+              pipeline: {
+                brandEdit: context.brandEditResult || null,
+                videoGeneration: context.videoGenResult || null,
+              },
+            },
           })
-          await this.videoService.completeIterationStep(taskId, step, {
-            outputVideoUrl,
-            title: copy.title,
-            hashtags: copy.hashtags,
-          })
-          if (completedTask) {
-            const reviewAwareTask = this.contentMgmtService
-              ? await this.contentMgmtService.initializeWorkflowForTask(taskId)
-              : completedTask
-            await this.distributionService.notifyTaskComplete(reviewAwareTask as any)
+          break
+        }
+        case 'quality-check': {
+          await this.videoService.updateStatus(taskId, VideoTaskStatus.QUALITY_CHECK, { step })
+          const report = await this.requirePipelineService().runQualityCheck(this.requireContext(context))
+          context = {
+            ...this.requireContext(context),
+            qualityReport: report,
           }
-          await this.pipelineService?.cleanupWorkspace(context)
-          this.logger.log(`Video task completed: ${taskId}`)
-          return
+          completedTask = await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
+            step,
+            outputVideoUrl: context.outputVideoUrl,
+            quality: report.metrics,
+            copy: task.copy,
+            deepSynthesis: context.deepSynthesisMarker?.manifest,
+          })
+          break
         }
         default:
           this.logger.warn(`Unknown worker step received: ${job.name}`)
@@ -131,6 +134,15 @@ export class VideoWorkerProcessor extends WorkerHost {
 
       const nextStep = NEXT_STEP_MAP[step]
       if (!nextStep) {
+        if (step === 'quality-check' && completedTask) {
+          const reviewAwareTask = this.contentMgmtService
+            ? await this.contentMgmtService.initializeWorkflowForTask(taskId)
+            : completedTask
+          await this.distributionService.notifyTaskComplete(reviewAwareTask as any)
+          this.logger.log(`Video task completed: ${taskId}`)
+        }
+
+        await this.pipelineService?.cleanupWorkspace(context)
         return
       }
 
@@ -214,19 +226,26 @@ export class VideoWorkerProcessor extends WorkerHost {
         return {
           frameCount: context.frameArtifacts?.length || 0,
           brandName: context.brand?.name || '',
+          brandEditStatus: context.brandEditResult?.status || 'completed',
+          brandEditReason: context.brandEditResult?.reason || '',
         }
       case 'render-video':
         return {
           outputVideoUrl: context.outputVideoUrl || '',
           segmentCount: context.segmentVideoPaths?.length || 0,
-        }
-      case 'quality-check':
-        return {
-          finalVideoPath: context.finalVideoPath || '',
+          videoGenStatus: context.videoGenResult?.status || 'completed',
+          videoGenReason: context.videoGenResult?.reason || '',
         }
       case 'generate-copy':
         return {
           outputVideoUrl: context.outputVideoUrl || '',
+          finalVideoPath: context.finalVideoPath || '',
+        }
+      case 'quality-check':
+        return {
+          finalVideoPath: context.finalVideoPath || '',
+          qualityPassed: context.qualityReport?.passed ?? false,
+          qualityErrors: context.qualityReport?.errors || [],
         }
       default:
         return {}

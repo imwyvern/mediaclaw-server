@@ -2,8 +2,13 @@ import { Injectable, Logger, Optional } from '@nestjs/common'
 import { OrgApiKeyProvider } from '@yikart/mongodb'
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PipelineFrameArtifact, PipelineJobContext } from './pipeline.types'
+import {
+  PipelineFrameArtifact,
+  PipelineJobContext,
+  PipelineStepExecutionResult,
+} from './pipeline.types'
 import { downloadFile, requestJson } from './pipeline.utils'
+import { MediaclawConfigService } from '../mediaclaw-config.service'
 import { ByokService } from '../settings/byok.service'
 
 interface VectorEngineImageResponse {
@@ -12,24 +17,52 @@ interface VectorEngineImageResponse {
   result?: Record<string, unknown>
 }
 
+interface BrandEditRunResult {
+  artifacts: PipelineFrameArtifact[]
+  result: PipelineStepExecutionResult
+}
+
+interface BrandEditRuntimeConfig {
+  apiKey: string
+  baseUrl: string
+  editPath: string
+  model: string
+}
+
 @Injectable()
 export class BrandEditService {
   private readonly logger = new Logger(BrandEditService.name)
 
   constructor(
+    private readonly configService: MediaclawConfigService,
     @Optional() private readonly byokService?: ByokService,
   ) {}
 
-  async applyBranding(context: PipelineJobContext): Promise<PipelineFrameArtifact[]> {
-    const provider = await this.resolveProvider(context.orgId)
+  async applyBranding(context: PipelineJobContext): Promise<BrandEditRunResult> {
+    const runtime = await this.resolveRuntimeConfig(context.orgId)
+    if (!runtime) {
+      return {
+        artifacts: await this.copySourceFrames(context),
+        result: {
+          provider: 'vce_gemini',
+          status: 'skipped',
+          reason: 'no_api_key',
+        },
+      }
+    }
+
     const artifacts: PipelineFrameArtifact[] = []
+    let fallbackReason = ''
 
     for (const frame of context.frameArtifacts) {
       const editedPath = join(context.workspaceDir, `edited-frame-${frame.index + 1}.png`)
-      if (provider === 'vectorengine') {
-        await this.applyVectorEngineEdit(context, frame, editedPath)
+
+      try {
+        await this.applyVectorEngineEdit(context, frame, editedPath, runtime)
       }
-      else {
+      catch (error) {
+        fallbackReason = fallbackReason || 'request_failed'
+        this.logger.warn(`品牌编辑回退到本地拷贝: ${error instanceof Error ? error.message : String(error)}`)
         await copyFile(frame.sourcePath, editedPath)
       }
 
@@ -39,37 +72,75 @@ export class BrandEditService {
       })
     }
 
+    return {
+      artifacts,
+      result: fallbackReason
+        ? {
+            provider: 'vce_gemini',
+            status: 'skipped',
+            reason: fallbackReason,
+          }
+        : {
+            provider: 'vce_gemini',
+            status: 'completed',
+          },
+    }
+  }
+
+  private async copySourceFrames(context: PipelineJobContext) {
+    const artifacts: PipelineFrameArtifact[] = []
+
+    for (const frame of context.frameArtifacts) {
+      const editedPath = join(context.workspaceDir, `edited-frame-${frame.index + 1}.png`)
+      await copyFile(frame.sourcePath, editedPath)
+      artifacts.push({
+        ...frame,
+        editedPath,
+      })
+    }
+
     return artifacts
   }
 
-  private async resolveProvider(orgId?: string | null) {
-    const provider = process.env['MEDIACLAW_BRAND_EDIT_PROVIDER']?.trim().toLowerCase()
+  private async resolveRuntimeConfig(orgId?: string | null): Promise<BrandEditRuntimeConfig | null> {
+    const provider = this.configService.getString(
+      ['MEDIACLAW_BRAND_EDIT_PROVIDER'],
+      'vectorengine',
+    ).toLowerCase()
+
+    if (provider === 'mock' || provider === 'local') {
+      return null
+    }
+
     const apiKey = await this.resolveApiKey(orgId)
-    if (provider === 'vectorengine' && apiKey) {
-      return 'vectorengine'
+    if (!apiKey) {
+      this.logger.warn('品牌编辑缺少可用 API key，返回 skipped 并使用原始帧')
+      return null
     }
 
-    if (provider === 'vectorengine' && !apiKey) {
-      this.logger.warn('品牌编辑缺少可用 API key，降级为 mock 模式')
+    return {
+      apiKey,
+      baseUrl: this.configService.getString(
+        ['VCE_GEMINI_BASE_URL', 'MEDIACLAW_VCE_BASE_URL'],
+        'https://api.vectorengine.cn',
+      ),
+      editPath: this.configService.getString(
+        ['VCE_GEMINI_EDIT_PATH', 'MEDIACLAW_VCE_EDIT_PATH'],
+        '/v1/images/edits',
+      ),
+      model: this.configService.getString(
+        ['VCE_GEMINI_IMAGE_MODEL', 'MEDIACLAW_VCE_MODEL'],
+        'gemini-2.5-flash-image',
+      ),
     }
-
-    return 'mock'
   }
 
   private async applyVectorEngineEdit(
     context: PipelineJobContext,
     frame: PipelineFrameArtifact,
     editedPath: string,
+    runtime: BrandEditRuntimeConfig,
   ) {
-    const baseUrl = process.env['MEDIACLAW_VCE_BASE_URL']?.trim() || 'https://api.vectorengine.cn'
-    const editPath = process.env['MEDIACLAW_VCE_EDIT_PATH']?.trim() || '/v1/images/edits'
-    const apiKey = await this.resolveApiKey(context.orgId)
-    const model = process.env['MEDIACLAW_VCE_MODEL']?.trim() || 'gemini-2.5-flash-image'
-    if (!apiKey) {
-      await copyFile(frame.sourcePath, editedPath)
-      return
-    }
-
     const prompt = context.prompts['edit-frames'] || this.buildPrompt(context, frame)
     context.prompts['edit-frames'] = prompt
     const imageBase64 = (await readFile(frame.sourcePath)).toString('base64')
@@ -78,15 +149,15 @@ export class BrandEditService {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         const response = await requestJson<VectorEngineImageResponse>(
-          `${baseUrl.replace(/\/+$/, '')}${editPath}`,
+          `${runtime.baseUrl.replace(/\/+$/, '')}${runtime.editPath}`,
           {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${apiKey}`,
+              Authorization: `Bearer ${runtime.apiKey}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              model,
+              model: runtime.model,
               prompt,
               image: imageBase64,
               response_format: 'url',
@@ -108,18 +179,18 @@ export class BrandEditService {
 
   private async resolveApiKey(orgId?: string | null) {
     if (this.byokService) {
-      const key = await this.byokService.getProviderRuntimeKey(
-        orgId,
-        OrgApiKeyProvider.VCE,
-        'MEDIACLAW_VCE_API_KEY',
-      )
+      const key = await this.byokService.getProviderRuntimeKey(orgId, OrgApiKeyProvider.VCE)
       if (key) {
         return key
       }
     }
 
-    return process.env['MEDIACLAW_VCE_API_KEY']?.trim() || ''
+    return this.configService.getString([
+      'VCE_GEMINI_API_KEY',
+      'MEDIACLAW_VCE_API_KEY',
+    ])
   }
+
   private buildPrompt(context: PipelineJobContext, frame: PipelineFrameArtifact) {
     const colors = context.brand.colors.slice(0, 3).join(', ') || 'brand primary palette'
     const slogans = context.brand.slogans.slice(0, 2).join(' / ')

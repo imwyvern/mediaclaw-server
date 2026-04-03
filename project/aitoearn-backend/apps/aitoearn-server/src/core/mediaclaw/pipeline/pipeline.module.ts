@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import { Brand, BrandSchema, Pipeline, PipelineSchema, VideoTask, VideoTaskSchema } from '@yikart/mongodb'
+import { MediaclawConfigModule } from '../mediaclaw-config.module'
 import { SettingsModule } from '../settings/settings.module'
 import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { BrandEditService } from './brand-edit.service'
@@ -21,6 +22,7 @@ import { VideoGenService } from './video-gen.service'
       { name: Brand.name, schema: BrandSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
+    MediaclawConfigModule,
     SettingsModule,
     VideoWorkerQueueModule,
   ],

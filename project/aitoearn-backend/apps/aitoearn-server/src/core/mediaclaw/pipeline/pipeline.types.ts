@@ -83,6 +83,12 @@ export interface PipelineSubtitleRenderResult {
   deepSynthesisMarker: PipelineDeepSynthesisMarker
 }
 
+export interface PipelineStepExecutionResult {
+  provider: string
+  status: 'completed' | 'skipped'
+  reason?: string
+}
+
 export interface PipelineJobContext {
   taskId: string
   orgId?: string | null
@@ -104,4 +110,7 @@ export interface PipelineJobContext {
   finalVideoPath?: string
   outputVideoUrl?: string
   deepSynthesisMarker?: PipelineDeepSynthesisMarker
+  brandEditResult?: PipelineStepExecutionResult
+  videoGenResult?: PipelineStepExecutionResult
+  qualityReport?: PipelineQualityReport
 }

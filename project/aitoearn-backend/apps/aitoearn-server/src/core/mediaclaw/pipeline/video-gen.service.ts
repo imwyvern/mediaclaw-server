@@ -2,8 +2,13 @@ import { Injectable, Logger, Optional } from '@nestjs/common'
 import { OrgApiKeyProvider } from '@yikart/mongodb'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PipelineFrameArtifact, PipelineJobContext } from './pipeline.types'
+import {
+  PipelineFrameArtifact,
+  PipelineJobContext,
+  PipelineStepExecutionResult,
+} from './pipeline.types'
 import { downloadFile, requestJson, runCommand } from './pipeline.utils'
+import { MediaclawConfigService } from '../mediaclaw-config.service'
 import { ByokService } from '../settings/byok.service'
 
 interface KlingCreateResponse {
@@ -19,31 +24,69 @@ interface KlingStatusResponse {
   result?: Record<string, unknown>
 }
 
+interface VideoGenRuntimeConfig {
+  apiKey: string
+  baseUrl: string
+  createPath: string
+  statusPathTemplate: string
+  model: string
+  intervalMs: number
+  maxPolls: number
+}
+
+interface VideoGenRunResult {
+  segmentPaths: string[]
+  result: PipelineStepExecutionResult
+}
+
 @Injectable()
 export class VideoGenService {
   private readonly logger = new Logger(VideoGenService.name)
 
   constructor(
+    private readonly configService: MediaclawConfigService,
     @Optional() private readonly byokService?: ByokService,
   ) {}
 
-  async generateSegments(context: PipelineJobContext) {
-    const provider = await this.resolveProvider(context.orgId)
+  async generateSegments(context: PipelineJobContext): Promise<VideoGenRunResult> {
+    const runtime = await this.resolveRuntimeConfig(context.orgId)
     const segmentDurationSeconds = this.resolveSegmentDuration(context)
     const segmentPaths: string[] = []
+    let fallbackReason = runtime ? '' : 'no_api_key'
 
     for (const frame of context.frameArtifacts) {
       const outputPath = join(context.workspaceDir, `segment-${frame.index + 1}.mp4`)
-      if (provider === 'vectorengine') {
-        await this.generateWithKling(context, frame, outputPath, segmentDurationSeconds)
+
+      if (runtime) {
+        try {
+          await this.generateWithKling(context, frame, outputPath, segmentDurationSeconds, runtime)
+        }
+        catch (error) {
+          fallbackReason = fallbackReason || 'request_failed'
+          this.logger.warn(`Kling 生成回退到本地 mock 片段: ${error instanceof Error ? error.message : String(error)}`)
+          await this.generateMockSegment(context, frame, outputPath, segmentDurationSeconds)
+        }
       }
       else {
         await this.generateMockSegment(context, frame, outputPath, segmentDurationSeconds)
       }
+
       segmentPaths.push(outputPath)
     }
 
-    return segmentPaths
+    return {
+      segmentPaths,
+      result: fallbackReason
+        ? {
+            provider: 'kling_v3',
+            status: 'skipped',
+            reason: fallbackReason,
+          }
+        : {
+            provider: 'kling_v3',
+            status: 'completed',
+          },
+    }
   }
 
   async composeSegments(context: PipelineJobContext, segmentVideoPaths: string[]) {
@@ -138,34 +181,65 @@ export class VideoGenService {
     return finalOutputPath
   }
 
-  private async resolveProvider(orgId?: string | null) {
-    const provider = process.env['MEDIACLAW_VIDEO_GEN_PROVIDER']?.trim().toLowerCase()
+  private async resolveRuntimeConfig(orgId?: string | null): Promise<VideoGenRuntimeConfig | null> {
+    const provider = this.configService.getString(
+      ['MEDIACLAW_VIDEO_GEN_PROVIDER'],
+      'kling',
+    ).toLowerCase()
+
+    if (provider === 'mock' || provider === 'local') {
+      return null
+    }
+
     const apiKey = await this.resolveApiKey(orgId)
-    if (provider === 'vectorengine' && apiKey) {
-      return 'vectorengine'
+    if (!apiKey) {
+      this.logger.warn('视频生成缺少可用 API key，返回 skipped 并生成本地 mock 片段')
+      return null
     }
 
-    if (provider === 'vectorengine' && !apiKey) {
-      this.logger.warn('视频生成缺少可用 API key，降级为 mock 模式')
+    return {
+      apiKey,
+      baseUrl: this.configService.getString(
+        ['KLING_BASE_URL', 'MEDIACLAW_KLING_BASE_URL'],
+        'https://api.vectorengine.ai',
+      ),
+      createPath: this.configService.getString(
+        ['KLING_CREATE_PATH', 'MEDIACLAW_KLING_CREATE_PATH'],
+        '/v1/videos',
+      ),
+      statusPathTemplate: this.configService.getString(
+        ['KLING_STATUS_PATH', 'MEDIACLAW_KLING_STATUS_PATH'],
+        '/v1/videos/{taskId}',
+      ),
+      model: this.configService.getString(
+        ['KLING_MODEL', 'MEDIACLAW_KLING_MODEL'],
+        'kling-v3-omni',
+      ),
+      intervalMs: this.configService.getNumber(
+        ['KLING_POLL_INTERVAL_MS', 'MEDIACLAW_KLING_POLL_INTERVAL_MS'],
+        5_000,
+      ),
+      maxPolls: this.configService.getNumber(
+        ['KLING_MAX_POLLS', 'MEDIACLAW_KLING_MAX_POLLS'],
+        24,
+      ),
     }
-
-    return 'mock'
   }
 
   private async resolveApiKey(orgId?: string | null) {
     if (this.byokService) {
-      const key = await this.byokService.getProviderRuntimeKey(
-        orgId,
-        OrgApiKeyProvider.KLING,
-        'MEDIACLAW_KLING_API_KEY',
-      )
+      const key = await this.byokService.getProviderRuntimeKey(orgId, OrgApiKeyProvider.KLING)
       if (key) {
         return key
       }
     }
 
-    return process.env['MEDIACLAW_KLING_API_KEY']?.trim() || ''
+    return this.configService.getString([
+      'KLING_API_KEY',
+      'MEDIACLAW_KLING_API_KEY',
+    ])
   }
+
   private resolveSegmentDuration(context: PipelineJobContext) {
     const segmentCount = context.frameArtifacts.length || 3
     return Number(Math.max(context.targetDurationSeconds / segmentCount, 3).toFixed(3))
@@ -205,37 +279,28 @@ export class VideoGenService {
     frame: PipelineFrameArtifact,
     outputPath: string,
     durationSeconds: number,
+    runtime: VideoGenRuntimeConfig,
   ) {
-    const baseUrl = process.env['MEDIACLAW_KLING_BASE_URL']?.trim() || 'https://api.vectorengine.ai'
-    const createPath = process.env['MEDIACLAW_KLING_CREATE_PATH']?.trim() || '/v1/videos'
-    const statusPathTemplate = process.env['MEDIACLAW_KLING_STATUS_PATH']?.trim() || '/v1/videos/{taskId}'
-    const apiKey = await this.resolveApiKey(context.orgId)
-    const model = process.env['MEDIACLAW_KLING_MODEL']?.trim() || 'kling-v3-omni'
-    if (!apiKey) {
-      await this.generateMockSegment(context, frame, outputPath, durationSeconds)
-      return
-    }
-
     const inputPath = frame.editedPath || frame.sourcePath
     const imageBase64 = (await readFile(inputPath)).toString('base64')
     const prompt = context.prompts['render-video'] || [
       `Generate a short branded video clip for ${context.brand.name}.`,
       `Use the ${frame.label} frame as the driving image.`,
       `Keep it vertical ${context.renderWidth}x${context.renderHeight}.`,
-      `The brand text will be added after subtitle rendering, so keep lower thirds clean.`,
+      'The brand text will be added after copy generation and subtitle rendering, so keep lower thirds clean.',
     ].join(' ')
     context.prompts['render-video'] = prompt
 
     const createResponse = await requestJson<KlingCreateResponse>(
-      `${baseUrl.replace(/\/+$/, '')}${createPath}`,
+      `${runtime.baseUrl.replace(/\/+$/, '')}${runtime.createPath}`,
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          Authorization: `Bearer ${runtime.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model,
+          model: runtime.model,
           prompt,
           image: imageBase64,
           duration: Number(durationSeconds.toFixed(1)),
@@ -257,17 +322,14 @@ export class VideoGenService {
       throw new Error('Kling response missing task id')
     }
 
-    const intervalMs = Number(process.env['MEDIACLAW_KLING_POLL_INTERVAL_MS'] || 5_000)
-    const maxPolls = Number(process.env['MEDIACLAW_KLING_MAX_POLLS'] || 24)
-
-    for (let poll = 1; poll <= maxPolls; poll += 1) {
-      const statusPath = statusPathTemplate.replace('{taskId}', taskId)
+    for (let poll = 1; poll <= runtime.maxPolls; poll += 1) {
+      const statusPath = runtime.statusPathTemplate.replace('{taskId}', taskId)
       const statusResponse = await requestJson<KlingStatusResponse>(
-        `${baseUrl.replace(/\/+$/, '')}${statusPath}`,
+        `${runtime.baseUrl.replace(/\/+$/, '')}${statusPath}`,
         {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
+            Authorization: `Bearer ${runtime.apiKey}`,
           },
           timeoutMs: 120_000,
         },
@@ -298,7 +360,7 @@ export class VideoGenService {
         throw new Error(`Kling generation failed for ${taskId}`)
       }
 
-      await new Promise(resolve => setTimeout(resolve, intervalMs))
+      await new Promise(resolve => setTimeout(resolve, runtime.intervalMs))
     }
 
     throw new Error(`Kling generation timed out for ${taskId}`)
