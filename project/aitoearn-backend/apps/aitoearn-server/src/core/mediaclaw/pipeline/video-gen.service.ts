@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common'
+import { Injectable, Optional } from '@nestjs/common'
 import { OrgApiKeyProvider } from '@yikart/mongodb'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -41,8 +41,6 @@ interface VideoGenRunResult {
 
 @Injectable()
 export class VideoGenService {
-  private readonly logger = new Logger(VideoGenService.name)
-
   constructor(
     private readonly configService: MediaclawConfigService,
     @Optional() private readonly byokService?: ByokService,
@@ -52,40 +50,20 @@ export class VideoGenService {
     const runtime = await this.resolveRuntimeConfig(context.orgId)
     const segmentDurationSeconds = this.resolveSegmentDuration(context)
     const segmentPaths: string[] = []
-    let fallbackReason = runtime ? '' : 'no_api_key'
 
     for (const frame of context.frameArtifacts) {
       const outputPath = join(context.workspaceDir, `segment-${frame.index + 1}.mp4`)
-
-      if (runtime) {
-        try {
-          await this.generateWithKling(context, frame, outputPath, segmentDurationSeconds, runtime)
-        }
-        catch (error) {
-          fallbackReason = fallbackReason || 'request_failed'
-          this.logger.warn(`Kling 生成回退到本地 mock 片段: ${error instanceof Error ? error.message : String(error)}`)
-          await this.generateMockSegment(context, frame, outputPath, segmentDurationSeconds)
-        }
-      }
-      else {
-        await this.generateMockSegment(context, frame, outputPath, segmentDurationSeconds)
-      }
+      await this.generateWithKling(context, frame, outputPath, segmentDurationSeconds, runtime)
 
       segmentPaths.push(outputPath)
     }
 
     return {
       segmentPaths,
-      result: fallbackReason
-        ? {
-            provider: 'kling_v3',
-            status: 'skipped',
-            reason: fallbackReason,
-          }
-        : {
-            provider: 'kling_v3',
-            status: 'completed',
-          },
+      result: {
+        provider: 'kling_v3',
+        status: 'completed',
+      },
     }
   }
 
@@ -181,20 +159,19 @@ export class VideoGenService {
     return finalOutputPath
   }
 
-  private async resolveRuntimeConfig(orgId?: string | null): Promise<VideoGenRuntimeConfig | null> {
+  private async resolveRuntimeConfig(orgId?: string | null): Promise<VideoGenRuntimeConfig> {
     const provider = this.configService.getString(
       ['MEDIACLAW_VIDEO_GEN_PROVIDER'],
       'kling',
     ).toLowerCase()
 
-    if (provider === 'mock' || provider === 'local') {
-      return null
+    if (provider && provider !== 'kling' && provider !== 'vce') {
+      throw new Error(`Unsupported video generation provider: ${provider}`)
     }
 
     const apiKey = await this.resolveApiKey(orgId)
     if (!apiKey) {
-      this.logger.warn('视频生成缺少可用 API key，返回 skipped 并生成本地 mock 片段')
-      return null
+      throw new Error('Kling video generation requires a configured API key')
     }
 
     return {
@@ -205,11 +182,11 @@ export class VideoGenService {
       ),
       createPath: this.configService.getString(
         ['KLING_CREATE_PATH', 'MEDIACLAW_KLING_CREATE_PATH'],
-        '/v1/videos',
+        '/kling/v1/videos/omni-video',
       ),
       statusPathTemplate: this.configService.getString(
         ['KLING_STATUS_PATH', 'MEDIACLAW_KLING_STATUS_PATH'],
-        '/v1/videos/{taskId}',
+        '/kling/v1/videos/omni-video/{taskId}',
       ),
       model: this.configService.getString(
         ['KLING_MODEL', 'MEDIACLAW_KLING_MODEL'],
@@ -228,50 +205,36 @@ export class VideoGenService {
 
   private async resolveApiKey(orgId?: string | null) {
     if (this.byokService) {
-      const key = await this.byokService.getProviderRuntimeKey(orgId, OrgApiKeyProvider.KLING)
-      if (key) {
-        return key
+      const klingKey = await this.byokService.resolveApiKey(
+        orgId,
+        OrgApiKeyProvider.KLING,
+        ['KLING_API_KEY', 'MEDIACLAW_KLING_API_KEY'],
+      )
+      if (klingKey) {
+        return klingKey
+      }
+
+      const vceKey = await this.byokService.resolveApiKey(
+        orgId,
+        OrgApiKeyProvider.VCE,
+        ['VCE_GEMINI_API_KEY', 'MEDIACLAW_VCE_API_KEY'],
+      )
+      if (vceKey) {
+        return vceKey
       }
     }
 
     return this.configService.getString([
       'KLING_API_KEY',
       'MEDIACLAW_KLING_API_KEY',
+      'VCE_GEMINI_API_KEY',
+      'MEDIACLAW_VCE_API_KEY',
     ])
   }
 
   private resolveSegmentDuration(context: PipelineJobContext) {
     const segmentCount = context.frameArtifacts.length || 3
     return Number(Math.max(context.targetDurationSeconds / segmentCount, 3).toFixed(3))
-  }
-
-  private async generateMockSegment(
-    context: PipelineJobContext,
-    frame: PipelineFrameArtifact,
-    outputPath: string,
-    durationSeconds: number,
-  ) {
-    const inputPath = frame.editedPath || frame.sourcePath
-    await runCommand(
-      'ffmpeg',
-      [
-        '-y',
-        '-loop',
-        '1',
-        '-i',
-        inputPath,
-        '-vf',
-        `scale=${context.renderWidth}:${context.renderHeight}:force_original_aspect_ratio=increase,crop=${context.renderWidth}:${context.renderHeight},zoompan=z='min(zoom+0.0008,1.08)':d=150:s=${context.renderWidth}x${context.renderHeight},fps=30`,
-        '-t',
-        durationSeconds.toFixed(3),
-        '-pix_fmt',
-        'yuv420p',
-        '-c:v',
-        'libx264',
-        outputPath,
-      ],
-      { timeoutMs: 120_000 },
-    )
   }
 
   private async generateWithKling(
