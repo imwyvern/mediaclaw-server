@@ -17,6 +17,7 @@ import { CopyEngineService } from './copy-engine.service'
 import { CopyStrategyService } from './copy-strategy.service'
 import { CopyController } from './copy.controller'
 import { CopyService } from './copy.service'
+import { StyleRewriteService } from './style-rewrite.service'
 
 @Module({
   imports: [
@@ -30,7 +31,7 @@ import { CopyService } from './copy.service'
     SettingsModule,
   ],
   controllers: [CopyController],
-  providers: [CopyEngineService, CopyStrategyService, CopyService],
-  exports: [CopyEngineService, CopyStrategyService, CopyService],
+  providers: [CopyEngineService, CopyStrategyService, CopyService, StyleRewriteService],
+  exports: [CopyEngineService, CopyStrategyService, CopyService, StyleRewriteService],
 })
 export class CopyModule {}

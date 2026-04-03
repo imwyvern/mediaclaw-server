@@ -2,6 +2,7 @@ import { Body, Get, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { CopyService } from './copy.service'
+import { StyleRewriteService } from './style-rewrite.service'
 import type {
   GenerateCopyHttpInput,
   RecordCopyPerformanceInput,
@@ -10,7 +11,10 @@ import type {
 
 @MediaClawApiController('api/v1/copy')
 export class CopyController {
-  constructor(private readonly copyService: CopyService) {}
+  constructor(
+    private readonly copyService: CopyService,
+    private readonly styleRewriteService: StyleRewriteService,
+  ) {}
 
   @Post('generate')
   async generateCopy(
@@ -26,6 +30,32 @@ export class CopyController {
     @Body() body: RewriteCopyHttpInput,
   ) {
     return this.copyService.rewriteForHttp(user.orgId || user.id || '', user.id || '', body)
+  }
+
+  @Post('rewrite-style')
+  async rewriteStyle(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: {
+      text?: string
+      fromPlatform?: string
+      toPlatform?: string
+      styleGuide?: string
+      brandId?: string
+      taskId?: string
+    },
+  ) {
+    return this.styleRewriteService.rewriteForPlatform(
+      body.text || '',
+      body.fromPlatform || '',
+      body.toPlatform || '',
+      body.styleGuide,
+      {
+        orgId: user.orgId || user.id || '',
+        userId: user.id || '',
+        taskId: body.taskId || null,
+        brandId: body.brandId || null,
+      },
+    )
   }
 
   @Post('blue-words')

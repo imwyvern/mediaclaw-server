@@ -21,6 +21,11 @@ export interface GeneratedCopyRecord {
   copy: GeneratedCopy
 }
 
+export interface GeneratedTextResult {
+  text: string
+  provider: CopyProvider
+}
+
 type CopyProvider = 'deepseek' | 'gemini' | 'heuristic'
 
 interface CopyHistoryPayload extends GeneratedCopy {
@@ -56,6 +61,12 @@ interface CopyTokenUsage {
 
 interface CopyLlmResult {
   draft: GeneratedCopyDraft | null
+  tokenUsage: CopyTokenUsage
+  provider: CopyProvider
+}
+
+interface CopyTextLlmResult {
+  text: string
   tokenUsage: CopyTokenUsage
   provider: CopyProvider
 }
@@ -299,6 +310,32 @@ export class CopyEngineService {
     return [...new Set(candidates)].slice(0, normalizedCount)
   }
 
+  async generateText(
+    prompt: string,
+    metadata: Record<string, any> = {},
+    options: {
+      systemPrompt?: string
+      temperature?: number
+      fallbackText?: string
+      usageSource?: string
+      brandId?: string | null
+    } = {},
+  ): Promise<GeneratedTextResult> {
+    const result = await this.generateTextFromPrompt(prompt, metadata, options)
+
+    await this.recordLlmUsage(
+      result,
+      metadata,
+      options.brandId || null,
+      options.usageSource || 'copy-engine-text',
+    )
+
+    return {
+      text: result.text || options.fallbackText?.trim() || '',
+      provider: result.provider,
+    }
+  }
+
   async checkDedupHistory(orgId: string, content: string | { title?: string, subtitle?: string }) {
     if (!Types.ObjectId.isValid(orgId)) {
       return {
@@ -385,6 +422,34 @@ export class CopyEngineService {
       const message = error instanceof Error ? error.message : 'Unknown copy provider error'
       this.logger.warn(`文案 LLM 调用失败，降级为 heuristic: ${message}`)
       return this.createEmptyLlmResult('heuristic')
+    }
+  }
+
+  private async generateTextFromPrompt(
+    prompt: string,
+    metadata: Record<string, any>,
+    options: {
+      systemPrompt?: string
+      temperature?: number
+      fallbackText?: string
+    } = {},
+  ): Promise<CopyTextLlmResult> {
+    const provider = await this.resolveProvider(metadata)
+
+    try {
+      switch (provider) {
+        case 'deepseek':
+          return await this.generateTextWithDeepSeek(prompt, metadata, options)
+        case 'gemini':
+          return await this.generateTextWithGemini(prompt, metadata, options)
+        default:
+          return this.createEmptyTextLlmResult('heuristic', options.fallbackText)
+      }
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown text provider error'
+      this.logger.warn(`文本 LLM 调用失败，降级为 heuristic: ${message}`)
+      return this.createEmptyTextLlmResult('heuristic', options.fallbackText)
     }
   }
 
@@ -612,6 +677,117 @@ export class CopyEngineService {
     }
   }
 
+  private async generateTextWithDeepSeek(
+    prompt: string,
+    metadata: Record<string, any>,
+    options: {
+      systemPrompt?: string
+      temperature?: number
+      fallbackText?: string
+    } = {},
+  ): Promise<CopyTextLlmResult> {
+    const apiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
+    if (!apiKey) {
+      return this.createEmptyTextLlmResult('heuristic', options.fallbackText)
+    }
+
+    const baseUrl = process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com'
+    const model = process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || 'deepseek-chat'
+    const response = await this.requestJson<DeepSeekResponse>(
+      `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: options.systemPrompt?.trim() || 'Return plain text only.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: typeof options.temperature === 'number' ? options.temperature : 0.7,
+        }),
+        timeoutMs: 60_000,
+      },
+    )
+
+    const text = (response.choices?.[0]?.message?.content || '').trim()
+
+    return {
+      text: text || options.fallbackText?.trim() || '',
+      tokenUsage: this.buildTokenUsage({
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        totalTokens: response.usage?.total_tokens,
+        model: response.model || model,
+        prompt,
+        completion: text,
+      }),
+      provider: 'deepseek',
+    }
+  }
+
+  private async generateTextWithGemini(
+    prompt: string,
+    metadata: Record<string, any>,
+    options: {
+      systemPrompt?: string
+      temperature?: number
+      fallbackText?: string
+    } = {},
+  ): Promise<CopyTextLlmResult> {
+    const apiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
+    if (!apiKey) {
+      return this.createEmptyTextLlmResult('heuristic', options.fallbackText)
+    }
+
+    const baseUrl = process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta'
+    const model = process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
+    const response = await this.requestJson<GeminiResponse>(
+      `${baseUrl.replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{
+                text: [
+                  options.systemPrompt?.trim() || 'Return plain text only.',
+                  prompt,
+                ].filter(Boolean).join('\n\n'),
+              }],
+            },
+          ],
+          generationConfig: {
+            temperature: typeof options.temperature === 'number' ? options.temperature : 0.7,
+          },
+        }),
+        timeoutMs: 60_000,
+      },
+    )
+
+    const text = (response.candidates?.[0]?.content?.parts?.[0]?.text || '').trim()
+
+    return {
+      text: text || options.fallbackText?.trim() || '',
+      tokenUsage: this.buildTokenUsage({
+        inputTokens: response.usageMetadata?.promptTokenCount,
+        outputTokens: response.usageMetadata?.candidatesTokenCount,
+        totalTokens: response.usageMetadata?.totalTokenCount,
+        model: response.modelVersion || model,
+        prompt,
+        completion: text,
+      }),
+      provider: 'gemini',
+    }
+  }
+
   private async resolveApiKey(
     metadata: Record<string, any>,
     provider: OrgApiKeyProvider,
@@ -762,6 +938,19 @@ export class CopyEngineService {
     }
   }
 
+  private createEmptyTextLlmResult(provider: CopyProvider, fallbackText?: string): CopyTextLlmResult {
+    return {
+      text: fallbackText?.trim() || '',
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        model: '',
+        cost: 0,
+      },
+      provider,
+    }
+  }
+
   private buildTokenUsage(input: {
     inputTokens?: number
     outputTokens?: number
@@ -827,9 +1016,10 @@ export class CopyEngineService {
   }
 
   private async recordLlmUsage(
-    result: CopyLlmResult,
+    result: Pick<CopyLlmResult, 'tokenUsage' | 'provider'> | Pick<CopyTextLlmResult, 'tokenUsage' | 'provider'>,
     metadata: Record<string, any>,
     brandId: string | null,
+    source = 'copy-engine',
   ) {
     if (!this.usageService) {
       return
@@ -855,7 +1045,7 @@ export class CopyEngineService {
           taskId: this.readMetadataObjectId(metadata, 'taskId'),
           brandId,
           provider: result.provider,
-          source: 'copy-engine',
+          source,
         },
       )
     }
