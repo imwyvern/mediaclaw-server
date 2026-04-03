@@ -21,6 +21,10 @@ import {
 } from "./content-generation-task.schema";
 import { Competitor, CompetitorSchema } from "./competitor.schema";
 import { CopyHistory, CopyHistorySchema } from "./copy-history.schema";
+import {
+  CopyPerformance,
+  CopyPerformanceSchema,
+} from "./copy-performance.schema";
 import { CreditsBalance, CreditsBalanceSchema } from "./credits-balance.schema";
 import { CreditsRecord, CreditsRecordSchema } from "./credits-record.schema";
 import { DeliveryRecord, DeliveryRecordSchema } from "./delivery-record.schema";
@@ -120,6 +124,7 @@ export * from "./clawhost-instance.schema";
 export * from "./competitor.schema";
 export * from "./content-generation-task.schema";
 export * from "./copy-history.schema";
+export * from "./copy-performance.schema";
 export * from "./credits-balance.schema";
 export * from "./credits-record.schema";
 export * from "./delivery-record.schema";
@@ -182,6 +187,7 @@ export const schemas = [
   { name: Competitor.name, schema: CompetitorSchema },
   { name: ContentGenerationTask.name, schema: ContentGenerationTaskSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },
+  { name: CopyPerformance.name, schema: CopyPerformanceSchema },
   { name: DiscoveryNotification.name, schema: DiscoveryNotificationSchema },
   { name: DistributionRule.name, schema: DistributionRuleSchema },
   { name: EmployeeAssignment.name, schema: EmployeeAssignmentSchema },

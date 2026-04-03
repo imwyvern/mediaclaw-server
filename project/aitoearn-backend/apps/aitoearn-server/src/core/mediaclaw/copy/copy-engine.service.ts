@@ -1,8 +1,8 @@
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { Brand, CopyHistory, OrgApiKeyProvider, UsageHistoryType } from '@yikart/mongodb'
+import { Brand, CopyHistory, OrgApiKeyProvider, UsageHistoryType, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { ByokService } from '../settings/byok.service'
 import { UsageService } from '../usage/usage.service'
@@ -14,6 +14,15 @@ export interface GeneratedCopy {
   blueWords: string[]
   commentGuide: string
   commentGuides: string[]
+}
+
+export interface GenerateCopySetInput {
+  videoTaskId?: string
+  brandId?: string
+  theme?: string
+  platform?: string
+  style?: string
+  count?: number
 }
 
 type CopyProvider = 'deepseek' | 'gemini' | 'heuristic'
@@ -88,6 +97,7 @@ export class CopyEngineService {
   constructor(
     @InjectModel(Brand.name) private readonly brandModel: Model<Brand>,
     @InjectModel(CopyHistory.name) private readonly copyHistoryModel: Model<CopyHistory>,
+    @Optional() @InjectModel(VideoTask.name) private readonly videoTaskModel?: Model<VideoTask>,
     @Optional() private readonly usageService?: UsageService,
     @Optional() private readonly byokService?: ByokService,
   ) {}
@@ -105,6 +115,7 @@ export class CopyEngineService {
     const toneKeywords = brand?.assets?.keywords || []
     const avoidKeywords = brand?.assets?.prohibitedWords || []
     const scene = this.readMetadataString(metadata, 'scene')
+      || this.readMetadataString(metadata, 'theme')
       || this.readMetadataString(metadata, 'campaign')
       || this.readMetadataString(metadata, 'platform')
       || '内容分发'
@@ -155,6 +166,103 @@ export class CopyEngineService {
     })
 
     return generated
+  }
+
+  async generateCopySet(input: GenerateCopySetInput) {
+    const normalizedCount = Math.min(Math.max(Math.trunc(Number(input.count) || 1), 1), 5)
+    const task = await this.findVideoTask(input.videoTaskId)
+    const resolvedBrandId = input.brandId || this.normalizeObjectIdString(task?.brandId) || null
+    const metadata = {
+      ...(this.toPlainObject(task?.metadata)),
+      taskId: this.normalizeObjectIdString(task?._id) || null,
+      orgId: this.normalizeObjectIdString(task?.orgId) || null,
+      brandId: resolvedBrandId,
+      theme: input.theme?.trim() || this.readMetadataString(this.toPlainObject(task?.metadata), 'theme'),
+      scene: input.theme?.trim()
+        || this.readMetadataString(this.toPlainObject(task?.metadata), 'scene')
+        || this.readMetadataString(this.toPlainObject(task?.metadata), 'campaign'),
+      platform: input.platform?.trim()
+        || this.readMetadataString(this.toPlainObject(task?.metadata), 'platform'),
+      style: input.style?.trim()
+        || this.readMetadataString(this.toPlainObject(task?.metadata), 'style'),
+      source: 'copy-generate-endpoint',
+    }
+    const videoUrl = task?.outputVideoUrl?.trim()
+      || task?.sourceVideoUrl?.trim()
+      || this.readString(task?.source?.url)
+      || ''
+    const baseCopy = await this.generateCopy(resolvedBrandId, videoUrl, metadata)
+
+    const copies = [baseCopy]
+    if (normalizedCount > 1) {
+      const variants = this.generateABVariants(baseCopy.title, normalizedCount)
+      for (const title of variants) {
+        if (copies.length >= normalizedCount) {
+          break
+        }
+
+        const blueWordResult = this.generateBlueWords(title, baseCopy.blueWords)
+        copies.push({
+          ...baseCopy,
+          title: blueWordResult.title,
+          blueWords: blueWordResult.blueWords,
+        })
+      }
+    }
+
+    return {
+      videoTaskId: this.normalizeObjectIdString(task?._id) || null,
+      brandId: resolvedBrandId,
+      count: copies.length,
+      copies,
+    }
+  }
+
+  async rewriteCopy(copyId: string, instructions?: string) {
+    const normalizedCopyId = this.normalizeObjectIdString(copyId)
+    if (!normalizedCopyId) {
+      throw new BadRequestException('copyId is invalid')
+    }
+
+    const copyHistory = await this.copyHistoryModel.findById(new Types.ObjectId(normalizedCopyId)).exec()
+    if (!copyHistory) {
+      throw new NotFoundException('Copy history not found')
+    }
+
+    const metadata = {
+      orgId: copyHistory.orgId?.toString() || null,
+      taskId: copyHistory.taskId?.toString() || null,
+      source: 'copy-rewrite-endpoint',
+    }
+    const llmResult = await this.generateFromPrompt(
+      this.buildRewritePrompt(copyHistory, instructions),
+      metadata,
+    )
+    const rewritten = this.normalizeGeneratedCopy({
+      draft: llmResult.draft,
+      brandName: 'MediaClaw',
+      scene: instructions?.trim() || '文案改写',
+      toneKeywords: (copyHistory.blueWords || []).map(item => item.replace(/^#+/, '')).filter(Boolean),
+      avoidKeywords: [],
+      dedupDuplicate: false,
+    })
+
+    await this.recordLlmUsage(llmResult, metadata, null)
+    await this.copyHistoryModel.findByIdAndUpdate(copyHistory._id, {
+      $set: {
+        title: rewritten.title,
+        subtitle: rewritten.subtitle,
+        hashtags: rewritten.hashtags,
+        blueWords: rewritten.blueWords,
+        commentGuide: rewritten.commentGuide,
+      },
+    }).exec()
+
+    return {
+      copyId: normalizedCopyId,
+      instructions: instructions?.trim() || '',
+      copy: rewritten,
+    }
   }
 
   generateBlueWords(title: string, keywords: string[] = []) {
@@ -273,15 +381,23 @@ export class CopyEngineService {
     dedupMatches: Array<{ title: string, subtitle: string }>
     metadata: Record<string, any>
   }): Promise<CopyLlmResult> {
-    const provider = await this.resolveProvider(input.metadata)
     const prompt = this.buildPrompt(input)
+
+    return this.generateFromPrompt(prompt, input.metadata)
+  }
+
+  private async generateFromPrompt(
+    prompt: string,
+    metadata: Record<string, any>,
+  ): Promise<CopyLlmResult> {
+    const provider = await this.resolveProvider(metadata)
 
     try {
       switch (provider) {
         case 'deepseek':
-          return await this.generateWithDeepSeek(prompt, input.metadata)
+          return await this.generateWithDeepSeek(prompt, metadata)
         case 'gemini':
-          return await this.generateWithGemini(prompt, input.metadata)
+          return await this.generateWithGemini(prompt, metadata)
         default:
           return this.createEmptyLlmResult('heuristic')
       }
@@ -327,6 +443,7 @@ export class CopyEngineService {
     metadata: Record<string, any>
   }) {
     const platform = this.readMetadataString(input.metadata, 'platform') || '通用短视频平台'
+    const style = this.readMetadataString(input.metadata, 'style') || '自然转化'
     const platformRules = this.buildPlatformRules(platform)
     const examples = input.historyExamples.length > 0
       ? input.historyExamples.map(example =>
@@ -343,6 +460,7 @@ export class CopyEngineService {
       '约束: 标题 <=60字; 字幕 15-60字; hashtags 5-10个; blueWords 1-3个; commentGuides 必须正好 3 条。',
       `品牌名称: ${input.brandName}`,
       `内容场景: ${input.scene}`,
+      `创作风格: ${style}`,
       `品牌关键词: ${input.toneKeywords.join('、') || '品牌感、转化、种草'}`,
       `禁用词: ${input.avoidKeywords.join('、') || '无'}`,
       `平台规则: ${platformRules}`,
@@ -841,6 +959,41 @@ export class CopyEngineService {
     await this.copyHistoryModel.create(baseDocument)
   }
 
+  private async findVideoTask(videoTaskId?: string) {
+    const normalizedVideoTaskId = this.normalizeObjectIdString(videoTaskId)
+    if (!normalizedVideoTaskId) {
+      return null
+    }
+
+    if (!this.videoTaskModel) {
+      throw new BadRequestException('Video task model is not configured')
+    }
+
+    const task = await this.videoTaskModel.findById(new Types.ObjectId(normalizedVideoTaskId)).exec()
+    if (!task) {
+      throw new NotFoundException('Video task not found')
+    }
+
+    return task
+  }
+
+  private buildRewritePrompt(copyHistory: CopyHistory, instructions?: string) {
+    const normalizedInstructions = instructions?.trim()
+      || '加强开头钩子、互动感和平台适配度，同时保留原有主题。'
+
+    return [
+      '你是 MediaClaw 的短视频文案改写引擎，只能输出 JSON。',
+      '输出字段必须包含: title, subtitle, hashtags, blueWords, commentGuides。',
+      `当前标题: ${copyHistory.title || '无'}`,
+      `当前字幕: ${copyHistory.subtitle || '无'}`,
+      `当前 hashtags: ${(copyHistory.hashtags || []).join(' ') || '无'}`,
+      `当前 blueWords: ${(copyHistory.blueWords || []).join(' ') || '无'}`,
+      `当前评论引导: ${(copyHistory.commentGuide || '').replace(/\n/g, ' | ') || '无'}`,
+      `改写要求: ${normalizedInstructions}`,
+      '保持主题不跑偏，优化表达效率、互动感和可发布度。',
+    ].join('\n')
+  }
+
   private escapeRegex(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
@@ -873,6 +1026,18 @@ export class CopyEngineService {
     }
 
     return null
+  }
+
+  private toPlainObject(value: unknown) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {}
+    }
+
+    return value as Record<string, any>
+  }
+
+  private readString(value: unknown) {
+    return typeof value === 'string' ? value.trim() : ''
   }
 
   private async requestJson<T>(
