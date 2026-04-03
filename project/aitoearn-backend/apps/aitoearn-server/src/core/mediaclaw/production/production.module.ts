@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
+  Brand,
+  BrandSchema,
   Pipeline,
   PipelineSchema,
   ProductionBatch,
@@ -19,6 +21,7 @@ import { ProductionOrchestratorService } from './production-orchestrator.service
       { name: ProductionBatch.name, schema: ProductionBatchSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: Pipeline.name, schema: PipelineSchema },
+      { name: Brand.name, schema: BrandSchema },
     ]),
     VideoModule,
   ],

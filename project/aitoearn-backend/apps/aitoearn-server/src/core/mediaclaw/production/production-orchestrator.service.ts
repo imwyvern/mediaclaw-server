@@ -5,8 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
+import { Cron } from '@nestjs/schedule'
 import {
+  Brand,
   Pipeline,
+  PipelineStatus,
   ProductionBatch,
   ProductionBatchStatus,
   VideoTask,
@@ -24,6 +27,7 @@ interface CreateBatchParams {
   brandAssets?: string[]
   styleOverrides?: Record<string, unknown>
   referenceVideoUrl?: string
+  scheduleContext?: Record<string, unknown>
 }
 
 interface BatchFilters {
@@ -37,6 +41,7 @@ interface PaginationInput {
 
 type ProductionBatchRecord = Record<string, any>
 type VideoTaskRecord = Record<string, any>
+type PipelineRecord = Record<string, any>
 
 @Injectable()
 export class ProductionOrchestratorService {
@@ -50,8 +55,44 @@ export class ProductionOrchestratorService {
     private readonly videoTaskModel: Model<VideoTask>,
     @InjectModel(Pipeline.name)
     private readonly pipelineModel: Model<Pipeline>,
+    @InjectModel(Brand.name)
+    private readonly brandModel: Model<Brand>,
     private readonly videoService: VideoService,
   ) {}
+
+  @Cron('0 2 * * *')
+  async runDailyProductionSchedule() {
+    const pipelines = await this.pipelineModel.find({
+      status: PipelineStatus.ACTIVE,
+      'schedule.enabled': true,
+    }).lean().exec() as PipelineRecord[]
+
+    const orgIds = Array.from(new Set(
+      pipelines
+        .map(pipeline => pipeline['orgId']?.toString?.() || this.normalizeOptionalString(pipeline['orgId']))
+        .filter(Boolean),
+    ))
+
+    for (const orgId of orgIds) {
+      try {
+        const summary = await this.scheduleDailyProduction(orgId)
+        this.logger.log({
+          message: 'Daily production schedule completed',
+          orgId,
+          scheduledCount: summary.scheduledCount,
+          skippedCount: summary.skippedCount,
+          failedCount: summary.failedCount,
+        })
+      }
+      catch (error) {
+        this.logger.error({
+          message: 'Daily production schedule failed',
+          orgId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+  }
 
   async createBatch(orgId: string, requestedBy: string, params: CreateBatchParams) {
     const normalizedOrgId = this.normalizeOrgId(orgId)
@@ -62,6 +103,7 @@ export class ProductionOrchestratorService {
     const referenceVideoUrl = this.normalizeOptionalString(params.referenceVideoUrl)
     const brandAssets = this.normalizeStringList(params.brandAssets)
     const styleOverrides = this.asRecord(params.styleOverrides) || {}
+    const scheduleContext = this.asRecord(params.scheduleContext) || {}
 
     await this.ensurePipelineBelongsToOrg(normalizedOrgId, pipelineId)
 
@@ -87,6 +129,7 @@ export class ProductionOrchestratorService {
         brandAssets,
         styleOverrides,
         referenceVideoUrl,
+        scheduleContext,
       },
       summary: {
         avgCostPerVideo: 0,
@@ -312,6 +355,181 @@ export class ProductionOrchestratorService {
           updatedAt: task?.['updatedAt'] || null,
         }
       }),
+    }
+  }
+
+  async scheduleDailyProduction(orgId: string) {
+    const normalizedOrgId = this.normalizeOrgId(orgId)
+    const pipelines = await this.pipelineModel.find({
+      ...this.buildOrgMatch(normalizedOrgId),
+      status: PipelineStatus.ACTIVE,
+      'schedule.enabled': true,
+    }).lean().exec() as PipelineRecord[]
+
+    const items: Array<Record<string, any>> = []
+    for (const pipeline of pipelines) {
+      items.push(await this.schedulePipelineRun(normalizedOrgId, pipeline))
+    }
+
+    return {
+      orgId: normalizedOrgId,
+      scheduledAt: new Date().toISOString(),
+      totalPipelines: pipelines.length,
+      scheduledCount: items.filter(item => item['status'] === 'scheduled').length,
+      skippedCount: items.filter(item => item['status'] === 'skipped').length,
+      failedCount: items.filter(item => item['status'] === 'failed').length,
+      items,
+    }
+  }
+
+  private async schedulePipelineRun(orgId: string, pipeline: PipelineRecord) {
+    const pipelineId = pipeline['_id']?.toString?.() || this.normalizeOptionalString(pipeline['_id'])
+    const pipelineName = this.normalizeOptionalString(pipeline['name']) || pipelineId
+    const schedule = this.asRecord(pipeline['schedule']) || {}
+    const timezone = this.normalizeOptionalString(schedule['timezone']) || 'Asia/Shanghai'
+    const scheduleDateKey = this.buildDateKeyForTimezone(timezone)
+
+    if (!pipelineId) {
+      return {
+        pipelineId: null,
+        pipelineName,
+        status: 'skipped',
+        reason: 'missing_pipeline_id',
+      }
+    }
+
+    const existingBatch = await this.productionBatchModel.findOne({
+      ...this.buildOrgMatch(orgId),
+      pipelineId: this.toObjectIdIfValid(pipelineId),
+      'params.scheduleContext.autoScheduled': true,
+      'params.scheduleContext.scheduleDateKey': scheduleDateKey,
+    }).sort({ createdAt: -1 }).lean().exec() as ProductionBatchRecord | null
+
+    if (existingBatch) {
+      return {
+        pipelineId,
+        pipelineName,
+        status: 'skipped',
+        reason: 'already_scheduled',
+        batchId: this.normalizeOptionalString(existingBatch['batchId']) || existingBatch['_id']?.toString(),
+        scheduleDateKey,
+      }
+    }
+
+    try {
+      const batchParams = await this.buildScheduledBatchParams(orgId, pipeline, scheduleDateKey, timezone)
+      if (!batchParams.referenceVideoUrl) {
+        this.logger.warn({
+          message: 'Skipping scheduled production because reference video is missing',
+          orgId,
+          pipelineId,
+          pipelineName,
+          scheduleDateKey,
+        })
+
+        return {
+          pipelineId,
+          pipelineName,
+          status: 'skipped',
+          reason: 'missing_reference_video_url',
+          scheduleDateKey,
+        }
+      }
+
+      const requestedBy = pipeline['orgId']?.toString?.() || orgId
+      const batch = await this.createBatch(orgId, requestedBy, batchParams)
+      const startedBatch = await this.startBatch(orgId, batch['batchId'] || batch['id'])
+
+      this.logger.log({
+        message: 'Scheduled production batch started',
+        orgId,
+        pipelineId,
+        pipelineName,
+        batchId: startedBatch['batchId'],
+        count: startedBatch['totalCount'],
+        scheduleDateKey,
+      })
+
+      return {
+        pipelineId,
+        pipelineName,
+        status: 'scheduled',
+        batchId: startedBatch['batchId'],
+        count: startedBatch['totalCount'],
+        scheduleDateKey,
+      }
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error({
+        message: 'Scheduled production batch failed to start',
+        orgId,
+        pipelineId,
+        pipelineName,
+        error: message,
+        scheduleDateKey,
+      })
+
+      return {
+        pipelineId,
+        pipelineName,
+        status: 'failed',
+        errorMessage: message,
+        scheduleDateKey,
+      }
+    }
+  }
+
+  private async buildScheduledBatchParams(
+    orgId: string,
+    pipeline: PipelineRecord,
+    scheduleDateKey: string,
+    timezone: string,
+  ): Promise<CreateBatchParams> {
+    const schedule = this.asRecord(pipeline['schedule']) || {}
+    const preferences = this.asRecord(pipeline['preferences']) || {}
+    const subtitlePreferences = this.asRecord(preferences['subtitlePreferences']) || {}
+    const remixInsights = this.asRecord(preferences['remixInsights']) || {}
+    const brandId = pipeline['brandId']?.toString?.() || this.normalizeOptionalString(pipeline['brandId'])
+    const brand = brandId
+      ? await this.brandModel.findOne({
+          _id: this.toObjectIdIfValid(brandId),
+          orgId: this.toObjectIdIfValid(orgId),
+        }).lean().exec() as Record<string, any> | null
+      : null
+    const brandAssets = [
+      ...this.normalizeStringList(brand?.['assets']?.['keywords']),
+      ...this.normalizeStringList(brand?.['assets']?.['slogans']),
+      ...this.normalizeStringList(brand?.['assets']?.['colors']),
+    ]
+
+    return {
+      templateId: this.normalizeOptionalString(subtitlePreferences['templateId']) || undefined,
+      count: Math.max(Number(schedule['videosPerRun'] || 1), 1),
+      pipelineId: pipeline['_id']?.toString?.() || undefined,
+      brandId: brandId || undefined,
+      brandAssets,
+      styleOverrides: {
+        preferredStyles: this.normalizeStringList(preferences['preferredStyles']),
+        avoidStyles: this.normalizeStringList(preferences['avoidStyles']),
+        preferredDuration: Number(preferences['preferredDuration'] || 0),
+        aspectRatio: this.normalizeOptionalString(preferences['aspectRatio']),
+        subtitlePreferences,
+        remixInsights,
+        pipelineName: this.normalizeOptionalString(pipeline['name']),
+        scheduleCron: this.normalizeOptionalString(schedule['cron']),
+      },
+      referenceVideoUrl: this.normalizeOptionalString(brand?.['videoStyle']?.['referenceVideoUrl'])
+        || this.normalizeOptionalString(remixInsights['referenceVideoUrl'])
+        || this.normalizeOptionalString(subtitlePreferences['referenceVideoUrl']),
+      scheduleContext: {
+        autoScheduled: true,
+        scheduleDateKey,
+        timezone,
+        pipelineId: pipeline['_id']?.toString?.() || '',
+        pipelineName: this.normalizeOptionalString(pipeline['name']),
+        videosPerRun: Math.max(Number(schedule['videosPerRun'] || 1), 1),
+      },
     }
   }
 
@@ -939,6 +1157,17 @@ export class ProductionOrchestratorService {
       return String(value).trim()
     }
     return ''
+  }
+
+  private buildDateKeyForTimezone(timezone: string) {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+
+    return formatter.format(new Date())
   }
 
   private normalizeStringList(value: unknown) {
