@@ -1,12 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import {
-  CopyEmotionalTone,
-  CopyHistory,
-  CopyPerformance,
-  Organization,
-  VideoTask,
-} from '@yikart/mongodb'
+import { CopyHistory, CopyPerformance, Organization, VideoTask } from '@yikart/mongodb'
+import type { CopyEmotionalTone } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
 interface CopyMetricsInput {
@@ -68,10 +63,12 @@ export class CopyStrategyService {
   ) {}
 
   async recordCopyPerformance(
+    orgId: string,
     copyHistoryId: string,
     videoTaskId: string,
     metricsInput: CopyMetricsInput,
   ) {
+    const normalizedOrgId = this.toObjectIdString(orgId, 'orgId')
     const normalizedCopyHistoryId = this.toObjectIdString(copyHistoryId, 'copyHistoryId')
     const normalizedVideoTaskId = this.toObjectIdString(videoTaskId, 'videoTaskId')
 
@@ -95,10 +92,18 @@ export class CopyStrategyService {
       throw new BadRequestException('copyHistoryId does not match videoTaskId')
     }
 
+    if (copyHistory.orgId.toString() !== normalizedOrgId) {
+      throw new NotFoundException('Copy history not found')
+    }
+
+    if (videoTask.orgId?.toString() && videoTask.orgId.toString() !== normalizedOrgId) {
+      throw new NotFoundException('Video task not found')
+    }
+
     const metrics = this.normalizeMetrics(metricsInput)
     const copyFeatures = this.extractCopyFeatures(copyHistory)
     const performanceScore = this.calculatePerformanceScore(metrics)
-    const orgId = copyHistory.orgId.toString()
+    const recordOrgId = copyHistory.orgId.toString()
     const platform = this.resolvePlatform(videoTask)
     const recordedAt = new Date()
 
@@ -111,7 +116,7 @@ export class CopyStrategyService {
         $set: {
           copyHistoryId: normalizedCopyHistoryId,
           videoTaskId: normalizedVideoTaskId,
-          orgId,
+          orgId: recordOrgId,
           platform,
           metrics,
           copyFeatures,
@@ -135,7 +140,7 @@ export class CopyStrategyService {
       },
     }).exec()
 
-    const strategyHints = await this.updateStrategyFromPerformance(orgId)
+    const strategyHints = await this.updateStrategyFromPerformance(recordOrgId)
 
     return {
       record: this.serializePerformanceRecord(performanceRecord),
@@ -264,7 +269,7 @@ export class CopyStrategyService {
       new Types.ObjectId(normalizedOrgId),
       {
         $set: {
-          'settings.copyStrategyHints': strategyHints,
+          'settings.copyStrategy': strategyHints,
         },
       },
       { new: true },
@@ -486,6 +491,13 @@ export class CopyStrategyService {
 
   private resolvePeriod(period: string) {
     const normalized = period.trim().toLowerCase()
+    if (normalized === 'all') {
+      return {
+        normalizedPeriod: 'all',
+        startDate: new Date(0),
+      }
+    }
+
     const matchedDays = normalized.match(/^(\d{1,3})d$/)
     const days = matchedDays
       ? Number(matchedDays[1])

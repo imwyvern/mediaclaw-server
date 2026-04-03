@@ -1,33 +1,31 @@
 import { Body, Get, Post, Query } from '@nestjs/common'
+import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
-import { CopyEngineService } from './copy-engine.service'
-import { CopyStrategyService } from './copy-strategy.service'
+import { CopyService } from './copy.service'
+import type {
+  GenerateCopyHttpInput,
+  RecordCopyPerformanceInput,
+  RewriteCopyHttpInput,
+} from './copy.service'
 
 @MediaClawApiController('api/v1/copy')
 export class CopyController {
-  constructor(
-    private readonly copyEngineService: CopyEngineService,
-    private readonly copyStrategyService: CopyStrategyService,
-  ) {}
+  constructor(private readonly copyService: CopyService) {}
 
   @Post('generate')
-  async generateCopy(@Body() body: {
-    videoTaskId?: string
-    brandId?: string
-    theme?: string
-    platform?: string
-    style?: string
-    count?: number
-  }) {
-    return this.copyEngineService.generateCopySet(body)
+  async generateCopy(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: GenerateCopyHttpInput,
+  ) {
+    return this.copyService.generateForHttp(user.orgId || user.id || '', user.id || '', body)
   }
 
   @Post('rewrite')
-  async rewriteCopy(@Body() body: {
-    copyId: string
-    instructions?: string
-  }) {
-    return this.copyEngineService.rewriteCopy(body.copyId, body.instructions)
+  async rewriteCopy(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: RewriteCopyHttpInput,
+  ) {
+    return this.copyService.rewriteForHttp(user.orgId || user.id || '', user.id || '', body)
   }
 
   @Post('blue-words')
@@ -35,7 +33,7 @@ export class CopyController {
     title?: string
     keywords?: string[]
   }) {
-    return this.copyEngineService.generateBlueWords(
+    return this.copyService.generateBlueWords(
       body.title || '',
       body.keywords || [],
     )
@@ -47,7 +45,7 @@ export class CopyController {
     content?: string
   }) {
     return {
-      commentGuide: this.copyEngineService.generateCommentGuide(
+      commentGuide: this.copyService.generateCommentGuide(
         body.brand || '',
         body.content || '',
       ),
@@ -60,7 +58,7 @@ export class CopyController {
     count?: number
   }) {
     return {
-      variants: this.copyEngineService.generateABVariants(
+      variants: this.copyService.generateABVariants(
         body.baseTitle || '',
         body.count,
       ),
@@ -68,41 +66,29 @@ export class CopyController {
   }
 
   @Post('performance')
-  async recordPerformance(@Body() body: {
-    copyHistoryId: string
-    videoTaskId: string
-    metrics?: {
-      views?: number
-      likes?: number
-      comments?: number
-      shares?: number
-      saves?: number
-      ctr?: number
-    }
-  }) {
-    return this.copyStrategyService.recordCopyPerformance(
-      body.copyHistoryId,
-      body.videoTaskId,
-      body.metrics || {},
-    )
+  async recordPerformance(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: RecordCopyPerformanceInput,
+  ) {
+    return this.copyService.recordPerformance(user.orgId || user.id || '', body)
   }
 
   @Get('insights')
   async getInsights(
-    @Query('orgId') orgId: string,
+    @GetToken() user: { orgId?: string, id?: string },
     @Query('period') period = '30d',
   ) {
-    return this.copyStrategyService.getCopyInsights(orgId, period)
+    return this.copyService.getInsights(user.orgId || user.id || '', period)
   }
 
   @Get('top-patterns')
   async getTopPatterns(
-    @Query('orgId') orgId: string,
+    @GetToken() user: { orgId?: string, id?: string },
     @Query('platform') platform?: string,
     @Query('limit') limit = '5',
   ) {
-    return this.copyStrategyService.getTopPerformingPatterns(
-      orgId,
+    return this.copyService.getTopPatterns(
+      user.orgId || user.id || '',
       platform,
       Number(limit || 5),
     )
