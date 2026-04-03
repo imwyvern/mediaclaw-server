@@ -6,7 +6,7 @@ export type TikHubPlatform = typeof SUPPORTED_TIKHUB_PLATFORMS[number]
 
 type RequestMethod = 'GET' | 'POST'
 
-interface TikHubStubRequest {
+interface TikHubRequestContract {
   method: RequestMethod
   url: string
   headers: Record<string, string>
@@ -57,9 +57,9 @@ interface TikHubSourceVideoData {
 }
 
 interface PlatformContract {
-  search: TikHubStubRequest
-  detail: TikHubStubRequest
-  sourceByShareUrl: TikHubStubRequest
+  search: TikHubRequestContract
+  detail: TikHubRequestContract
+  sourceByShareUrl: TikHubRequestContract
 }
 
 @Injectable()
@@ -90,7 +90,7 @@ export class TikHubService {
     })
 
     if (!this.hasApiKey()) {
-      this.warnStubFallback('searchVideos')
+      this.warnUnavailable('searchVideos')
       return {
         source: 'unavailable',
         reason: 'TIKHUB_API_KEY not configured',
@@ -127,7 +127,7 @@ export class TikHubService {
     })
 
     if (!this.hasApiKey()) {
-      this.warnStubFallback('getVideoDetail')
+      this.warnUnavailable('getVideoDetail')
       return {
         source: 'unavailable',
         reason: 'TIKHUB_API_KEY not configured',
@@ -156,7 +156,7 @@ export class TikHubService {
     }
 
     if (!this.hasApiKey()) {
-      this.warnStubFallback('trackPerformance')
+      this.warnUnavailable('trackPerformance')
       return {
         source: 'unavailable',
         reason: 'TIKHUB_API_KEY not configured',
@@ -208,14 +208,14 @@ export class TikHubService {
     })
 
     if (!this.hasApiKey()) {
-      this.warnStubFallback('getSourceVideo')
+      this.warnUnavailable('getSourceVideo')
       return {
         source: 'unavailable',
         reason: 'TIKHUB_API_KEY not configured',
         platform,
         videoUrl: normalizedShareUrl,
         request: contract.sourceByShareUrl,
-        data: this.buildSourceStub(platform),
+        data: null,
       }
     }
 
@@ -386,7 +386,7 @@ export class TikHubService {
     return contractMap[platform]
   }
 
-  private async requestWithRetry<T>(request: TikHubStubRequest): Promise<T> {
+  private async requestWithRetry<T>(request: TikHubRequestContract): Promise<T> {
     let lastError: Error | null = null
 
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
@@ -404,7 +404,7 @@ export class TikHubService {
     throw lastError || new Error('TikHub request failed')
   }
 
-  private async executeRequest<T>(request: TikHubStubRequest): Promise<T> {
+  private async executeRequest<T>(request: TikHubRequestContract): Promise<T> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
     const url = this.buildRequestUrl(request)
@@ -442,7 +442,7 @@ export class TikHubService {
     }
   }
 
-  private buildRequestUrl(request: TikHubStubRequest) {
+  private buildRequestUrl(request: TikHubRequestContract) {
     const url = new URL(request.url)
 
     for (const [key, value] of Object.entries(request.query || {})) {
@@ -789,51 +789,6 @@ export class TikHubService {
     }
   }
 
-  private buildSearchStub(platform: TikHubPlatform, keyword: string, limit: number): SearchVideoSummary[] {
-    return Array.from({ length: Math.min(limit, 3) }, (_, index) => ({
-      platform,
-      videoId: `${platform}-${keyword}-${index + 1}`.replace(/\s+/g, '-').toLowerCase(),
-      title: `${keyword} 爆款候选 ${index + 1}`,
-      author: `${platform}-author-${index + 1}`,
-      contentUrl: `https://content.example.com/${platform}/${index + 1}`,
-      thumbnailUrl: `https://images.example.com/${platform}/${index + 1}.jpg`,
-      publishedAt: this.addDays(-(index + 1)),
-      metrics: {
-        views: 5000 + (index + 1) * 2400,
-        likes: 800 + (index + 1) * 120,
-        comments: 90 + (index + 1) * 18,
-        shares: 40 + (index + 1) * 9,
-      },
-    }))
-  }
-
-  private buildDetailStub(platform: TikHubPlatform, videoId: string): TikHubVideoDetailData {
-    return {
-      platform,
-      videoId,
-      title: `${videoId} 的平台详情草稿`,
-      author: `${platform}-creator`,
-      description: '该详情返回当前只做 TikHub 契约占位，待后续切换为真实 HTTP 调用。',
-      durationSeconds: 37,
-      contentUrl: `https://content.example.com/${platform}/${videoId}`,
-      thumbnailUrl: `https://images.example.com/${platform}/${videoId}.jpg`,
-      metrics: {
-        views: 12600,
-        likes: 1180,
-        comments: 216,
-        shares: 91,
-      },
-    }
-  }
-
-  private buildSourceStub(platform: TikHubPlatform): TikHubSourceVideoData {
-    return {
-      downloadUrl: `https://downloads.example.com/${platform}/source-video.mp4`,
-      filename: `${platform}-source-video.mp4`,
-      expiresAt: this.addDays(1),
-    }
-  }
-
   private assertPlatform(platform: string): TikHubPlatform {
     if ((SUPPORTED_TIKHUB_PLATFORMS as readonly string[]).includes(platform)) {
       return platform as TikHubPlatform
@@ -1118,8 +1073,8 @@ export class TikHubService {
     return text.replace(/<[^>]+>/g, '').trim()
   }
 
-  private warnStubFallback(method: string) {
-    console.warn(`[TikHubService] ${method} fallback to stub because TIKHUB_API_KEY is not configured.`)
+  private warnUnavailable(method: string) {
+    console.warn(`[TikHubService] ${method} unavailable because TIKHUB_API_KEY is not configured.`)
   }
 
   private addDays(days: number): string {
