@@ -595,6 +595,7 @@ export class TaskMgmtService {
     const completedTasks = tasks.filter(task => this.isSuccessfulTaskStatus(task.status)).length
     const failedTasks = tasks.filter(task => this.isFailedTaskStatus(task.status)).length
     const terminalTasks = completedTasks + failedTasks
+    const batchSummary = (batch.summary || {}) as Record<string, unknown>
 
     let status = ProductionBatchStatus.PENDING
     if (tasks.length > 0) {
@@ -631,9 +632,9 @@ export class TaskMgmtService {
         startedAt: batch.startedAt || new Date(),
         completedAt: isTerminal ? new Date() : null,
         summary: {
-          ...(batch.summary || {}),
-          autoCreated: batch.summary?.['autoCreated'] === true,
-          source: batch.summary?.['source'] || 'task-mgmt',
+          ...batchSummary,
+          autoCreated: batchSummary['autoCreated'] === true,
+          source: typeof batchSummary['source'] === 'string' ? batchSummary['source'] : 'task-mgmt',
           totalTasks,
           completedTasks,
           failedTasks,

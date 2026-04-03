@@ -298,6 +298,9 @@ export class VideoTask extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, default: null, index: true })
   batchId: MongooseSchema.Types.ObjectId | null
 
+  @Prop({ type: Number, default: null, index: true })
+  batchIndex: number | null
+
   @Prop({ type: MongooseSchema.Types.ObjectId, default: null, index: true })
   campaignId: MongooseSchema.Types.ObjectId | null
 
@@ -384,4 +387,5 @@ export const VideoTaskSchema = SchemaFactory.createForClass(VideoTask)
 VideoTaskSchema.index({ orgId: 1, status: 1, createdAt: -1 })
 VideoTaskSchema.index({ pipelineId: 1, status: 1 })
 VideoTaskSchema.index({ batchId: 1, status: 1, createdAt: -1 })
+VideoTaskSchema.index({ batchId: 1, batchIndex: 1 })
 VideoTaskSchema.index({ campaignId: 1, status: 1, createdAt: -1 })

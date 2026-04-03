@@ -81,6 +81,7 @@ import { PaymentModule } from './payment/payment.module'
 import { PipelineSystemModule } from './pipeline-system/pipeline-system.module'
 import { PipelineModule } from './pipeline/pipeline.module'
 import { PlatformAccountModule } from './platform-account/platform-account.module'
+import { ProductionModule } from './production/production.module'
 import { ReportModule } from './report/report.module'
 import { SettingsModule } from './settings/settings.module'
 import { SkillModule } from './skill/skill.module'
@@ -154,6 +155,7 @@ const workerModuleImports = process.env['MEDIACLAW_ENABLE_WORKER'] === 'false'
     MarketplaceModule,
     NotificationModule,
     PlatformAccountModule,
+    ProductionModule,
     ReportModule,
     UsageModule,
     ClawHostModule,
