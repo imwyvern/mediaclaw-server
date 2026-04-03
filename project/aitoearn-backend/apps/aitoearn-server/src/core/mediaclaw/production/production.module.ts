@@ -8,6 +8,7 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { VideoModule } from '../video/video.module'
 
 import { ProductionController } from './production.controller'
 import { ProductionOrchestratorService } from './production-orchestrator.service'
@@ -19,6 +20,7 @@ import { ProductionOrchestratorService } from './production-orchestrator.service
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: Pipeline.name, schema: PipelineSchema },
     ]),
+    VideoModule,
   ],
   controllers: [ProductionController],
   providers: [ProductionOrchestratorService],
