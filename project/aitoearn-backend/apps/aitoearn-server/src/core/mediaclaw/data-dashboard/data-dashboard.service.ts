@@ -38,6 +38,13 @@ interface HealthSignalSummary {
   firstDayDecayRate: number
 }
 
+interface OverviewActivityPoint {
+  date: string
+  totalVideos: number
+  completedVideos: number
+  totalViews: number
+}
+
 interface ContentHealthPayload {
   orgId: string
   source: 'mongodb' | 'task_snapshot'
@@ -82,6 +89,57 @@ export class DataDashboardService {
     @InjectModel(Organization.name) private readonly organizationModel: Model<Organization>,
     @InjectModel(Subscription.name) private readonly subscriptionModel: Model<Subscription>,
   ) {}
+
+  async getOverview(orgId: string) {
+    const health = await this.getContentHealth(orgId)
+    const activity = await this.buildOverviewActivity(orgId)
+    const recentVideos = await this.videoTaskModel.find(
+      this.buildOrgMatch(orgId),
+      {
+        copy: 1,
+        metadata: 1,
+        brandId: 1,
+        brandName: 1,
+        status: 1,
+        taskType: 1,
+        sourceVideoUrl: 1,
+        outputVideoUrl: 1,
+        creditsConsumed: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        completedAt: 1,
+        publishedAt: 1,
+      },
+    )
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean()
+      .exec()
+
+    const totalVideos = health.totals?.totalVideos || 0
+    const completedVideos = health.totals?.completedVideos || 0
+
+    return {
+      orgId,
+      source: health.source,
+      dashboardTier: health.dashboardTier,
+      windowDays: health.windowDays,
+      summary: {
+        totalVideos,
+        completedVideos,
+        successRate: totalVideos > 0
+          ? this.round((completedVideos / totalVideos) * 100)
+          : 0,
+        totalViews: health.totals?.totalViews || 0,
+        averageViewsPerVideo: health.averageViewsPerVideo || 0,
+        engagementRate: health.engagementRate || 0,
+        publishingConsistency: health.publishingConsistency || 0,
+        trackedVideos: typeof health.trackedVideos === 'number' ? health.trackedVideos : 0,
+      },
+      activity,
+      recentVideos,
+    }
+  }
 
   async getContentHealth(orgId: string) {
     const [tier, payload] = await Promise.all([
@@ -776,6 +834,62 @@ export class DataDashboardService {
     ]).exec()
 
     return tasks
+  }
+
+  private async buildOverviewActivity(orgId: string) {
+    const startDate = this.buildDaysAgo(13)
+    const items = await this.videoTaskModel.aggregate<OverviewActivityPoint>([
+      {
+        $match: {
+          ...this.buildOrgMatch(orgId),
+          createdAt: { $gte: startDate },
+        },
+      },
+      ...this.buildTaskMetricStages(startDate),
+      {
+        $group: {
+          _id: {
+            $dateToString: {
+              date: '$createdAt',
+              format: '%Y-%m-%d',
+            },
+          },
+          totalVideos: { $sum: 1 },
+          completedVideos: {
+            $sum: {
+              $cond: [{ $in: ['$status', MEDIACLAW_SUCCESS_STATUSES] }, 1, 0],
+            },
+          },
+          totalViews: { $sum: '$views' },
+        },
+      },
+      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          date: '$_id',
+          totalVideos: 1,
+          completedVideos: 1,
+          totalViews: { $round: ['$totalViews', 0] },
+        },
+      },
+    ]).exec()
+
+    const itemMap = new Map(items.map(item => [item.date, item]))
+    const activity: OverviewActivityPoint[] = []
+
+    for (let offset = 13; offset >= 0; offset -= 1) {
+      const current = this.buildDaysAgo(offset)
+      const key = current.toISOString().slice(0, 10)
+      activity.push(itemMap.get(key) || {
+        date: key,
+        totalVideos: 0,
+        completedVideos: 0,
+        totalViews: 0,
+      })
+    }
+
+    return activity
   }
 
   private buildCsvReport(

@@ -7,6 +7,11 @@ import { DataDashboardService } from './data-dashboard.service'
 export class DataDashboardController {
   constructor(private readonly dataDashboardService: DataDashboardService) {}
 
+  @Get('overview')
+  async getOverview(@GetToken() user: any) {
+    return this.dataDashboardService.getOverview(user.orgId || user.id)
+  }
+
   @Get('health')
   async getContentHealth(@GetToken() user: any) {
     return this.dataDashboardService.getContentHealth(user.orgId || user.id)
