@@ -14,6 +14,7 @@ import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import { BillingService } from '../billing/billing.service'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
+import { createStatusTransitionIterationEntry, mapVideoTaskStatusToProductionStage } from '../video-task-lifecycle.util'
 import { UsageService } from '../usage/usage.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData } from '../worker/worker.constants'
 
@@ -116,8 +117,25 @@ export class VideoService {
       },
     )
 
+    const draftedAt = new Date()
+    const queuedAt = new Date(draftedAt.getTime() + 1)
     const metadata = {
       ...(data.metadata || {}),
+      productionStage: mapVideoTaskStatusToProductionStage(VideoTaskStatus.PENDING),
+      timeline: [
+        {
+          status: 'draft',
+          rawStatus: VideoTaskStatus.DRAFT,
+          timestamp: draftedAt.toISOString(),
+          message: 'Task drafted',
+        },
+        {
+          status: 'queued',
+          rawStatus: VideoTaskStatus.PENDING,
+          timestamp: queuedAt.toISOString(),
+          message: 'Queued for processing',
+        },
+      ],
       billing: {
         usageHistoryId: usageCharge.usageHistoryId,
         usageHistoryIds: usageCharge.usageHistoryIds || [usageCharge.usageHistoryId].filter(Boolean),
@@ -128,6 +146,27 @@ export class VideoService {
         chargedAt: new Date().toISOString(),
       },
     }
+
+    const iterationLog = [
+      createStatusTransitionIterationEntry([], {
+        fromStatus: null,
+        toStatus: VideoTaskStatus.DRAFT,
+        timestamp: draftedAt,
+        detail: {
+          source: 'video-service',
+          reason: 'task_created',
+        },
+      }),
+      createStatusTransitionIterationEntry([], {
+        fromStatus: VideoTaskStatus.DRAFT,
+        toStatus: VideoTaskStatus.PENDING,
+        timestamp: queuedAt,
+        detail: {
+          source: 'video-service',
+          reason: 'task_queued',
+        },
+      }),
+    ]
 
     const taskPayload = {
       _id: taskId,
@@ -147,6 +186,7 @@ export class VideoService {
       creditsConsumed: usageCharge.units,
       quotaUnits: usageCharge.units,
       creditCharged: true,
+      iterationLog,
       metadata,
     }
 
@@ -409,13 +449,17 @@ export class VideoService {
       throw new NotFoundException('Video task not found')
     }
 
+    const transitionedAt = new Date()
     const timelineEntry = {
       status: this.mapTimelineStatus(status),
       rawStatus: status,
-      timestamp: new Date().toISOString(),
+      timestamp: transitionedAt.toISOString(),
     }
 
-    const updateSet: Record<string, any> = { status }
+    const updateSet: Record<string, any> = {
+      status,
+      'metadata.productionStage': mapVideoTaskStatusToProductionStage(status),
+    }
     if (data?.outputVideoUrl) {
       updateSet['outputVideoUrl'] = data.outputVideoUrl
       updateSet['output.url'] = data.outputVideoUrl
@@ -447,13 +491,22 @@ export class VideoService {
       VideoTaskStatus.QUALITY_CHECK,
       VideoTaskStatus.GENERATING_COPY,
     ].includes(status)) {
-      updateSet['startedAt'] = new Date()
+      updateSet['startedAt'] = transitionedAt
     }
     if ([VideoTaskStatus.COMPLETED, VideoTaskStatus.FAILED, VideoTaskStatus.CANCELLED].includes(status)) {
-      updateSet['completedAt'] = new Date()
+      updateSet['completedAt'] = transitionedAt
     }
 
     const pushPayload: Record<string, any> = {
+      iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+        fromStatus: task.status,
+        toStatus: status,
+        timestamp: transitionedAt,
+        detail: {
+          source: 'video-service',
+          step: data?.step || this.mapStatusToStep(status),
+        },
+      }),
       'metadata.timeline': timelineEntry,
     }
 
@@ -462,7 +515,7 @@ export class VideoService {
         step: data.step || this.mapStatusToStep(status),
         message: data.errorMessage,
         detail: data.metadata || {},
-        recordedAt: new Date(),
+        recordedAt: transitionedAt,
       }
     }
 
@@ -483,7 +536,7 @@ export class VideoService {
       }
 
       updateSet['creditCharged'] = false
-      updateSet['metadata.creditRefundedAt'] = new Date().toISOString()
+      updateSet['metadata.creditRefundedAt'] = transitionedAt.toISOString()
     }
 
     const updated = await this.videoTaskModel.findByIdAndUpdate(
@@ -514,7 +567,7 @@ export class VideoService {
   }
 
   async markPublished(orgId: string, taskId: string) {
-    await this.getTask(orgId, taskId)
+    const task = await this.getTask(orgId, taskId)
     const publishedAt = new Date()
     const updated = await this.videoTaskModel.findOneAndUpdate(
       this.buildOwnershipQuery(orgId, taskId),
@@ -523,8 +576,18 @@ export class VideoService {
           status: VideoTaskStatus.PUBLISHED,
           publishedAt,
           'metadata.publishedAt': publishedAt.toISOString(),
+          'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.PUBLISHED),
         },
         $push: {
+          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+            fromStatus: task.status,
+            toStatus: VideoTaskStatus.PUBLISHED,
+            timestamp: publishedAt,
+            detail: {
+              source: 'video-service',
+              step: 'publish',
+            },
+          }),
           'metadata.timeline': {
             status: 'published',
             rawStatus: VideoTaskStatus.PUBLISHED,
@@ -534,6 +597,10 @@ export class VideoService {
       },
       { new: true },
     ).exec()
+
+    if (updated?.batchId) {
+      await this.syncBatchStats(updated.batchId.toString())
+    }
 
     if (updated && this.employeeDispatchService) {
       await this.employeeDispatchService.confirmPublished(orgId, taskId).catch((error) => {

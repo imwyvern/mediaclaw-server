@@ -22,6 +22,7 @@ import {
 import { Model, Types } from 'mongoose'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 import { NotificationService } from '../notification/notification.service'
+import { createStatusTransitionIterationEntry, mapVideoTaskStatusToProductionStage } from '../video-task-lifecycle.util'
 import { WebhookService } from '../webhook/webhook.service'
 
 interface ContentFilters {
@@ -92,8 +93,18 @@ export class ContentMgmtService {
         $set: {
           status: VideoTaskStatus.PENDING_REVIEW,
           approval,
+          'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.PENDING_REVIEW),
         },
         $push: {
+          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+            fromStatus: task.status,
+            toStatus: VideoTaskStatus.PENDING_REVIEW,
+            timestamp: submittedAt,
+            detail: {
+              source: 'content-mgmt',
+              action: 'submit_review',
+            },
+          }),
           'metadata.timeline': this.createTimelineEntry(
             'pending_review',
             submittedAt,
@@ -262,8 +273,19 @@ export class ContentMgmtService {
         $set: {
           status: nextStatus,
           approval: nextApproval,
+          'metadata.productionStage': mapVideoTaskStatusToProductionStage(nextStatus),
         },
         $push: {
+          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+            fromStatus: task.status,
+            toStatus: nextStatus,
+            timestamp: reviewedAt,
+            detail: {
+              source: 'content-mgmt',
+              action,
+              reviewerId,
+            },
+          }),
           'metadata.timeline': this.createTimelineEntry(
             nextTimelineStatus,
             reviewedAt,
@@ -344,10 +366,21 @@ export class ContentMgmtService {
             publishedAt: timestamp,
           },
           'metadata.publishedAt': timestamp,
+          'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.PUBLISHED),
           'metadata.distribution.publishStatus': 'published',
           'metadata.distribution.lastStatusAt': timestamp,
         },
         $push: {
+          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+            fromStatus: task.status,
+            toStatus: VideoTaskStatus.PUBLISHED,
+            timestamp: publishedAt,
+            detail: {
+              source: 'content-mgmt',
+              action: 'publish',
+              platform: platform.trim(),
+            },
+          }),
           'metadata.distribution.history': {
             status: 'published',
             timestamp,

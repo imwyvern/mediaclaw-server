@@ -9,6 +9,8 @@ import { InjectModel } from '@nestjs/mongoose'
 import {
   Brand,
   Pipeline,
+  ProductionBatch,
+  ProductionBatchStatus,
   VideoTask,
   VideoTaskStatus,
   VideoTaskType,
@@ -16,6 +18,7 @@ import {
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import { BillingService } from '../billing/billing.service'
+import { createStatusTransitionIterationEntry, mapVideoTaskStatusToProductionStage } from '../video-task-lifecycle.util'
 import { UsageService } from '../usage/usage.service'
 import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData } from '../worker/worker.constants'
 
@@ -47,6 +50,12 @@ interface TaskTimelineEntry {
   message?: string
 }
 
+interface BatchContext {
+  batchId: Types.ObjectId
+  batchName: string
+  autoCreated: boolean
+}
+
 @Injectable()
 export class TaskMgmtService {
   constructor(
@@ -56,6 +65,8 @@ export class TaskMgmtService {
     private readonly brandModel: Model<Brand>,
     @InjectModel(Pipeline.name)
     private readonly pipelineModel: Model<Pipeline>,
+    @InjectModel(ProductionBatch.name)
+    private readonly productionBatchModel: Model<ProductionBatch>,
     private readonly billingService: BillingService,
     @InjectQueue(VIDEO_WORKER_QUEUE)
     private readonly videoWorkerQueue: Queue<VideoWorkerJobData>,
@@ -75,6 +86,7 @@ export class TaskMgmtService {
     await this.ensureBrandBelongsToOrg(params.brandId, normalizedOrgId)
     await this.ensurePipelineBelongsToOrg(params.pipelineId, normalizedOrgId)
 
+    const batchContext = await this.resolveBatchContext(normalizedOrgId, params)
     const taskObjectId = new Types.ObjectId()
     const requestedDurationSec = this.resolveRequestedDuration(params.metadata)
     const chargeResult = await this.chargeTaskCredits(
@@ -82,13 +94,39 @@ export class TaskMgmtService {
       normalizedOrgId.toString(),
       taskObjectId.toString(),
       requestedDurationSec,
-      params.metadata,
+      {
+        ...(params.metadata || {}),
+        batchId: batchContext.batchId.toString(),
+      },
     )
 
-    const createdAt = new Date().toISOString()
+    const draftedAt = new Date()
+    const queuedAt = new Date(draftedAt.getTime() + 1)
+    const draftedAtIso = draftedAt.toISOString()
+    const queuedAtIso = queuedAt.toISOString()
+    const iterationLog = [
+      createStatusTransitionIterationEntry([], {
+        fromStatus: null,
+        toStatus: VideoTaskStatus.DRAFT,
+        timestamp: draftedAt,
+        detail: {
+          source: 'task-mgmt',
+          reason: 'task_created',
+        },
+      }),
+      createStatusTransitionIterationEntry([], {
+        fromStatus: VideoTaskStatus.DRAFT,
+        toStatus: VideoTaskStatus.PENDING,
+        timestamp: queuedAt,
+        detail: {
+          source: 'task-mgmt',
+          reason: 'task_queued',
+        },
+      }),
+    ]
     const timeline = [
-      this.createTimelineEntry('created', createdAt, 'Task created'),
-      this.createTimelineEntry('queued', createdAt, 'Queued for processing', VideoTaskStatus.PENDING),
+      this.createTimelineEntry('draft', draftedAtIso, 'Task drafted', VideoTaskStatus.DRAFT),
+      this.createTimelineEntry('queued', queuedAtIso, 'Queued for processing', VideoTaskStatus.PENDING),
     ]
 
     let task: VideoTask | null = null
@@ -100,19 +138,27 @@ export class TaskMgmtService {
         orgId: normalizedOrgId,
         brandId: params.brandId ? this.toObjectId(params.brandId, 'brandId') : null,
         pipelineId: params.pipelineId ? this.toObjectId(params.pipelineId, 'pipelineId') : null,
+        batchId: batchContext.batchId,
         taskType: params.taskType,
         status: VideoTaskStatus.PENDING,
         sourceVideoUrl: params.sourceVideoUrl || '',
         creditsConsumed: chargeResult.units,
         creditCharged: true,
+        iterationLog,
         metadata: {
           ...(params.metadata || {}),
+          productionStage: mapVideoTaskStatusToProductionStage(VideoTaskStatus.PENDING),
           timeline,
+          batch: {
+            batchId: batchContext.batchId.toString(),
+            batchName: batchContext.batchName,
+            autoCreated: batchContext.autoCreated,
+          },
           billing: {
             packId: chargeResult.packId,
             usageHistoryId: chargeResult.usageHistoryId,
             requestedDurationSec,
-            chargedAt: createdAt,
+            chargedAt: queuedAtIso,
           },
         },
       })
@@ -122,6 +168,9 @@ export class TaskMgmtService {
         { taskId: task._id.toString() },
         { jobId: `${task._id.toString()}:analyze-source` },
       )
+
+      await this.syncBatchStats(batchContext.batchId.toString())
+      return task
     }
     catch (error) {
       await this.refundTaskCredits(
@@ -136,21 +185,45 @@ export class TaskMgmtService {
       )
 
       if (task) {
+        const failedAt = new Date()
         await this.videoTaskModel.findByIdAndUpdate(task._id, {
           $set: {
             status: VideoTaskStatus.FAILED,
             creditCharged: false,
             errorMessage: error instanceof Error ? error.message : String(error),
-            completedAt: new Date(),
-            'metadata.creditRefundedAt': new Date().toISOString(),
+            completedAt: failedAt,
+            'metadata.creditRefundedAt': failedAt.toISOString(),
+            'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.FAILED),
+          },
+          $push: {
+            iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+              fromStatus: VideoTaskStatus.PENDING,
+              toStatus: VideoTaskStatus.FAILED,
+              timestamp: failedAt,
+              detail: {
+                source: 'task-mgmt',
+                reason: 'task_create_failed',
+              },
+            }),
+            'metadata.timeline': this.createTimelineEntry(
+              'failed',
+              failedAt.toISOString(),
+              'Task creation failed',
+              VideoTaskStatus.FAILED,
+            ),
           },
         }).exec()
+
+        if (task.batchId) {
+          await this.syncBatchStats(task.batchId.toString()).catch(() => undefined)
+        }
+      }
+      else if (batchContext.autoCreated) {
+        await this.productionBatchModel.findByIdAndDelete(batchContext.batchId).exec()
       }
 
       throw error
     }
-
-    return task
   }
 
   async getTask(orgIdOrTaskId: string, maybeTaskId?: string) {
@@ -187,8 +260,10 @@ export class TaskMgmtService {
         userId: task.userId,
         brandId: task.brandId?.toString() || null,
         pipelineId: task.pipelineId?.toString() || null,
+        batchId: task.batchId?.toString() || null,
         taskType: task.taskType,
         status: task.status,
+        productionStage: task.metadata?.['productionStage'] || mapVideoTaskStatusToProductionStage(task.status),
         sourceVideoUrl: task.sourceVideoUrl,
         outputVideoUrl: task.outputVideoUrl,
         retryCount: task.retryCount,
@@ -223,19 +298,30 @@ export class TaskMgmtService {
       )
     }
 
+    const cancelledAt = new Date()
     const updated = await this.videoTaskModel.findByIdAndUpdate(
       task._id,
       {
         $set: {
-          'status': VideoTaskStatus.CANCELLED,
-          'creditCharged': false,
-          'completedAt': new Date(),
-          'metadata.creditRefundedAt': new Date().toISOString(),
+          status: VideoTaskStatus.CANCELLED,
+          creditCharged: false,
+          completedAt: cancelledAt,
+          'metadata.creditRefundedAt': cancelledAt.toISOString(),
+          'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.CANCELLED),
         },
         $push: {
+          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+            fromStatus: task.status,
+            toStatus: VideoTaskStatus.CANCELLED,
+            timestamp: cancelledAt,
+            detail: {
+              source: 'task-mgmt',
+              reason: 'task_cancelled',
+            },
+          }),
           'metadata.timeline': this.createTimelineEntry(
             'cancelled',
-            new Date().toISOString(),
+            cancelledAt.toISOString(),
             'Task cancelled by user',
             VideoTaskStatus.CANCELLED,
           ),
@@ -243,6 +329,10 @@ export class TaskMgmtService {
       },
       { new: true },
     ).exec()
+
+    if (updated?.batchId) {
+      await this.syncBatchStats(updated.batchId.toString())
+    }
 
     return updated
   }
@@ -253,6 +343,7 @@ export class TaskMgmtService {
       throw new BadRequestException('Only failed tasks can be retried')
     }
 
+    const retriedAt = new Date()
     const updated = await this.videoTaskModel.findByIdAndUpdate(
       task._id,
       {
@@ -261,18 +352,28 @@ export class TaskMgmtService {
           startedAt: null,
           completedAt: null,
           errorMessage: '',
+          'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.PENDING),
         },
         $push: {
+          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+            fromStatus: task.status,
+            toStatus: VideoTaskStatus.PENDING,
+            timestamp: retriedAt,
+            detail: {
+              source: 'task-mgmt',
+              reason: 'retry_requested',
+            },
+          }),
           'metadata.timeline': {
             $each: [
               this.createTimelineEntry(
                 'retry_requested',
-                new Date().toISOString(),
+                retriedAt.toISOString(),
                 'Retry requested by user',
               ),
               this.createTimelineEntry(
                 'queued',
-                new Date().toISOString(),
+                new Date(retriedAt.getTime() + 1).toISOString(),
                 'Queued for retry',
                 VideoTaskStatus.PENDING,
               ),
@@ -288,6 +389,10 @@ export class TaskMgmtService {
       { taskId: task._id.toString() },
       { jobId: `${task._id.toString()}:analyze-source:retry:${Date.now()}` },
     )
+
+    if (updated?.batchId) {
+      await this.syncBatchStats(updated.batchId.toString())
+    }
 
     return updated
   }
@@ -401,6 +506,146 @@ export class TaskMgmtService {
     return 4
   }
 
+  private async resolveBatchContext(orgId: Types.ObjectId, params: CreateTaskParams): Promise<BatchContext> {
+    const requestedBatchId = this.readBatchId(params.metadata)
+    if (requestedBatchId) {
+      const existing = await this.productionBatchModel.findOne({
+        _id: this.toObjectId(requestedBatchId, 'batchId'),
+        orgId,
+      }).lean().exec()
+
+      if (!existing) {
+        throw new NotFoundException('Production batch not found in organization')
+      }
+
+      return {
+        batchId: new Types.ObjectId(existing._id.toString()),
+        batchName: existing.batchName || '',
+        autoCreated: false,
+      }
+    }
+
+    const created = await this.productionBatchModel.create({
+      orgId,
+      brandId: params.brandId ? this.toObjectId(params.brandId, 'brandId') : null,
+      batchName: this.buildBatchName(params),
+      userId: params.requestedBy,
+      status: ProductionBatchStatus.PENDING,
+      tasks: [],
+      totalTasks: 1,
+      completedTasks: 0,
+      failedTasks: 0,
+      createdBy: params.requestedBy,
+      startedAt: new Date(),
+      completedAt: null,
+      summary: {
+        autoCreated: true,
+        source: 'task-mgmt',
+      },
+    })
+
+    return {
+      batchId: new Types.ObjectId(created._id.toString()),
+      batchName: created.batchName,
+      autoCreated: true,
+    }
+  }
+
+  private readBatchId(metadata?: Record<string, any>) {
+    const candidates = [
+      metadata?.['batchId'],
+      metadata?.['productionBatchId'],
+      metadata?.['batch']?.['batchId'],
+    ]
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim()
+      }
+    }
+
+    return ''
+  }
+
+  private buildBatchName(params: CreateTaskParams) {
+    const explicitName = params.metadata?.['batchName']
+    if (typeof explicitName === 'string' && explicitName.trim()) {
+      return explicitName.trim()
+    }
+
+    const sourceName = params.sourceVideoUrl?.split('/').filter(Boolean).pop() || params.taskType
+    return `task-${params.taskType}-${sourceName}-${Date.now()}`
+  }
+
+  private async syncBatchStats(batchId: string) {
+    const batchObjectId = this.toObjectId(batchId, 'batchId')
+    const [batch, tasks] = await Promise.all([
+      this.productionBatchModel.findById(batchObjectId).exec(),
+      this.videoTaskModel.find({ batchId: batchObjectId })
+        .select({ _id: 1, status: 1, creditsConsumed: 1, errorMessage: 1, sourceVideoUrl: 1 })
+        .lean()
+        .exec(),
+    ])
+
+    if (!batch) {
+      return null
+    }
+
+    const totalTasks = Math.max(batch.totalTasks || 0, tasks.length)
+    const completedTasks = tasks.filter(task => this.isSuccessfulTaskStatus(task.status)).length
+    const failedTasks = tasks.filter(task => this.isFailedTaskStatus(task.status)).length
+    const terminalTasks = completedTasks + failedTasks
+
+    let status = ProductionBatchStatus.PENDING
+    if (tasks.length > 0) {
+      status = ProductionBatchStatus.PROCESSING
+    }
+    if (totalTasks > 0 && completedTasks === totalTasks) {
+      status = ProductionBatchStatus.COMPLETED
+    }
+    else if (totalTasks > 0 && failedTasks === totalTasks) {
+      status = ProductionBatchStatus.FAILED
+    }
+    else if (totalTasks > 0 && terminalTasks >= totalTasks && completedTasks > 0 && failedTasks > 0) {
+      status = ProductionBatchStatus.PARTIAL
+    }
+
+    const isTerminal = [
+      ProductionBatchStatus.COMPLETED,
+      ProductionBatchStatus.FAILED,
+      ProductionBatchStatus.PARTIAL,
+    ].includes(status)
+
+    await this.productionBatchModel.findByIdAndUpdate(batch._id, {
+      $set: {
+        status,
+        tasks: tasks.map(task => ({
+          taskId: task._id,
+          status: task.status,
+          sourceVideoUrl: task.sourceVideoUrl || '',
+          errorMessage: task.errorMessage || '',
+        })),
+        totalTasks,
+        completedTasks,
+        failedTasks,
+        startedAt: batch.startedAt || new Date(),
+        completedAt: isTerminal ? new Date() : null,
+        summary: {
+          ...(batch.summary || {}),
+          autoCreated: batch.summary?.['autoCreated'] === true,
+          source: batch.summary?.['source'] || 'task-mgmt',
+          totalTasks,
+          completedTasks,
+          failedTasks,
+          successRate: totalTasks > 0 ? Number(((completedTasks / totalTasks) * 100).toFixed(2)) : 0,
+          creditsConsumed: tasks.reduce((sum, task) => sum + Number(task.creditsConsumed || 0), 0),
+        },
+      },
+    }).exec()
+
+    return status
+  }
+
   private buildTaskQuery(orgId: string, filters: TaskFilters) {
     const query: Record<string, any> = {
       orgId: this.toObjectId(orgId, 'orgId'),
@@ -446,7 +691,7 @@ export class TaskMgmtService {
     }
 
     const fallback: TaskTimelineEntry[] = [
-      this.createTimelineEntry('created', new Date(task.createdAt).toISOString(), 'Task created'),
+      this.createTimelineEntry('draft', new Date(task.createdAt).toISOString(), 'Task drafted', VideoTaskStatus.DRAFT),
     ]
 
     if (task.status === VideoTaskStatus.PENDING) {
@@ -476,7 +721,8 @@ export class TaskMgmtService {
   private mapTerminalTimelineStatus(status: VideoTaskStatus) {
     switch (status) {
       case VideoTaskStatus.COMPLETED:
-        return 'completed'
+      case VideoTaskStatus.PENDING_REVIEW:
+        return 'review'
       case VideoTaskStatus.APPROVED:
         return 'approved'
       case VideoTaskStatus.REJECTED:
@@ -627,5 +873,20 @@ export class TaskMgmtService {
     }
 
     return queryOrValue
+  }
+
+  private isSuccessfulTaskStatus(status: VideoTaskStatus) {
+    return [
+      VideoTaskStatus.COMPLETED,
+      VideoTaskStatus.APPROVED,
+      VideoTaskStatus.PUBLISHED,
+    ].includes(status)
+  }
+
+  private isFailedTaskStatus(status: VideoTaskStatus) {
+    return [
+      VideoTaskStatus.FAILED,
+      VideoTaskStatus.CANCELLED,
+    ].includes(status)
   }
 }
