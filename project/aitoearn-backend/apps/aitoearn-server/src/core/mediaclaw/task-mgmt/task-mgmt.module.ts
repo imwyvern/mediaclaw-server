@@ -5,6 +5,8 @@ import {
   BrandSchema,
   Pipeline,
   PipelineSchema,
+  ProductionBatch,
+  ProductionBatchSchema,
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
@@ -19,6 +21,7 @@ import { TaskMgmtService } from './task-mgmt.service'
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: Brand.name, schema: BrandSchema },
       { name: Pipeline.name, schema: PipelineSchema },
+      { name: ProductionBatch.name, schema: ProductionBatchSchema },
     ]),
     BillingModule,
     VideoWorkerQueueModule,

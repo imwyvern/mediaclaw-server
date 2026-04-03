@@ -92,12 +92,13 @@ export class TikHubService {
     if (!this.hasApiKey()) {
       this.warnStubFallback('searchVideos')
       return {
-        source: 'stub',
+        source: 'unavailable',
+        reason: 'TIKHUB_API_KEY not configured',
         platform: normalizedPlatform,
         keyword: safeKeyword,
         limit: safeLimit,
         request: contract.search,
-        items: this.buildSearchStub(normalizedPlatform, safeKeyword, safeLimit),
+        items: [],
       }
     }
 
@@ -128,11 +129,12 @@ export class TikHubService {
     if (!this.hasApiKey()) {
       this.warnStubFallback('getVideoDetail')
       return {
-        source: 'stub',
+        source: 'unavailable',
+        reason: 'TIKHUB_API_KEY not configured',
         platform: normalizedPlatform,
         videoId: safeVideoId,
         request: contract.detail,
-        data: this.buildDetailStub(normalizedPlatform, safeVideoId),
+        data: null,
       }
     }
 
@@ -153,27 +155,41 @@ export class TikHubService {
       throw new BadRequestException('videoId is required')
     }
 
-    const checkpoints = [1, 3, 7, 30, 90]
+    if (!this.hasApiKey()) {
+      this.warnStubFallback('trackPerformance')
+      return {
+        source: 'unavailable',
+        reason: 'TIKHUB_API_KEY not configured',
+        videoId: safeVideoId,
+        data: null,
+      }
+    }
+
+    // Try to detect platform from videoId format and fetch real data
+    const platforms = ['douyin', 'xhs', 'kuaishou', 'bilibili'] as const
+    for (const platform of platforms) {
+      try {
+        const contract = this.buildPlatformContract(platform, { videoId: safeVideoId })
+        const response = await this.requestWithRetry<Record<string, unknown>>(contract.detail)
+        const data = this.parseDetailResponse(platform, response, safeVideoId)
+        if (data) {
+          return {
+            source: 'tikhub',
+            platform,
+            videoId: safeVideoId,
+            data,
+          }
+        }
+      } catch {
+        continue
+      }
+    }
+
     return {
-      source: 'stub',
+      source: 'unavailable',
+      reason: 'Could not resolve platform for videoId',
       videoId: safeVideoId,
-      strategy: 'resolve platform from stored source metadata, then replay detail endpoint snapshots at each checkpoint',
-      checkpoints: checkpoints.map(day => ({
-        checkpoint: `T+${day}`,
-        scheduledAt: this.addDays(day),
-        requestTemplate: {
-          douyin: this.buildPlatformContract('douyin', { videoId: safeVideoId }).detail,
-          xhs: this.buildPlatformContract('xhs', { videoId: safeVideoId }).detail,
-          kuaishou: this.buildPlatformContract('kuaishou', { videoId: safeVideoId }).detail,
-          bilibili: this.buildPlatformContract('bilibili', { videoId: safeVideoId }).detail,
-        },
-        snapshot: {
-          views: 1000 * (day + 1),
-          likes: 180 * day,
-          comments: 36 * day,
-          shares: 14 * day,
-        },
-      })),
+      data: null,
     }
   }
 
@@ -194,7 +210,8 @@ export class TikHubService {
     if (!this.hasApiKey()) {
       this.warnStubFallback('getSourceVideo')
       return {
-        source: 'stub',
+        source: 'unavailable',
+        reason: 'TIKHUB_API_KEY not configured',
         platform,
         videoUrl: normalizedShareUrl,
         request: contract.sourceByShareUrl,
