@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Cron } from '@nestjs/schedule'
 import { VideoAnalytics, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
-import { Model } from 'mongoose'
+import { Model, Types } from 'mongoose'
 import { TikHubService } from '../acquisition/tikhub.service'
 
 interface VideoTaskAnalyticsMetadata {
@@ -65,10 +65,10 @@ export class AnalyticsCollectorService {
     return summary
   }
 
-  async collectSnapshots(limit = 200) {
+  async collectSnapshots(limit = 200, orgId?: string) {
     const since = new Date(Date.now() - this.retentionWindowMs)
     const recordedAt = this.startOfUtcDay(new Date())
-    const tasks = await this.videoTaskModel.find({
+    const query: Record<string, any> = {
       status: {
         $in: [
           VideoTaskStatus.COMPLETED,
@@ -77,7 +77,13 @@ export class AnalyticsCollectorService {
         ],
       },
       createdAt: { $gte: since },
-    })
+    }
+
+    if (orgId) {
+      query['$and'] = [this.buildOrgMatch(orgId)]
+    }
+
+    const tasks = await this.videoTaskModel.find(query)
       .sort({ publishedAt: -1, completedAt: -1, updatedAt: -1 })
       .limit(Math.max(1, Math.min(Number(limit) || 200, 1000)))
       .lean()
@@ -176,6 +182,7 @@ export class AnalyticsCollectorService {
       skipped,
       failed,
       recordedAt: recordedAt.toISOString(),
+      orgId: orgId || null,
     }
   }
 
@@ -323,6 +330,15 @@ export class AnalyticsCollectorService {
       shares: metrics.shares,
       engagementRate: metrics.engagementRate,
     }
+  }
+
+  private buildOrgMatch(orgId: string) {
+    const clauses: Record<string, any>[] = [{ userId: orgId }]
+    if (Types.ObjectId.isValid(orgId)) {
+      clauses.unshift({ orgId: new Types.ObjectId(orgId) })
+    }
+
+    return clauses.length === 1 ? clauses[0] : { $or: clauses }
   }
 
   private startOfUtcDay(date: Date) {
