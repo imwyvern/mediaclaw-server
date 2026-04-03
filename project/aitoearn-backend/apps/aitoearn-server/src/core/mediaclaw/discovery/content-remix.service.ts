@@ -7,10 +7,52 @@ import {
 import { InjectModel } from "@nestjs/mongoose";
 import { Brand, Pipeline, ViralContent } from "@yikart/mongodb";
 import { Model, Types } from "mongoose";
+import { MediaclawConfigService } from "../mediaclaw-config.service";
 
 interface ChatMessage {
   role: "system" | "user";
   content: string;
+}
+
+interface AnalysisResultShape {
+  source: string;
+  model: string;
+  contentId: string;
+  platform: string;
+  videoId: string;
+  title: string;
+  summary: string;
+  hooks: string[];
+  narrativeBeats: string[];
+  structureBreakdown: string[];
+  visualMotifs: string[];
+  audioCues: string[];
+  copyStyle: string[];
+  tagStrategy: string[];
+  bestPostingTimes: string[];
+  ctaStyle: string;
+  risks: string[];
+  fallbackReason: string;
+  raw?: string;
+  analyzedAt: Date;
+}
+
+interface RemixBriefShape {
+  source: string;
+  model: string;
+  contentId: string;
+  brandId: string;
+  briefTitle: string;
+  coreAngle: string;
+  targetAudience: string;
+  openingHook: string;
+  scenePlan: string[];
+  copyIdeas: string[];
+  brandSafetyNotes: string[];
+  productionNotes: string[];
+  fallbackReason: string;
+  raw?: string;
+  generatedAt: Date;
 }
 
 type Identifier = Types.ObjectId | string | { toString(): string };
@@ -33,9 +75,10 @@ type LeanViralContent = ViralContent & {
 @Injectable()
 export class ContentRemixService {
   private readonly logger = new Logger(ContentRemixService.name);
-  private readonly endpoint = "https://api.vectorengine.cn/v1/chat/completions";
-  private readonly model = "gemini-3.1-pro-preview";
-  private readonly requestTimeoutMs = 5000;
+  private readonly defaultEndpoint =
+    "https://api.vectorengine.cn/v1/chat/completions";
+  private readonly defaultModel = "gemini-3.1-pro-preview";
+  private readonly defaultRequestTimeoutMs = 5000;
 
   constructor(
     @InjectModel(ViralContent.name)
@@ -44,17 +87,12 @@ export class ContentRemixService {
     private readonly brandModel: Model<Brand>,
     @InjectModel(Pipeline.name)
     private readonly pipelineModel: Model<Pipeline>,
+    private readonly configService: MediaclawConfigService,
   ) {}
 
   async analyzeViralElements(contentId: string) {
     const content = await this.getViralContent(contentId);
-    const analysis = !this.hasApiKey()
-      ? this.buildAnalysisStub(content)
-      : await this.generateAnalysis(content);
-
-    if (!this.hasApiKey()) {
-      this.warnStubFallback("analyzeViralElements");
-    }
+    const analysis = await this.resolveAnalysis(content);
 
     await this.persistAnalysis(content._id.toString(), analysis);
     return analysis;
@@ -65,13 +103,7 @@ export class ContentRemixService {
       this.getViralContent(contentId),
       this.getBrand(brandId),
     ]);
-    const brief = !this.hasApiKey()
-      ? this.buildBriefStub(content, brand)
-      : await this.generateBrief(content, brand);
-
-    if (!this.hasApiKey()) {
-      this.warnStubFallback("generateRemixBrief");
-    }
+    const brief = await this.resolveBrief(content, brand);
 
     await this.persistBrief(content, brand, brief);
     return brief;
@@ -108,6 +140,11 @@ export class ContentRemixService {
         "",
       copyIdeas: this.readStringArray(brief?.["copyIdeas"]),
       audioCues: this.readStringArray(analysis?.["audioCues"]),
+      copyStyleNotes: this.readStringArray(analysis?.["copyStyle"]),
+      hashtagIdeas: this.readStringArray(analysis?.["tagStrategy"]),
+      recommendedPostingTimes: this.readStringArray(
+        analysis?.["bestPostingTimes"],
+      ),
       remixSourceContentId: content._id.toString(),
       remixAppliedAt: new Date().toISOString(),
     };
@@ -124,10 +161,19 @@ export class ContentRemixService {
             summary: this.readString(analysis["summary"]),
             hooks: this.readStringArray(analysis["hooks"]),
             narrativeBeats: this.readStringArray(analysis["narrativeBeats"]),
+            structureBreakdown: this.readStringArray(
+              analysis["structureBreakdown"],
+            ),
             visualMotifs: this.readStringArray(analysis["visualMotifs"]),
             audioCues: this.readStringArray(analysis["audioCues"]),
+            copyStyle: this.readStringArray(analysis["copyStyle"]),
+            tagStrategy: this.readStringArray(analysis["tagStrategy"]),
+            bestPostingTimes: this.readStringArray(
+              analysis["bestPostingTimes"],
+            ),
             ctaStyle: this.readString(analysis["ctaStyle"]),
             risks: this.readStringArray(analysis["risks"]),
+            fallbackReason: this.readString(analysis["fallbackReason"]),
             analyzedAt: analysis["analyzedAt"] || null,
           }
         : null,
@@ -144,6 +190,7 @@ export class ContentRemixService {
             copyIdeas: this.readStringArray(brief["copyIdeas"]),
             brandSafetyNotes: this.readStringArray(brief["brandSafetyNotes"]),
             productionNotes: this.readStringArray(brief["productionNotes"]),
+            fallbackReason: this.readString(brief["fallbackReason"]),
             generatedAt: brief["generatedAt"] || null,
           }
         : null,
@@ -180,102 +227,206 @@ export class ContentRemixService {
     };
   }
 
-  private async generateAnalysis(content: LeanViralContent) {
-    const completion = await this.requestStructuredCompletion([
-      {
-        role: "system",
-        content: "你是短视频爆款拆解策略师。只返回 JSON，不要输出 Markdown。",
-      },
-      {
-        role: "user",
-        content: [
-          "请基于以下爆款内容，输出 JSON：",
-          '{"summary":"","hooks":[],"narrativeBeats":[],"visualMotifs":[],"audioCues":[],"ctaStyle":"","risks":[]}',
-          "",
-          this.formatViralContent(content),
-        ].join("\n"),
-      },
-    ]);
+  private async resolveAnalysis(content: LeanViralContent) {
+    const apiKey = this.getGeminiApiKey();
+    if (!apiKey) {
+      const fallback = this.buildAnalysisFallback(content, "no_api_key");
+      this.warnFallback("analyzeViralElements", fallback.fallbackReason);
+      return fallback;
+    }
+
+    try {
+      return await this.generateAnalysis(content, apiKey);
+    } catch (error) {
+      const fallbackReason = this.buildFallbackReason(error);
+      this.warnFallback("analyzeViralElements", fallbackReason, error);
+      return this.buildAnalysisFallback(content, fallbackReason);
+    }
+  }
+
+  private async resolveBrief(content: LeanViralContent, brand: LeanBrand) {
+    const apiKey = this.getGeminiApiKey();
+    if (!apiKey) {
+      const fallback = this.buildBriefFallback(content, brand, "no_api_key");
+      this.warnFallback("generateRemixBrief", fallback.fallbackReason);
+      return fallback;
+    }
+
+    try {
+      return await this.generateBrief(content, brand, apiKey);
+    } catch (error) {
+      const fallbackReason = this.buildFallbackReason(error);
+      this.warnFallback("generateRemixBrief", fallbackReason, error);
+      return this.buildBriefFallback(content, brand, fallbackReason);
+    }
+  }
+
+  private async generateAnalysis(
+    content: LeanViralContent,
+    apiKey: string,
+  ): Promise<AnalysisResultShape> {
+    const fallback = this.buildAnalysisFallback(content, "partial_response");
+    const completion = await this.requestStructuredCompletion(
+      [
+        {
+          role: "system",
+          content:
+            "你是短视频爆款拆解策略师。请严格返回 JSON，不要输出 Markdown、解释或多余文本。",
+        },
+        {
+          role: "user",
+          content: [
+            "请基于以下爆款内容，输出 JSON。字段必须完整：",
+            '{"summary":"","hooks":[],"narrativeBeats":[],"structureBreakdown":[],"visualMotifs":[],"audioCues":[],"copyStyle":[],"tagStrategy":[],"bestPostingTimes":[],"ctaStyle":"","risks":[]}',
+            "",
+            "要求：",
+            "1. structureBreakdown 需要覆盖开场钩子、价值递进、证明段、结尾 CTA。",
+            "2. copyStyle 要总结文案语气、修辞、常用句式、节奏。",
+            "3. tagStrategy 要给出 3-5 个标签/话题策略方向。",
+            "4. bestPostingTimes 要给出 2-4 个最适合该内容的发布时间窗口。",
+            "",
+            this.formatViralContent(content),
+          ].join("\n"),
+        },
+      ],
+      apiKey,
+    );
     const parsed = this.parseJsonPayload(completion);
+
+    if (Object.keys(parsed).length === 0) {
+      throw new Error("invalid_json_payload");
+    }
 
     return {
       source: "vce_gemini",
-      model: this.model,
+      model: this.getGeminiModel(),
       contentId: content._id.toString(),
       platform: content.platform,
       videoId: content.videoId,
       title: content.title,
-      summary:
-        this.readString(parsed["summary"]) ||
-        this.buildAnalysisStub(content)["summary"],
-      hooks: this.readStringArray(parsed["hooks"]),
-      narrativeBeats: this.readStringArray(parsed["narrativeBeats"]),
-      visualMotifs: this.readStringArray(parsed["visualMotifs"]),
-      audioCues: this.readStringArray(parsed["audioCues"]),
-      ctaStyle: this.readString(parsed["ctaStyle"]),
-      risks: this.readStringArray(parsed["risks"]),
+      summary: this.preferString(parsed["summary"], fallback.summary),
+      hooks: this.preferStringArray(parsed["hooks"], fallback.hooks),
+      narrativeBeats: this.preferStringArray(
+        parsed["narrativeBeats"],
+        fallback.narrativeBeats,
+      ),
+      structureBreakdown: this.preferStringArray(
+        parsed["structureBreakdown"],
+        fallback.structureBreakdown,
+      ),
+      visualMotifs: this.preferStringArray(
+        parsed["visualMotifs"],
+        fallback.visualMotifs,
+      ),
+      audioCues: this.preferStringArray(parsed["audioCues"], fallback.audioCues),
+      copyStyle: this.preferStringArray(parsed["copyStyle"], fallback.copyStyle),
+      tagStrategy: this.preferStringArray(
+        parsed["tagStrategy"],
+        fallback.tagStrategy,
+      ),
+      bestPostingTimes: this.preferStringArray(
+        parsed["bestPostingTimes"],
+        fallback.bestPostingTimes,
+      ),
+      ctaStyle: this.preferString(parsed["ctaStyle"], fallback.ctaStyle),
+      risks: this.preferStringArray(parsed["risks"], fallback.risks),
+      fallbackReason: "",
       raw: completion,
+      analyzedAt: new Date(),
     };
   }
 
-  private async generateBrief(content: LeanViralContent, brand: LeanBrand) {
-    const completion = await this.requestStructuredCompletion([
-      {
-        role: "system",
-        content: "你是品牌短视频改编导演。只返回 JSON，不要输出 Markdown。",
-      },
-      {
-        role: "user",
-        content: [
-          "请基于以下爆款内容和品牌信息，输出 JSON：",
-          '{"briefTitle":"","coreAngle":"","targetAudience":"","openingHook":"","scenePlan":[],"copyIdeas":[],"brandSafetyNotes":[],"productionNotes":[]}',
-          "",
-          "[爆款内容]",
-          this.formatViralContent(content),
-          "",
-          "[品牌信息]",
-          this.formatBrand(brand),
-        ].join("\n"),
-      },
-    ]);
+  private async generateBrief(
+    content: LeanViralContent,
+    brand: LeanBrand,
+    apiKey: string,
+  ): Promise<RemixBriefShape> {
+    const fallback = this.buildBriefFallback(content, brand, "partial_response");
+    const completion = await this.requestStructuredCompletion(
+      [
+        {
+          role: "system",
+          content:
+            "你是品牌短视频改编导演。请严格返回 JSON，不要输出 Markdown、解释或多余文本。",
+        },
+        {
+          role: "user",
+          content: [
+            "请基于以下爆款内容和品牌信息，输出 JSON。字段必须完整：",
+            '{"briefTitle":"","coreAngle":"","targetAudience":"","openingHook":"","scenePlan":[],"copyIdeas":[],"brandSafetyNotes":[],"productionNotes":[]}',
+            "",
+            "要求：",
+            "1. briefTitle 和 coreAngle 要能直接指导改编脚本。",
+            "2. copyIdeas 需要结合爆款文案风格与品牌口吻。",
+            "3. productionNotes 要包含标签策略和建议发布时间。",
+            "",
+            "[爆款内容]",
+            this.formatViralContent(content),
+            "",
+            "[已有分析]",
+            this.formatAnalysis(content.analysisResult),
+            "",
+            "[品牌信息]",
+            this.formatBrand(brand),
+          ].join("\n"),
+        },
+      ],
+      apiKey,
+    );
     const parsed = this.parseJsonPayload(completion);
+
+    if (Object.keys(parsed).length === 0) {
+      throw new Error("invalid_json_payload");
+    }
 
     return {
       source: "vce_gemini",
-      model: this.model,
+      model: this.getGeminiModel(),
       contentId: content._id.toString(),
       brandId: brand._id.toString(),
-      briefTitle:
-        this.readString(parsed["briefTitle"]) || `${brand.name} 爆款改编简报`,
-      coreAngle: this.readString(parsed["coreAngle"]),
-      targetAudience: this.readString(parsed["targetAudience"]),
-      openingHook: this.readString(parsed["openingHook"]),
-      scenePlan: this.readStringArray(parsed["scenePlan"]),
-      copyIdeas: this.readStringArray(parsed["copyIdeas"]),
-      brandSafetyNotes: this.readStringArray(parsed["brandSafetyNotes"]),
-      productionNotes: this.readStringArray(parsed["productionNotes"]),
+      briefTitle: this.preferString(parsed["briefTitle"], fallback.briefTitle),
+      coreAngle: this.preferString(parsed["coreAngle"], fallback.coreAngle),
+      targetAudience: this.preferString(
+        parsed["targetAudience"],
+        fallback.targetAudience,
+      ),
+      openingHook: this.preferString(parsed["openingHook"], fallback.openingHook),
+      scenePlan: this.preferStringArray(parsed["scenePlan"], fallback.scenePlan),
+      copyIdeas: this.preferStringArray(parsed["copyIdeas"], fallback.copyIdeas),
+      brandSafetyNotes: this.preferStringArray(
+        parsed["brandSafetyNotes"],
+        fallback.brandSafetyNotes,
+      ),
+      productionNotes: this.preferStringArray(
+        parsed["productionNotes"],
+        fallback.productionNotes,
+      ),
+      fallbackReason: "",
       raw: completion,
+      generatedAt: new Date(),
     };
   }
 
-  private async persistAnalysis(
-    contentId: string,
-    analysis: Record<string, any>,
-  ) {
+  private async persistAnalysis(contentId: string, analysis: AnalysisResultShape) {
     await this.viralContentModel
       .findByIdAndUpdate(contentId, {
         $set: {
           analysisResult: {
-            source: analysis["source"] || "stub",
-            model: analysis["model"] || "stub",
-            summary: analysis["summary"] || "",
-            hooks: analysis["hooks"] || [],
-            narrativeBeats: analysis["narrativeBeats"] || [],
-            visualMotifs: analysis["visualMotifs"] || [],
-            audioCues: analysis["audioCues"] || [],
-            ctaStyle: analysis["ctaStyle"] || "",
-            risks: analysis["risks"] || [],
-            analyzedAt: new Date(),
+            source: analysis.source,
+            model: analysis.model,
+            summary: analysis.summary,
+            hooks: analysis.hooks,
+            narrativeBeats: analysis.narrativeBeats,
+            structureBreakdown: analysis.structureBreakdown,
+            visualMotifs: analysis.visualMotifs,
+            audioCues: analysis.audioCues,
+            copyStyle: analysis.copyStyle,
+            tagStrategy: analysis.tagStrategy,
+            bestPostingTimes: analysis.bestPostingTimes,
+            ctaStyle: analysis.ctaStyle,
+            risks: analysis.risks,
+            fallbackReason: analysis.fallbackReason,
+            analyzedAt: analysis.analyzedAt,
           },
         },
       })
@@ -285,7 +436,7 @@ export class ContentRemixService {
   private async persistBrief(
     content: LeanViralContent,
     brand: LeanBrand,
-    brief: Record<string, any>,
+    brief: RemixBriefShape,
   ) {
     const currentBriefs = Array.isArray(content.remixBriefs)
       ? content.remixBriefs
@@ -296,17 +447,18 @@ export class ContentRemixService {
       ),
       {
         brandId: new Types.ObjectId(brand._id.toString()),
-        source: brief["source"] || "stub",
-        model: brief["model"] || "stub",
-        briefTitle: brief["briefTitle"] || "",
-        coreAngle: brief["coreAngle"] || "",
-        targetAudience: brief["targetAudience"] || "",
-        openingHook: brief["openingHook"] || "",
-        scenePlan: brief["scenePlan"] || [],
-        copyIdeas: brief["copyIdeas"] || [],
-        brandSafetyNotes: brief["brandSafetyNotes"] || [],
-        productionNotes: brief["productionNotes"] || [],
-        generatedAt: new Date(),
+        source: brief.source,
+        model: brief.model,
+        briefTitle: brief.briefTitle,
+        coreAngle: brief.coreAngle,
+        targetAudience: brief.targetAudience,
+        openingHook: brief.openingHook,
+        scenePlan: brief.scenePlan,
+        copyIdeas: brief.copyIdeas,
+        brandSafetyNotes: brief.brandSafetyNotes,
+        productionNotes: brief.productionNotes,
+        fallbackReason: brief.fallbackReason,
+        generatedAt: brief.generatedAt,
       },
     ];
 
@@ -377,19 +529,23 @@ export class ContentRemixService {
     return matchedBrief || briefs.at(-1) || null;
   }
 
-  private async requestStructuredCompletion(messages: ChatMessage[]) {
+  private async requestStructuredCompletion(
+    messages: ChatMessage[],
+    apiKey: string,
+  ) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    const requestTimeoutMs = this.getGeminiTimeoutMs();
+    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 
     try {
-      const response = await fetch(this.endpoint, {
+      const response = await fetch(this.getGeminiEndpoint(), {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env["VCE_GEMINI_API_KEY"] || ""}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: this.model,
+          model: this.getGeminiModel(),
           temperature: 0.4,
           response_format: { type: "json_object" },
           messages,
@@ -399,23 +555,19 @@ export class ContentRemixService {
       const rawText = await response.text();
 
       if (!response.ok) {
-        throw new Error(
-          `VCE Gemini request failed with ${response.status}: ${rawText}`,
-        );
+        throw new Error(`request_failed_${response.status}:${rawText}`);
       }
 
       const payload = JSON.parse(rawText) as Record<string, any>;
       const content = payload?.["choices"]?.[0]?.["message"]?.["content"];
       if (typeof content !== "string" || !content.trim()) {
-        throw new Error("VCE Gemini returned empty content");
+        throw new Error("empty_model_content");
       }
 
       return content;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(
-          `VCE Gemini request timed out after ${this.requestTimeoutMs}ms`,
-        );
+        throw new Error(`request_timeout_${requestTimeoutMs}ms`);
       }
 
       throw error;
@@ -424,40 +576,67 @@ export class ContentRemixService {
     }
   }
 
-  private buildAnalysisStub(content: LeanViralContent) {
+  private buildAnalysisFallback(
+    content: LeanViralContent,
+    fallbackReason: string,
+  ): AnalysisResultShape {
     return {
-      source: "stub",
-      model: "stub",
+      source: "fallback",
+      model: "fallback",
       contentId: content._id.toString(),
       platform: content.platform,
       videoId: content.videoId,
       title: content.title,
-      summary: `${content.title || content.videoId} 的爆点主要集中在强开场、明确利益点和高互动话题。`,
+      summary: `${content.title || content.videoId} 的爆点集中在强开场、结果前置和高互动话题。`,
       hooks: [
         "前 3 秒直接给出结果或冲突",
         "标题与封面保持同一利益点",
-        "评论区引导二次表达",
+        "评论区引导用户站队或补充经验",
       ],
       narrativeBeats: [
         "开场抛出问题或结果",
         "中段快速给出 2-3 个关键证据",
-        "结尾引导用户模仿或评论",
+        "结尾引导用户模仿、评论或私信",
+      ],
+      structureBreakdown: [
+        "开场 0-3 秒：先给结果或冲突，建立继续观看理由",
+        "中段 4-12 秒：用场景或数据快速证明观点",
+        "后段 13-20 秒：放大差异点，制造跟拍或转发动机",
+        "结尾 3 秒：用提问式 CTA 拉动评论互动",
       ],
       visualMotifs: ["近景人物反应", "字幕高亮关键收益", "节奏快的镜头切换"],
       audioCues: [
-        "开头重拍点音效",
-        "中段口播节奏加快",
+        "开头用重拍点音效强调反差",
+        "中段口播节奏略加快，形成推进感",
         "结尾用停顿制造评论冲动",
       ],
-      ctaStyle: "邀请用户在评论区给出自己的选择或经验",
+      copyStyle: [
+        "高利益点标题，先讲结果再补证据",
+        "短句密集推进，减少解释性废话",
+        "多用反问、对比和数字化表达提升记忆点",
+      ],
+      tagStrategy: this.buildTagStrategyFallback(content),
+      bestPostingTimes: this.buildPostingTimeFallback(content),
+      ctaStyle: "邀请用户在评论区给出自己的选择、经验或反例",
       risks: ["避免绝对化承诺", "避免夸张前后对比无法验证"],
+      fallbackReason,
+      analyzedAt: new Date(),
     };
   }
 
-  private buildBriefStub(content: LeanViralContent, brand: LeanBrand) {
+  private buildBriefFallback(
+    content: LeanViralContent,
+    brand: LeanBrand,
+    fallbackReason: string,
+  ): RemixBriefShape {
+    const analysis = content.analysisResult || null;
+    const tagStrategy = this.readStringArray(analysis?.["tagStrategy"]);
+    const postingTimes = this.readStringArray(analysis?.["bestPostingTimes"]);
+    const copyStyle = this.readStringArray(analysis?.["copyStyle"]);
+
     return {
-      source: "stub",
-      model: "stub",
+      source: "fallback",
+      model: "fallback",
       contentId: content._id.toString(),
       brandId: brand._id.toString(),
       briefTitle: `${brand.name} 爆款改编简报`,
@@ -473,7 +652,7 @@ export class ContentRemixService {
       copyIdeas: [
         `${brand.name} 为什么更容易被记住？`,
         `同样预算下，${brand.name} 的优势到底在哪？`,
-        "一个动作解释清楚核心差异点",
+        ...copyStyle.slice(0, 1).map((item) => `延续“${item}”的表达方式做品牌改写`),
       ],
       brandSafetyNotes: [
         ...(brand.assets?.prohibitedWords || []).slice(0, 3),
@@ -482,8 +661,55 @@ export class ContentRemixService {
       productionNotes: [
         "保留原爆款快节奏结构，但替换成品牌真实场景",
         "字幕只保留一个主利益点，避免信息拥堵",
+        ...(tagStrategy.length > 0
+          ? [`标签策略优先采用：${tagStrategy.join("；")}`]
+          : []),
+        ...(postingTimes.length > 0
+          ? [`建议发布时间：${postingTimes.join(" / ")}`]
+          : []),
       ],
+      fallbackReason,
+      generatedAt: new Date(),
     };
+  }
+
+  private buildTagStrategyFallback(content: LeanViralContent) {
+    const keywords = this.mergeUniqueStrings(content.keywords || [], []);
+    const strategy = keywords.slice(0, 3).map((keyword) => `围绕“${keyword}”扩展场景词与利益词`);
+
+    if (content.industry) {
+      strategy.push(`补充 ${content.industry} 行业通用问题词，扩大搜索命中`);
+    }
+
+    if (strategy.length === 0) {
+      strategy.push("使用痛点词 + 场景词 + 结果词三段式标签组合");
+    }
+
+    return strategy;
+  }
+
+  private buildPostingTimeFallback(content: LeanViralContent) {
+    const windows = ["工作日 12:00-13:30", "工作日 19:30-21:30"];
+    const publishedAt = this.toDate(content.publishedAt);
+
+    if (!publishedAt) {
+      return windows;
+    }
+
+    const weekdayNames = [
+      "周日",
+      "周一",
+      "周二",
+      "周三",
+      "周四",
+      "周五",
+      "周六",
+    ];
+    const hour = publishedAt.getHours();
+    const nextHour = `${(hour + 2) % 24}`.padStart(2, "0");
+    const primaryWindow = `${weekdayNames[publishedAt.getDay()]} ${`${hour}`.padStart(2, "0")}:00-${nextHour}:00`;
+
+    return this.mergeUniqueStrings([primaryWindow], windows);
   }
 
   private formatViralContent(content: LeanViralContent) {
@@ -504,6 +730,20 @@ export class ContentRemixService {
     ].join("\n");
   }
 
+  private formatAnalysis(analysis?: Record<string, unknown> | null) {
+    if (!analysis) {
+      return "暂无现成分析，可根据原始内容直接生成品牌改编简报。";
+    }
+
+    return [
+      `总结: ${this.readString(analysis["summary"])}`,
+      `结构拆解: ${this.readStringArray(analysis["structureBreakdown"]).join("；")}`,
+      `文案风格: ${this.readStringArray(analysis["copyStyle"]).join("；")}`,
+      `标签策略: ${this.readStringArray(analysis["tagStrategy"]).join("；")}`,
+      `最佳发布时间: ${this.readStringArray(analysis["bestPostingTimes"]).join(" / ")}`,
+    ].join("\n");
+  }
+
   private formatBrand(brand: LeanBrand) {
     return [
       `品牌名: ${brand.name}`,
@@ -514,14 +754,42 @@ export class ContentRemixService {
     ].join("\n");
   }
 
-  private hasApiKey() {
-    return Boolean(process.env["VCE_GEMINI_API_KEY"]?.trim());
+  private getGeminiApiKey() {
+    return this.configService.getString([
+      "VCE_GEMINI_API_KEY",
+      "MEDIACLAW_VCE_API_KEY",
+    ]);
   }
 
-  private warnStubFallback(method: string) {
-    this.logger.warn(
-      `${method} fallback to stub because VCE_GEMINI_API_KEY is not configured.`,
+  private getGeminiEndpoint() {
+    return this.configService.getString(
+      ["VCE_GEMINI_ENDPOINT"],
+      this.defaultEndpoint,
     );
+  }
+
+  private getGeminiModel() {
+    return this.configService.getString(["VCE_GEMINI_MODEL"], this.defaultModel);
+  }
+
+  private getGeminiTimeoutMs() {
+    return this.configService.getNumber(
+      ["VCE_GEMINI_TIMEOUT_MS"],
+      this.defaultRequestTimeoutMs,
+    );
+  }
+
+  private warnFallback(method: string, reason: string, error?: unknown) {
+    const suffix = error instanceof Error ? ` (${error.name})` : "";
+    this.logger.warn(`${method} fallback engaged: ${reason}${suffix}`);
+  }
+
+  private buildFallbackReason(error: unknown) {
+    if (error instanceof Error) {
+      return error.message.slice(0, 200);
+    }
+
+    return "unknown_error";
   }
 
   private parseJsonPayload(content: string) {
@@ -536,6 +804,28 @@ export class ContentRemixService {
     } catch {
       return {};
     }
+  }
+
+  private toDate(value: unknown) {
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value;
+    }
+
+    if (typeof value === "string" || typeof value === "number") {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    return null;
+  }
+
+  private preferString(value: unknown, fallback: string) {
+    return this.readString(value) || fallback;
+  }
+
+  private preferStringArray(value: unknown, fallback: string[]) {
+    const next = this.readStringArray(value);
+    return next.length > 0 ? next : fallback;
   }
 
   private readString(value: unknown) {

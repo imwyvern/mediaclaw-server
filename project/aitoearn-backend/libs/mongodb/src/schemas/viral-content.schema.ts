@@ -27,16 +27,31 @@ class ViralContentAnalysis {
   narrativeBeats: string[];
 
   @Prop({ type: [String], default: [] })
+  structureBreakdown: string[];
+
+  @Prop({ type: [String], default: [] })
   visualMotifs: string[];
 
   @Prop({ type: [String], default: [] })
   audioCues: string[];
+
+  @Prop({ type: [String], default: [] })
+  copyStyle: string[];
+
+  @Prop({ type: [String], default: [] })
+  tagStrategy: string[];
+
+  @Prop({ type: [String], default: [] })
+  bestPostingTimes: string[];
 
   @Prop({ type: String, default: "" })
   ctaStyle: string;
 
   @Prop({ type: [String], default: [] })
   risks: string[];
+
+  @Prop({ type: String, default: "" })
+  fallbackReason: string;
 
   @Prop({ type: Date, default: null })
   analyzedAt: Date | null;
@@ -76,6 +91,9 @@ class ViralContentBrief {
 
   @Prop({ type: [String], default: [] })
   productionNotes: string[];
+
+  @Prop({ type: String, default: "" })
+  fallbackReason: string;
 
   @Prop({ type: Date, default: null })
   generatedAt: Date | null;

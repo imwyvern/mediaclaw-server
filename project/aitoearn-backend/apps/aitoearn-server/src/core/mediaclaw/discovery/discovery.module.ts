@@ -17,6 +17,7 @@ import {
   ViralContentSchema,
 } from "@yikart/mongodb";
 import { AcquisitionModule } from "../acquisition/acquisition.module";
+import { MediaclawConfigModule } from "../mediaclaw-config.module";
 import { ContentRemixService } from "./content-remix.service";
 import { DiscoveryController } from "./discovery.controller";
 import { DiscoveryNotificationService } from "./discovery-notification.service";
@@ -25,6 +26,7 @@ import { DiscoveryService } from "./discovery.service";
 @Module({
   imports: [
     AcquisitionModule,
+    MediaclawConfigModule,
     MongooseModule.forFeature([
       { name: Competitor.name, schema: CompetitorSchema },
       { name: Brand.name, schema: BrandSchema },
