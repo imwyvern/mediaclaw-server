@@ -3,9 +3,12 @@ import { MongooseModule } from '@nestjs/mongoose'
 import {
   DistributionRule,
   DistributionRuleSchema,
+  Pipeline,
+  PipelineSchema,
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+
 import { EmployeeDispatchModule } from '../employee-dispatch/employee-dispatch.module'
 import { NotificationModule } from '../notification/notification.module'
 import { WebhookModule } from '../webhook/webhook.module'
@@ -17,6 +20,7 @@ import { DistributionService } from './distribution.service'
     MongooseModule.forFeature([
       { name: DistributionRule.name, schema: DistributionRuleSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
+      { name: Pipeline.name, schema: PipelineSchema },
     ]),
     WebhookModule,
     EmployeeDispatchModule,

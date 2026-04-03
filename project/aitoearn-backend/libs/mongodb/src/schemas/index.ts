@@ -23,6 +23,7 @@ import { Competitor, CompetitorSchema } from './competitor.schema'
 import { CopyHistory, CopyHistorySchema } from './copy-history.schema'
 import { CreditsBalance, CreditsBalanceSchema } from './credits-balance.schema'
 import { CreditsRecord, CreditsRecordSchema } from './credits-record.schema'
+import { DeliveryRecord, DeliveryRecordSchema } from './delivery-record.schema'
 import {
   DiscoveryNotification,
   DiscoveryNotificationSchema,
@@ -117,6 +118,7 @@ export * from './content-generation-task.schema'
 export * from './copy-history.schema'
 export * from './credits-balance.schema'
 export * from './credits-record.schema'
+export * from './delivery-record.schema'
 export * from './discovery-notification.schema'
 export * from './distribution-rule.schema'
 export * from './employee-assignment.schema'
@@ -163,6 +165,7 @@ export const schemas = [
   { name: User.name, schema: UserSchema },
   { name: CreditsBalance.name, schema: CreditsBalanceSchema },
   { name: CreditsRecord.name, schema: CreditsRecordSchema },
+  { name: DeliveryRecord.name, schema: DeliveryRecordSchema },
   { name: PointsRecord.name, schema: PointsRecordSchema },
   { name: PlatformAccount.name, schema: PlatformAccountSchema },
   { name: AiLog.name, schema: AiLogSchema },

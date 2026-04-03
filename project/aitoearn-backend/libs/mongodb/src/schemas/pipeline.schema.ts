@@ -57,6 +57,21 @@ class ScheduleConfig {
   timezone: string;
 }
 
+@Schema({ _id: false })
+class PipelineDispatchRules {
+  @Prop({ type: [String], default: [] })
+  assignmentIds: string[];
+
+  @Prop({ type: [String], default: [] })
+  preferredPlatforms: string[];
+
+  @Prop({ type: [String], default: [] })
+  preferredCategories: string[];
+
+  @Prop({ type: String, default: "round-robin" })
+  strategy: string;
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: "pipelines" })
 export class Pipeline extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -93,6 +108,9 @@ export class Pipeline extends WithTimestampSchema {
 
   @Prop({ type: ScheduleConfig, default: () => ({}) })
   schedule: ScheduleConfig;
+
+  @Prop({ type: PipelineDispatchRules, default: () => ({}) })
+  distributionRules: PipelineDispatchRules;
 
   @Prop({ type: Number, default: 0 })
   totalVideosProduced: number;

@@ -144,9 +144,9 @@ export class EmployeeDispatchService {
     const dispatchedAt = new Date()
     const dispatchPayload = assignments.map((assignment) => ({
       assignmentId: assignment._id.toString(),
-      employeeId: assignment.employeeId.toString(),
+      employeeId: assignment.employeeId?.toString() || '',
       employeeName: assignment.employeeName,
-      platformAccountId: assignment.platformAccountId.toString(),
+      platformAccountId: assignment.platformAccountId?.toString() || '',
       platforms: assignment.platforms || [],
       message: this.buildDispatchMessage(task, assignment),
       dispatchedAt: dispatchedAt.toISOString(),
@@ -263,7 +263,7 @@ export class EmployeeDispatchService {
               timestamp: confirmedAt.toISOString(),
               details: {
                 assignmentId: assignment._id.toString(),
-                employeeId: assignment.employeeId.toString(),
+                employeeId: assignment.employeeId?.toString() || '',
                 employeeName: assignment.employeeName,
                 publishUrl: normalizedPublishUrl,
               },
@@ -331,9 +331,9 @@ export class EmployeeDispatchService {
     return {
       id: assignment._id.toString(),
       orgId: assignment.orgId.toString(),
-      employeeId: assignment.employeeId.toString(),
+      employeeId: assignment.employeeId?.toString() || '',
       employeeName: assignment.employeeName || '',
-      platformAccountId: assignment.platformAccountId.toString(),
+      platformAccountId: assignment.platformAccountId?.toString() || '',
       platforms: assignment.platforms || [],
       isActive: assignment.isActive !== false,
       status: assignment.status || EmployeeAssignmentStatus.ACTIVE,

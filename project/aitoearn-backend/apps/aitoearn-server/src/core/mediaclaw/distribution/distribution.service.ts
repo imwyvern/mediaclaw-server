@@ -10,6 +10,7 @@ import {
   DistributionRule,
   DistributionRuleType,
   NotificationEvent,
+  Pipeline,
   PaymentOrder,
   VideoTask,
   VideoTaskStatus,
@@ -76,6 +77,8 @@ export class DistributionService {
     private readonly distributionRuleModel: Model<DistributionRule>,
     @InjectModel(VideoTask.name)
     private readonly videoTaskModel: Model<VideoTask>,
+    @InjectModel(Pipeline.name)
+    private readonly pipelineModel: Model<Pipeline>,
     private readonly webhookService: WebhookService,
     @Optional()
     private readonly employeeDispatchService?: EmployeeDispatchService,
@@ -318,18 +321,76 @@ export class DistributionService {
     return this.toDistributionResponse(updated)
   }
 
-  async assignByRule(orgId: string, contentId: string) {
-    const task = await this.getTaskOrFail(orgId, contentId)
-    const dispatchResult = this.employeeDispatchService
-      ? await this.employeeDispatchService.dispatchToEmployee(task)
-      : {
+  async dispatchByPipelineRules(pipelineId: string, videoTaskIds: string[]) {
+    if (!this.employeeDispatchService) {
+      return {
+        total: videoTaskIds.length,
+        dispatched: 0,
+        failed: videoTaskIds.length,
+        strategy: 'round-robin',
+        results: videoTaskIds.map(videoTaskId => ({
+          videoTaskId,
           dispatched: false,
           reason: 'employee_dispatch_not_configured',
-        }
+        })),
+      }
+    }
+
+    const normalizedTaskIds = Array.from(new Set(videoTaskIds.map(id => id.trim()).filter(Boolean)))
+    if (normalizedTaskIds.length === 0) {
+      throw new BadRequestException('videoTaskIds is required')
+    }
+
+    if (!Types.ObjectId.isValid(pipelineId)) {
+      throw new BadRequestException('pipelineId is invalid')
+    }
+
+    const pipeline = await this.pipelineModel.findById(new Types.ObjectId(pipelineId)).lean().exec() as Record<string, any> | null
+    if (!pipeline) {
+      throw new NotFoundException('Pipeline not found')
+    }
+
+    const distributionRules = this.asRecord(pipeline['distributionRules']) || {}
+    return this.employeeDispatchService.batchDispatch(normalizedTaskIds, {
+      pipelineId,
+      assignmentIds: Array.isArray(distributionRules['assignmentIds']) ? distributionRules['assignmentIds'] as string[] : [],
+      preferredPlatforms: Array.isArray(distributionRules['preferredPlatforms']) ? distributionRules['preferredPlatforms'] as string[] : [],
+      preferredCategories: Array.isArray(distributionRules['preferredCategories']) ? distributionRules['preferredCategories'] as string[] : [],
+      strategy: typeof distributionRules['strategy'] === 'string' ? distributionRules['strategy'] : undefined,
+    })
+  }
+
+  async assignByRule(orgId: string, contentId: string) {
+    const task = await this.getTaskOrFail(orgId, contentId)
+    const taskId = task._id.toString()
+
+    let dispatchResult: Record<string, any>
+    if (!this.employeeDispatchService) {
+      dispatchResult = {
+        total: 1,
+        dispatched: 0,
+        failed: 1,
+        strategy: 'round-robin',
+        results: [
+          {
+            videoTaskId: taskId,
+            dispatched: false,
+            reason: 'employee_dispatch_not_configured',
+          },
+        ],
+      }
+    }
+    else if (task.pipelineId) {
+      dispatchResult = await this.dispatchByPipelineRules(task.pipelineId.toString(), [taskId])
+    }
+    else {
+      dispatchResult = await this.employeeDispatchService.batchDispatch([taskId], {})
+    }
 
     const refreshed = await this.videoTaskModel.findById(task._id).lean().exec()
     return {
-      assignment: dispatchResult,
+      assignment: Array.isArray(dispatchResult['results']) ? dispatchResult['results'][0] || null : dispatchResult,
+      batch: dispatchResult,
       ...(refreshed ? this.toDistributionResponse(refreshed) : this.toDistributionResponse(task.toObject?.() || task as Record<string, any>)),
     }
   }
@@ -340,22 +401,36 @@ export class DistributionService {
     }
 
     const task = await this.getTaskOrFail(orgId, contentId)
-    const timestamp = new Date().toISOString()
+    const normalizedPublishUrl = publishUrl.trim()
     const normalizedPlatform = platform?.trim() || ''
     const confirmation = this.employeeDispatchService
-      ? await this.employeeDispatchService.confirmPublished(orgId, contentId)
+      ? await this.employeeDispatchService.confirmPublished(orgId, contentId, {
+          publishUrl: normalizedPublishUrl,
+          publishPlatform: normalizedPlatform,
+        })
       : {
           confirmed: false,
           reason: 'employee_dispatch_not_configured',
         }
 
+    if (confirmation['confirmed']) {
+      const refreshed = await this.videoTaskModel.findById(task._id).lean().exec()
+      if (refreshed) {
+        return {
+          confirmation,
+          ...this.toDistributionResponse(refreshed),
+        }
+      }
+    }
+
+    const timestamp = new Date().toISOString()
     const updated = await this.videoTaskModel.findByIdAndUpdate(
       task._id,
       {
         $set: {
           'metadata.publishedAt': timestamp,
           'metadata.distribution.publishStatus': DistributionPublishStatus.PUBLISHED,
-          'metadata.distribution.publishUrl': publishUrl.trim(),
+          'metadata.distribution.publishUrl': normalizedPublishUrl,
           'metadata.distribution.platform': normalizedPlatform,
           'metadata.distribution.lastStatusAt': timestamp,
         },
@@ -363,7 +438,7 @@ export class DistributionService {
           'metadata.distribution.history': {
             $each: [
               this.createDistributionHistory(DistributionPublishStatus.PUBLISHED, timestamp, {
-                publishUrl: publishUrl.trim(),
+                publishUrl: normalizedPublishUrl,
                 platform: normalizedPlatform,
                 confirmation,
               }),
@@ -427,15 +502,18 @@ export class DistributionService {
   async notifyTaskComplete(task: VideoTask) {
     const taskId = task._id?.toString()
     const orgId = task.orgId?.toString() || null
-    const employeeDispatch = this.employeeDispatchService
-      ? await this.employeeDispatchService.dispatchToEmployee(task).catch((error) => {
-          this.logger.warn({
-            message: 'Employee dispatch failed after task completion',
-            taskId,
-            error: error instanceof Error ? error.message : String(error),
+    const pipelineId = task.pipelineId?.toString() || null
+    const employeeDispatch = this.employeeDispatchService && taskId
+      ? await (pipelineId
+          ? this.dispatchByPipelineRules(pipelineId, [taskId])
+          : this.employeeDispatchService.batchDispatch([taskId], {})).catch((error) => {
+            this.logger.warn({
+              message: 'Employee dispatch failed after task completion',
+              taskId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+            return null
           })
-          return null
-        })
       : null
 
     const payload = {
@@ -444,7 +522,7 @@ export class DistributionService {
       userId: task.userId,
       orgId,
       brandId: task.brandId?.toString() || null,
-      pipelineId: task.pipelineId?.toString() || null,
+      pipelineId,
       status: task.status,
       outputVideoUrl: task.outputVideoUrl,
       completedAt: task.completedAt,
