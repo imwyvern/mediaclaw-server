@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { DeliveryChannel } from '@yikart/mongodb'
 
-import { DispatchVideoCard, ImPushResult, ImPushService } from './im-push.service'
+import { ImDeliveryService } from './im-delivery.service'
+import { DispatchVideoCard, ImPushContext, ImPushResult, ImPushService } from './im-push.service'
 
 export interface WecomBinding {
-  userId: string
+  userId?: string
   chatId?: string
 }
 
@@ -12,23 +13,23 @@ export interface WecomBinding {
 export class WecomPushService implements ImPushService<WecomBinding> {
   readonly channel = DeliveryChannel.WECOM
 
-  private readonly logger = new Logger(WecomPushService.name)
+  constructor(private readonly imDeliveryService: ImDeliveryService) {}
 
-  async pushVideoCard(binding: WecomBinding, videoData: DispatchVideoCard): Promise<ImPushResult> {
-    // TODO: Replace this stub with real OpenClaw -> WeCom message delivery.
-    const payload = {
-      channel: this.channel,
-      binding,
+  async pushVideoCard(
+    context: ImPushContext<WecomBinding>,
+    videoData: DispatchVideoCard,
+  ): Promise<ImPushResult> {
+    const payload = this.imDeliveryService.buildWecomCardPayload(
       videoData,
-      deliveredAt: new Date().toISOString(),
-      stub: true,
-    }
+      context.target,
+      context.binding,
+      context.deliveryRecord,
+    )
 
-    this.logger.log(`Stub WeCom push for task ${videoData.videoTaskId} -> ${binding.userId}`)
-
-    return {
-      success: true,
+    return this.imDeliveryService.deliverViaWebhook(
+      context.deliveryRecord,
+      context.target.webhookUrl,
       payload,
-    }
+    )
   }
 }

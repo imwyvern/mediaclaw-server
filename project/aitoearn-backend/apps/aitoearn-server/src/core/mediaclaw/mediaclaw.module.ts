@@ -80,6 +80,7 @@ import { MarketplaceModule } from "./marketplace/marketplace.module";
 import { NotificationModule } from "./notification/notification.module";
 import { OrgModule } from "./org/org.module";
 import { PaymentModule } from "./payment/payment.module";
+import { PipelineMatchModule } from "./pipeline-match/pipeline-match.module";
 import { PipelineSystemModule } from "./pipeline-system/pipeline-system.module";
 import { PipelineModule } from "./pipeline/pipeline.module";
 import { PlatformAccountModule } from "./platform-account/platform-account.module";
@@ -135,6 +136,7 @@ const workerModuleImports =
     VideoModule,
     PaymentModule,
     PipelineModule,
+    PipelineMatchModule,
     McAccountModule,
     CopyModule,
     DistributionModule,

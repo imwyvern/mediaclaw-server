@@ -7,6 +7,7 @@ import { WithTimestampSchema } from './timestamp.schema'
 export enum DeliveryChannel {
   FEISHU = 'feishu',
   WECOM = 'wecom',
+  WEBHOOK = 'webhook',
   EMAIL = 'email',
   MANUAL = 'manual',
 }

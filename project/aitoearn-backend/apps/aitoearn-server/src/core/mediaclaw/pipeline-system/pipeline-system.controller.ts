@@ -53,12 +53,12 @@ export class PipelineSystemController {
     })
   }
 
-  @Get(':id')
+  @Get(':id([0-9a-fA-F]{24})')
   async getTemplate(@GetToken() user: any, @Param('id') id: string) {
     return this.pipelineSystemService.getTemplate(id, user.id)
   }
 
-  @Post(':id/apply')
+  @Post(':id([0-9a-fA-F]{24})/apply')
   async applyTemplate(
     @GetToken() user: any,
     @Param('id') id: string,
@@ -86,7 +86,7 @@ export class PipelineSystemController {
     )
   }
 
-  @Post(':id/learn')
+  @Post(':id([0-9a-fA-F]{24})/learn')
   async learnPreference(
     @GetToken() user: any,
     @Param('id') id: string,
@@ -102,7 +102,7 @@ export class PipelineSystemController {
     return this.pipelineSystemService.learnPreference(user.orgId || user.id, id, body)
   }
 
-  @Post(':id/warm-up')
+  @Post(':id([0-9a-fA-F]{24})/warm-up')
   async warmUp(
     @Param('id') id: string,
     @GetToken() user: any,

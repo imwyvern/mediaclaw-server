@@ -18,7 +18,14 @@ import {
 import { Model, Types } from 'mongoose'
 
 import { FeishuPushService } from './feishu-push.service'
-import { DispatchVideoCard } from './im-push.service'
+import { ImDeliveryService } from './im-delivery.service'
+import {
+  DispatchEmployeeTarget,
+  DispatchVideoCard,
+  ImPushContext,
+  ImPushResult,
+  WebhookDeliveryRecord,
+} from './im-push.service'
 import { WecomPushService } from './wecom-push.service'
 
 type DispatchStrategy = 'round-robin' | 'category-match' | 'load-balance'
@@ -67,6 +74,7 @@ export class EmployeeDispatchService {
     private readonly videoTaskModel: Model<VideoTask>,
     private readonly feishuPushService: FeishuPushService,
     private readonly wecomPushService: WecomPushService,
+    private readonly imDeliveryService: ImDeliveryService,
   ) {}
 
   async createAssignment(orgId: string, data: Record<string, unknown>) {
@@ -234,6 +242,7 @@ export class EmployeeDispatchService {
     const rules = this.normalizeDispatchRules(dispatchRules)
     const results: Array<Record<string, unknown>> = []
     let dispatched = 0
+    let pending = 0
     let failed = 0
     let roundRobinIndex = 0
 
@@ -279,6 +288,9 @@ export class EmployeeDispatchService {
       if (delivery['dispatched']) {
         dispatched += 1
       }
+      else if (delivery['status'] === DeliveryRecordStatus.PENDING) {
+        pending += 1
+      }
       else {
         failed += 1
       }
@@ -288,6 +300,7 @@ export class EmployeeDispatchService {
     return {
       total: normalizedTaskIds.length,
       dispatched,
+      pending,
       failed,
       strategy: rules.strategy,
       results,
@@ -452,90 +465,146 @@ export class EmployeeDispatchService {
   }
 
   private async dispatchTaskWithAssignment(task: VideoTaskRecord, assignment: AssignmentRecord) {
-    const deliveryChannel = this.resolveDeliveryChannel(assignment)
-    const created = await this.deliveryRecordModel.create({
-      orgId: assignment['orgId'],
-      videoTaskId: task['_id'].toString(),
-      employeeAssignmentId: assignment['_id'].toString(),
-      deliveryChannel,
-      status: DeliveryRecordStatus.PENDING,
-      retryCount: 0,
-    })
+  const deliveryChannel = this.resolveDeliveryChannel(assignment)
+  const created = await this.deliveryRecordModel.create({
+    orgId: assignment['orgId'],
+    videoTaskId: task['_id'].toString(),
+    employeeAssignmentId: assignment['_id'].toString(),
+    deliveryChannel,
+    status: DeliveryRecordStatus.PENDING,
+    retryCount: 0,
+  })
 
-    const videoData = this.buildVideoCard(task)
-    const deliveredAt = new Date()
-    const pushResult = await this.pushVideoCard(deliveryChannel, assignment, videoData)
-    const nextStatus = pushResult.success ? DeliveryRecordStatus.DELIVERED : DeliveryRecordStatus.FAILED
+  const deliveryRecord = this.toWebhookDeliveryRecord(created, deliveryChannel)
+  const videoData = this.buildVideoCard(task)
+  const pushResult = await this.pushVideoCard(deliveryChannel, assignment, deliveryRecord, videoData)
+  const manualPickupRequired = Boolean(pushResult.manualPickupRequired)
+  const processedAt = pushResult.deliveredAt || new Date()
+  const nextStatus = pushResult.status
+    || (manualPickupRequired
+      ? DeliveryRecordStatus.PENDING
+      : pushResult.success
+        ? DeliveryRecordStatus.DELIVERED
+        : DeliveryRecordStatus.FAILED)
+  const reason = manualPickupRequired
+    ? 'manual_pickup_required'
+    : nextStatus === DeliveryRecordStatus.FAILED
+      ? pushResult.errorMessage || 'push_failed'
+      : ''
 
-    const updated = await this.deliveryRecordModel.findByIdAndUpdate(
+  if (manualPickupRequired || !pushResult.status) {
+    await this.deliveryRecordModel.findByIdAndUpdate(
       created._id,
       {
         $set: {
           status: nextStatus,
-          deliveredAt: pushResult.success ? deliveredAt : null,
-          failReason: pushResult.success ? '' : pushResult.errorMessage || 'push_failed',
+          deliveredAt: nextStatus === DeliveryRecordStatus.DELIVERED ? processedAt : null,
+          failReason: nextStatus === DeliveryRecordStatus.FAILED ? reason : '',
           deliveryPayload: pushResult.payload,
-        },
-        $inc: {
-          retryCount: pushResult.success ? 0 : 1,
+          retryCount: Number(pushResult.retryCount || 0),
         },
       },
-      { new: true },
-    ).lean().exec()
-
-    if (pushResult.success) {
-      await Promise.all([
-        this.employeeAssignmentModel.findByIdAndUpdate(assignment['_id'], {
-          $inc: {
-            'stats.totalAssigned': 1,
-            'stats.totalPending': 1,
-            dailyAssignedCount: 1,
-          },
-          $set: {
-            'stats.lastAssignedAt': deliveredAt,
-            lastDispatchedAt: deliveredAt,
-          },
-        }).exec(),
-        this.videoTaskModel.findByIdAndUpdate(task['_id'], {
-          $set: {
-            'metadata.distribution.employeeDispatch': {
-              assignmentId: assignment['_id'].toString(),
-              employeeName: assignment['employeeName'] || '',
-              employeePhone: assignment['employeePhone'] || '',
-              deliveryRecordId: created._id.toString(),
-              deliveryChannel,
-              deliveredAt: deliveredAt.toISOString(),
-              publishConfirmed: false,
-            },
-            'metadata.distribution.publishStatus': DeliveryRecordStatus.DELIVERED,
-            'metadata.distribution.lastDistributedAt': deliveredAt.toISOString(),
-            'metadata.distribution.lastStatusAt': deliveredAt.toISOString(),
-          },
-          $push: {
-            'metadata.distribution.history': {
-              status: 'pushed',
-              timestamp: deliveredAt.toISOString(),
-              details: {
-                deliveryRecordId: created._id.toString(),
-                assignmentId: assignment['_id'].toString(),
-                deliveryChannel,
-              },
-            },
-          },
-        }).exec(),
-      ])
-    }
-
-    return {
-      dispatched: pushResult.success,
-      videoTaskId: task['_id'].toString(),
-      assignmentId: assignment['_id'].toString(),
-      deliveryRecordId: created._id.toString(),
-      status: nextStatus,
-      reason: pushResult.success ? '' : pushResult.errorMessage || 'push_failed',
-      deliveryChannel,
-    }
+    ).exec()
   }
+
+  if (pushResult.success || manualPickupRequired) {
+    const eventStatus = manualPickupRequired ? 'pending_manual_pickup' : 'pushed'
+    await Promise.all([
+      this.employeeAssignmentModel.findByIdAndUpdate(assignment['_id'], {
+        $inc: {
+          'stats.totalAssigned': 1,
+          'stats.totalPending': 1,
+          dailyAssignedCount: 1,
+        },
+        $set: {
+          'stats.lastAssignedAt': processedAt,
+          lastDispatchedAt: processedAt,
+        },
+      }).exec(),
+      this.videoTaskModel.findByIdAndUpdate(task['_id'], {
+        $set: {
+          'metadata.distribution.employeeDispatch': {
+            assignmentId: assignment['_id'].toString(),
+            employeeName: assignment['employeeName'] || '',
+            employeePhone: assignment['employeePhone'] || '',
+            webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+            deliveryRecordId: created._id.toString(),
+            deliveryChannel,
+            assignedAt: processedAt.toISOString(),
+            deliveredAt: nextStatus === DeliveryRecordStatus.DELIVERED ? processedAt.toISOString() : null,
+            deliveryStatus: nextStatus,
+            publishConfirmed: false,
+            manualPickupRequired,
+          },
+          'metadata.distribution.publishStatus': nextStatus,
+          'metadata.distribution.lastDistributedAt': processedAt.toISOString(),
+          'metadata.distribution.lastStatusAt': processedAt.toISOString(),
+          'metadata.distribution.manualPickupRequired': manualPickupRequired,
+        },
+        $push: {
+          'metadata.distribution.history': {
+            status: eventStatus,
+            timestamp: processedAt.toISOString(),
+            details: {
+              deliveryRecordId: created._id.toString(),
+              assignmentId: assignment['_id'].toString(),
+              deliveryChannel,
+              manualPickupRequired,
+              webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+            },
+          },
+        },
+      }).exec(),
+    ])
+  }
+  else {
+    await this.videoTaskModel.findByIdAndUpdate(task['_id'], {
+      $set: {
+        'metadata.distribution.employeeDispatch': {
+          assignmentId: assignment['_id'].toString(),
+          employeeName: assignment['employeeName'] || '',
+          employeePhone: assignment['employeePhone'] || '',
+          webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+          deliveryRecordId: created._id.toString(),
+          deliveryChannel,
+          assignedAt: processedAt.toISOString(),
+          deliveredAt: null,
+          deliveryStatus: DeliveryRecordStatus.FAILED,
+          publishConfirmed: false,
+          manualPickupRequired: false,
+          failReason: reason,
+        },
+        'metadata.distribution.publishStatus': DeliveryRecordStatus.FAILED,
+        'metadata.distribution.lastStatusAt': processedAt.toISOString(),
+        'metadata.distribution.manualPickupRequired': false,
+      },
+      $push: {
+        'metadata.distribution.history': {
+          status: 'delivery_failed',
+          timestamp: processedAt.toISOString(),
+          details: {
+            deliveryRecordId: created._id.toString(),
+            assignmentId: assignment['_id'].toString(),
+            deliveryChannel,
+            failReason: reason,
+          },
+        },
+      },
+    }).exec()
+  }
+
+  return {
+    dispatched: pushResult.success,
+    pendingManualPickup: manualPickupRequired,
+    manualPickupRequired,
+    videoTaskId: task['_id'].toString(),
+    assignmentId: assignment['_id'].toString(),
+    deliveryRecordId: created._id.toString(),
+    status: nextStatus,
+    reason,
+    deliveryChannel,
+  }
+}
 
   private async resolveEligibleAssignments(task: VideoTaskRecord, rules: Required<DispatchRulesInput>) {
     const orgId = this.resolveTaskOrgId(task)
@@ -574,7 +643,7 @@ export class EmployeeDispatchService {
 
       const assignmentPlatforms = new Set([
         ...this.normalizeStringList(assignment['distributionRules']?.['preferredPlatforms']),
-        ...platformLookup.get(assignment['_id'].toString()) || [],
+        ...(platformLookup.get(assignment['_id'].toString()) || []),
       ])
       if (taskPlatform && assignmentPlatforms.size > 0 && !assignmentPlatforms.has(taskPlatform)) {
         return false
@@ -638,49 +707,62 @@ export class EmployeeDispatchService {
   private async pushVideoCard(
     channel: DeliveryChannel,
     assignment: AssignmentRecord,
+    deliveryRecord: WebhookDeliveryRecord,
     videoData: DispatchVideoCard,
-  ) {
+  ): Promise<ImPushResult> {
+    const target = this.buildDispatchTarget(assignment)
+    if (!target.webhookUrl) {
+      return this.buildManualPickupResult(channel, videoData)
+    }
+
     if (channel === DeliveryChannel.FEISHU) {
       const binding = assignment['imBinding']?.['feishu'] || {}
-      if (!binding['openId']) {
-        return {
-          success: false,
-          payload: {},
-          errorMessage: 'feishu_binding_missing',
-        }
+      const context: ImPushContext<Record<string, unknown>> = {
+        binding,
+        target,
+        deliveryRecord,
       }
-      return this.feishuPushService.pushVideoCard(binding, videoData)
+      return this.feishuPushService.pushVideoCard(context, videoData)
     }
 
     if (channel === DeliveryChannel.WECOM) {
       const binding = assignment['imBinding']?.['wecom'] || {}
-      if (!binding['userId']) {
-        return {
-          success: false,
-          payload: {},
-          errorMessage: 'wecom_binding_missing',
-        }
+      const context: ImPushContext<Record<string, unknown>> = {
+        binding,
+        target,
+        deliveryRecord,
       }
-      return this.wecomPushService.pushVideoCard(binding, videoData)
+      return this.wecomPushService.pushVideoCard(context, videoData)
     }
 
-    return {
-      success: true,
-      payload: {
-        channel: DeliveryChannel.MANUAL,
-        stub: true,
-        videoData,
-      },
+    if (channel === DeliveryChannel.WEBHOOK) {
+      const payload = this.imDeliveryService.buildGenericWebhookPayload(videoData, target, deliveryRecord)
+      return this.imDeliveryService.deliverViaWebhook(deliveryRecord, target.webhookUrl, payload)
     }
+
+    return this.buildManualPickupResult(channel, videoData)
   }
 
   private resolveDeliveryChannel(assignment: AssignmentRecord) {
-    if (assignment['imBinding']?.['feishu']?.['openId']) {
+    if (assignment['imBinding']?.['feishu']?.['openId'] || assignment['imBinding']?.['feishu']?.['chatId']) {
       return DeliveryChannel.FEISHU
     }
-    if (assignment['imBinding']?.['wecom']?.['userId']) {
+    if (assignment['imBinding']?.['wecom']?.['userId'] || assignment['imBinding']?.['wecom']?.['chatId']) {
       return DeliveryChannel.WECOM
     }
+
+    const webhookUrl = this.normalizeOptionalString(assignment['webhookUrl'])
+    if (webhookUrl) {
+      const host = this.readWebhookHost(webhookUrl)
+      if (host.includes('feishu') || host.includes('larksuite') || host.includes('larkoffice')) {
+        return DeliveryChannel.FEISHU
+      }
+      if (host.includes('qyapi.weixin.qq.com') || host.includes('wecom') || host.includes('weixin.qq.com')) {
+        return DeliveryChannel.WECOM
+      }
+      return DeliveryChannel.WEBHOOK
+    }
+
     return DeliveryChannel.MANUAL
   }
 
@@ -714,6 +796,9 @@ export class EmployeeDispatchService {
     const status = this.normalizeStatus(data['status'], existing?.['status']) || EmployeeAssignmentStatus.ACTIVE
     const distributionRules = this.normalizeDistributionRules(data['distributionRules'] ?? existing?.['distributionRules'])
     const imBinding = this.normalizeImBindingPayload(data['imBinding'] ?? existing?.['imBinding'])
+    const webhookUrl = this.normalizeWebhookUrl(
+      this.hasOwn(data, 'webhookUrl') ? data['webhookUrl'] : existing?.['webhookUrl'],
+    )
     const platforms = await this.resolvePlatformsForAccounts(platformAccountIds)
     const previousStats = existing?.['stats'] || {}
 
@@ -723,6 +808,7 @@ export class EmployeeDispatchService {
       employeeUserId,
       platformAccountIds,
       imBinding,
+      webhookUrl,
       status,
       distributionRules,
       stats: {
@@ -770,16 +856,14 @@ export class EmployeeDispatchService {
     }
 
     if (channel === DeliveryChannel.FEISHU) {
-      const openId = this.normalizeRequiredString(source['openId'], 'binding.openId')
       return {
-        openId,
+        openId: this.normalizeOptionalString(source['openId']),
         chatId: this.normalizeOptionalString(source['chatId']),
       }
     }
 
-    const userId = this.normalizeRequiredString(source['userId'], 'binding.userId')
     return {
-      userId,
+      userId: this.normalizeOptionalString(source['userId']),
       chatId: this.normalizeOptionalString(source['chatId']),
     }
   }
@@ -835,15 +919,30 @@ export class EmployeeDispatchService {
   }
 
   private buildVideoCard(task: VideoTaskRecord): DispatchVideoCard {
-    return {
-      videoTaskId: task['_id'].toString(),
-      title: this.normalizeOptionalString(task['copy']?.['title']) || this.normalizeOptionalString(task['outputVideoUrl']) || task['_id'].toString(),
-      description: this.normalizeOptionalString(task['copy']?.['description']),
-      outputVideoUrl: this.normalizeOptionalString(task['output']?.['url']) || this.normalizeOptionalString(task['outputVideoUrl']),
-      publishPlatforms: this.resolveTaskPlatform(task) ? [this.resolveTaskPlatform(task)] : [],
-      tags: this.resolveTaskCategories(task),
-    }
+  const title = this.normalizeOptionalString(task['copy']?.['title'])
+    || this.normalizeOptionalString(task['metadata']?.['title'])
+    || this.normalizeOptionalString(task['outputVideoUrl'])
+    || task['_id'].toString()
+  const description = this.normalizeOptionalString(task['copy']?.['description'])
+  const subtitle = this.normalizeOptionalString(task['copy']?.['subtitle'])
+  const hashtags = this.normalizeStringList(task['copy']?.['hashtags']).map(tag => `#${tag}`)
+  const publishGuide = this.resolvePublishGuide(task)
+  const primaryPlatform = this.resolveTaskPlatform(task)
+
+  return {
+    videoTaskId: task['_id'].toString(),
+    title,
+    description,
+    copy: [title, subtitle, description, hashtags.join(' ')].filter(Boolean).join('\n'),
+    coverUrl: this.resolveTaskCoverUrl(task),
+    outputVideoUrl: this.normalizeOptionalString(task['output']?.['url'])
+      || this.normalizeOptionalString(task['outputVideoUrl']),
+    publishGuide,
+    publishPlatforms: primaryPlatform ? [primaryPlatform] : [],
+    primaryPlatform,
+    tags: this.resolveTaskCategories(task),
   }
+}
 
   private resolveTaskPlatform(task: VideoTaskRecord) {
     const candidates = [
@@ -876,6 +975,33 @@ export class EmployeeDispatchService {
         || task['metadata']?.['categories']
         || [],
     )
+  }
+
+  private resolveTaskCoverUrl(task: VideoTaskRecord) {
+    const candidates = [
+      task['output']?.['metadata']?.['coverUrl'],
+      task['output']?.['metadata']?.['thumbnailUrl'],
+      task['output']?.['metadata']?.['posterUrl'],
+      task['metadata']?.['coverUrl'],
+      task['metadata']?.['thumbnailUrl'],
+      task['source']?.['metadata']?.['coverUrl'],
+      task['source']?.['metadata']?.['thumbnailUrl'],
+    ]
+
+    for (const candidate of candidates) {
+      const normalized = this.normalizeOptionalString(candidate)
+      if (normalized) {
+        return normalized
+      }
+    }
+
+    return ''
+  }
+
+  private resolvePublishGuide(task: VideoTaskRecord) {
+    const primaryGuide = this.normalizeOptionalString(task['copy']?.['commentGuide'])
+    const guideList = this.normalizeStringList(task['copy']?.['commentGuides'])
+    return [primaryGuide, ...guideList].filter(Boolean).join(' | ')
   }
 
   private resolveTaskOrgId(task: VideoTaskRecord) {
@@ -995,6 +1121,21 @@ export class EmployeeDispatchService {
       .filter(Boolean)))
   }
 
+  private normalizeWebhookUrl(value: unknown) {
+    const normalized = this.normalizeOptionalString(value)
+    if (!normalized) {
+      return ''
+    }
+
+    try {
+      const parsed = new URL(normalized)
+      return parsed.toString()
+    }
+    catch {
+      throw new BadRequestException('webhookUrl must be a valid URL')
+    }
+  }
+
   private toPositiveInt(value: unknown) {
     const normalized = Number(value || 0)
     if (!Number.isFinite(normalized) || normalized <= 0) {
@@ -1035,6 +1176,54 @@ export class EmployeeDispatchService {
 
   private toObjectIdIfValid(value: string) {
     return Types.ObjectId.isValid(value) ? new Types.ObjectId(value) : null
+  }
+
+  private buildDispatchTarget(assignment: AssignmentRecord): DispatchEmployeeTarget {
+    return {
+      assignmentId: assignment['_id'].toString(),
+      employeeName: assignment['employeeName'] || '',
+      employeePhone: assignment['employeePhone'] || '',
+      webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+    }
+  }
+
+  private buildManualPickupResult(channel: DeliveryChannel, videoData: DispatchVideoCard): ImPushResult {
+  return {
+    success: false,
+    manualPickupRequired: true,
+    status: DeliveryRecordStatus.PENDING,
+    deliveredAt: null,
+    retryCount: 0,
+    payload: {
+      channel,
+      reason: 'webhook_missing',
+      manualPickupRequired: true,
+      videoData,
+    },
+  }
+}
+
+  private readWebhookHost(webhookUrl: string) {
+    try {
+      return new URL(webhookUrl).host.toLowerCase()
+    }
+    catch {
+      return ''
+    }
+  }
+
+  private toWebhookDeliveryRecord(record: DeliveryRecord, deliveryChannel: DeliveryChannel): WebhookDeliveryRecord {
+    return {
+      id: record._id.toString(),
+      orgId: record.orgId,
+      videoTaskId: record.videoTaskId,
+      employeeAssignmentId: record.employeeAssignmentId,
+      deliveryChannel,
+    }
+  }
+
+  private hasOwn(value: Record<string, unknown>, key: string) {
+    return Object.prototype.hasOwnProperty.call(value, key)
   }
 
   private async getAssignmentOrFail(id: string) {
@@ -1089,6 +1278,7 @@ export class EmployeeDispatchService {
       employeeUserId: assignment['employeeUserId'] || '',
       platformAccountIds: assignment['platformAccountIds'] || [],
       imBinding: assignment['imBinding'] || {},
+      webhookUrl: assignment['webhookUrl'] || '',
       status: assignment['status'] || EmployeeAssignmentStatus.ACTIVE,
       distributionRules: assignment['distributionRules'] || {},
       stats: assignment['stats'] || {

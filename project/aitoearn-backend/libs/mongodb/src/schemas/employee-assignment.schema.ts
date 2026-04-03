@@ -86,6 +86,9 @@ export class EmployeeAssignment extends WithTimestampSchema {
   @Prop({ type: EmployeeImBinding, default: () => ({}) })
   imBinding: EmployeeImBinding
 
+  @Prop({ type: String, default: '' })
+  webhookUrl?: string
+
   @Prop({
     type: String,
     enum: Object.values(EmployeeAssignmentStatus),

@@ -14,6 +14,7 @@ import {
 import { EmployeeDispatchController } from './employee-dispatch.controller'
 import { EmployeeDispatchService } from './employee-dispatch.service'
 import { FeishuPushService } from './feishu-push.service'
+import { ImDeliveryService } from './im-delivery.service'
 import { WecomPushService } from './wecom-push.service'
 
 @Module({
@@ -26,7 +27,7 @@ import { WecomPushService } from './wecom-push.service'
     ]),
   ],
   controllers: [EmployeeDispatchController],
-  providers: [EmployeeDispatchService, FeishuPushService, WecomPushService],
+  providers: [EmployeeDispatchService, ImDeliveryService, FeishuPushService, WecomPushService],
   exports: [EmployeeDispatchService],
 })
 export class EmployeeDispatchModule {}
