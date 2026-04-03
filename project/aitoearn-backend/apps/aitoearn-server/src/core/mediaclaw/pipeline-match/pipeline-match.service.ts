@@ -10,8 +10,10 @@ import {
   PipelineTemplate,
   PipelineTemplateStatus,
   PipelineType,
+  ViralContent,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { ContentRemixService } from '../discovery/content-remix.service'
 
 interface MatchPipelineRequest {
   referenceVideoUrl?: string
@@ -71,10 +73,16 @@ interface ReferenceAnalysis {
   duration: number
   keyElements: string[]
   suggestedTemplateType: PipelineType
+  analysisSource: 'content_remix' | 'pending_manual'
+  matchedContentId: string | null
   note: string
 }
 
 type TemplateRecord = Record<string, any> & {
+  _id: { toString(): string }
+}
+
+type ViralContentRecord = Record<string, any> & {
   _id: { toString(): string }
 }
 
@@ -157,6 +165,9 @@ export class PipelineMatchService implements OnModuleInit {
   constructor(
     @InjectModel(PipelineTemplate.name)
     private readonly pipelineTemplateModel: Model<PipelineTemplate>,
+    @InjectModel(ViralContent.name)
+    private readonly viralContentModel: Model<ViralContent>,
+    private readonly contentRemixService: ContentRemixService,
   ) {}
 
   async onModuleInit() {
@@ -215,29 +226,12 @@ export class PipelineMatchService implements OnModuleInit {
 
   async analyzeReferenceVideo(videoUrl: string): Promise<ReferenceAnalysis> {
     const normalizedUrl = this.normalizeRequiredString(videoUrl, 'videoUrl')
-    const tokens = normalizedUrl.toLowerCase()
-    const category = this.pickFirstMatching(tokens, [
-      ['makeup', 'lipstick', 'skincare', 'beauty', '美妆'],
-      ['food', 'snack', 'drink', '食品', '饮料'],
-      ['tutorial', 'guide', 'explain', '教学', '教程', '规则'],
-      ['bar', 'cocktail', '酒吧'],
-    ])
-    const style = this.pickFirstMatching(tokens, [
-      ['unbox', '开箱'],
-      ['live', '直播', 'scene', '场景'],
-      ['tutorial', 'guide', '教程', '讲解'],
-      ['showcase', 'product', '产品'],
-    ])
-
-    return {
-      videoUrl: normalizedUrl,
-      category: category || '通用',
-      style: style || '产品展示',
-      duration: this.extractDurationFromUrl(tokens),
-      keyElements: [category || '通用', style || '产品展示'].filter(Boolean),
-      suggestedTemplateType: this.inferPipelineType(category || '', style || ''),
-      note: 'TODO: integrate with ContentRemixAgent for real reference video analysis',
+    const matchedContent = await this.findReferenceContent(normalizedUrl)
+    if (!matchedContent) {
+      return this.buildPendingManualReferenceAnalysis(normalizedUrl)
     }
+
+    return this.buildReferenceAnalysisFromContent(normalizedUrl, matchedContent)
   }
 
   suggestNewPipeline(request: MatchPipelineRequest, matchResults: Array<Record<string, any>>) {
@@ -833,6 +827,159 @@ export class PipelineMatchService implements OnModuleInit {
 
     const duration = Number(matched[1] || 30)
     return Number.isFinite(duration) ? duration : 30
+  }
+
+  private async findReferenceContent(videoUrl: string): Promise<ViralContentRecord | null> {
+    const normalizedUrl = this.normalizeOptionalString(videoUrl)
+    if (!normalizedUrl) {
+      return null
+    }
+
+    const normalizedUrlWithoutQuery = this.stripUrlSearchAndHash(normalizedUrl)
+    const videoId = this.extractVideoIdFromUrl(normalizedUrl)
+    const orConditions: Array<Record<string, unknown>> = []
+
+    if (normalizedUrl) {
+      orConditions.push({ contentUrl: normalizedUrl })
+    }
+    if (normalizedUrlWithoutQuery && normalizedUrlWithoutQuery !== normalizedUrl) {
+      orConditions.push({ contentUrl: normalizedUrlWithoutQuery })
+    }
+    if (videoId) {
+      orConditions.push({ videoId })
+    }
+
+    if (orConditions.length === 0) {
+      return null
+    }
+
+    return this.viralContentModel.findOne({ $or: orConditions })
+      .sort({ viralScore: -1, discoveredAt: -1 })
+      .lean()
+      .exec() as Promise<ViralContentRecord | null>
+  }
+
+  private async buildReferenceAnalysisFromContent(
+    videoUrl: string,
+    content: ViralContentRecord,
+  ): Promise<ReferenceAnalysis> {
+    const analysis = this.asRecord(
+      await this.contentRemixService.analyzeViralElements(content['_id'].toString()),
+    ) || {}
+    const category = this.resolveCategoryFromContent(content, analysis)
+    const style = this.resolveStyleFromContent(content, analysis)
+    const keyElements = Array.from(new Set([
+      ...this.normalizeStringList(content['keywords']).slice(0, 3),
+      ...this.normalizeStringList(analysis['hooks']).slice(0, 2),
+      ...this.normalizeStringList(analysis['visualMotifs']).slice(0, 2),
+      ...this.normalizeStringList(analysis['copyStyle']).slice(0, 1),
+    ])).slice(0, 6)
+    const note = this.normalizeOptionalString(analysis['summary'])
+      || `已基于素材库内容 ${content['_id'].toString()} 完成参考视频分析`
+
+    return {
+      videoUrl,
+      category,
+      style,
+      duration: this.extractDurationFromUrl(videoUrl.toLowerCase()),
+      keyElements,
+      suggestedTemplateType: this.inferPipelineType(category, style),
+      analysisSource: 'content_remix',
+      matchedContentId: content['_id'].toString(),
+      note,
+    }
+  }
+
+  private buildPendingManualReferenceAnalysis(videoUrl: string): ReferenceAnalysis {
+    return {
+      videoUrl,
+      category: '',
+      style: '',
+      duration: this.extractDurationFromUrl(videoUrl.toLowerCase()),
+      keyElements: [],
+      suggestedTemplateType: PipelineType.PROMO,
+      analysisSource: 'pending_manual',
+      matchedContentId: null,
+      note: '未在爆款素材库中找到可复用的参考视频分析，请人工补充拆解后再进行精确模板匹配。',
+    }
+  }
+
+  private resolveCategoryFromContent(
+    content: ViralContentRecord,
+    analysis: Record<string, unknown>,
+  ) {
+    const contentIndustry = this.normalizeOptionalString(content['industry'])
+    if (contentIndustry) {
+      return contentIndustry
+    }
+
+    const categoryTokens = [
+      this.normalizeOptionalString(content['title']),
+      ...this.normalizeStringList(content['keywords']),
+      ...this.normalizeStringList(analysis['hooks']),
+      ...this.normalizeStringList(analysis['tagStrategy']),
+      this.normalizeOptionalString(analysis['summary']),
+    ].join(' ').toLowerCase()
+
+    return this.pickFirstMatching(categoryTokens, [
+      ['makeup', 'lipstick', 'skincare', 'beauty', '美妆'],
+      ['food', 'snack', 'drink', '食品', '饮料'],
+      ['tutorial', 'guide', 'explain', '教学', '教程', '规则'],
+      ['bar', 'cocktail', '酒吧'],
+    ]) || '通用'
+  }
+
+  private resolveStyleFromContent(
+    content: ViralContentRecord,
+    analysis: Record<string, unknown>,
+  ) {
+    const styleTokens = [
+      this.normalizeOptionalString(content['title']),
+      ...this.normalizeStringList(content['keywords']),
+      ...this.normalizeStringList(analysis['visualMotifs']),
+      ...this.normalizeStringList(analysis['copyStyle']),
+      ...this.normalizeStringList(analysis['structureBreakdown']),
+      this.normalizeOptionalString(analysis['summary']),
+    ].join(' ').toLowerCase()
+
+    return this.pickFirstMatching(styleTokens, [
+      ['unbox', '开箱'],
+      ['live', '直播', 'scene', '场景'],
+      ['tutorial', 'guide', '教程', '讲解'],
+      ['showcase', 'product', '产品'],
+    ]) || '产品展示'
+  }
+
+  private stripUrlSearchAndHash(value: string) {
+    try {
+      const url = new URL(value)
+      url.search = ''
+      url.hash = ''
+      return url.toString().replace(/\/+$/, '')
+    }
+    catch {
+      return value.split(/[?#]/)[0]?.replace(/\/+$/, '') || value
+    }
+  }
+
+  private extractVideoIdFromUrl(value: string) {
+    try {
+      const url = new URL(value)
+      const queryKeys = ['videoId', 'video_id', 'itemId', 'item_id', 'aweme_id', 'vid', 'id']
+      for (const key of queryKeys) {
+        const candidate = this.normalizeOptionalString(url.searchParams.get(key))
+        if (candidate) {
+          return candidate
+        }
+      }
+
+      const segments = url.pathname.split('/').map(item => item.trim()).filter(Boolean)
+      const lastSegment = segments.at(-1) || ''
+      return /^[a-z0-9_-]{5,}$/i.test(lastSegment) ? lastSegment : ''
+    }
+    catch {
+      return ''
+    }
   }
 
   private asRecord(value: unknown) {
