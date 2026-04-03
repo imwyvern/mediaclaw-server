@@ -66,16 +66,24 @@ export class McAuthController {
       contactEmail?: string
       contactName?: string
       monthlyQuota?: number
+      companyName?: string
+      businessLicenseUrl?: string
+      unifiedSocialCreditCode?: string
+      legalRepresentative?: string
+      registeredAddress?: string
+      industry?: string
+      officialWebsite?: string
+      description?: string
     },
   ) {
     return this.enterpriseAuthService.registerEnterprise(body)
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ENTERPRISE_ADMIN)
   @UseGuards(PermissionGuard)
   @Post('enterprise/invite')
   async inviteByPhone(
-    @GetToken() user: { orgId?: string },
+    @GetToken() user: { id: string, orgId?: string },
     @Body()
     body: {
       orgId?: string
@@ -87,6 +95,7 @@ export class McAuthController {
       user.orgId || '',
       body.phone,
       body.role,
+      user.id,
     )
   }
 

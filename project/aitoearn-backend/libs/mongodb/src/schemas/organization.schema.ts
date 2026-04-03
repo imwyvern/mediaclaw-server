@@ -66,6 +66,33 @@ class OrganizationVideoCredits {
   overagePrice: number
 }
 
+@Schema({ _id: false })
+export class OrganizationEnterpriseProfile {
+  @Prop({ type: String, default: '' })
+  companyName: string
+
+  @Prop({ type: String, default: '' })
+  businessLicenseUrl: string
+
+  @Prop({ type: String, default: '' })
+  unifiedSocialCreditCode: string
+
+  @Prop({ type: String, default: '' })
+  legalRepresentative: string
+
+  @Prop({ type: String, default: '' })
+  registeredAddress: string
+
+  @Prop({ type: String, default: '' })
+  industry: string
+
+  @Prop({ type: String, default: '' })
+  officialWebsite: string
+
+  @Prop({ type: String, default: '' })
+  description: string
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'organizations' })
 export class Organization extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -112,6 +139,9 @@ export class Organization extends WithTimestampSchema {
 
   @Prop({ type: String, default: 'Asia/Shanghai' })
   timezone: string
+
+  @Prop({ type: OrganizationEnterpriseProfile, default: () => ({}) })
+  enterpriseProfile: OrganizationEnterpriseProfile
 
   @Prop({ type: Object, default: {} })
   apiKeys: OrganizationApiKeyMap

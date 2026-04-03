@@ -5,9 +5,78 @@ import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
 import { WithTimestampSchema } from './timestamp.schema'
 
 export enum UserRole {
+  SUPER_ADMIN = 'super_admin',
+  ENTERPRISE_ADMIN = 'admin',
+  OPERATOR = 'editor',
+  EMPLOYEE = 'viewer',
   ADMIN = 'admin',
   EDITOR = 'editor',
   VIEWER = 'viewer',
+}
+
+export const USER_ROLE_STORAGE_VALUES = Array.from(new Set(Object.values(UserRole)))
+
+export const ENTERPRISE_USER_ROLES = [
+  UserRole.ENTERPRISE_ADMIN,
+  UserRole.OPERATOR,
+  UserRole.EMPLOYEE,
+] as const
+
+const USER_ROLE_RANKS: Record<string, number> = {
+  [UserRole.SUPER_ADMIN]: 400,
+  [UserRole.ENTERPRISE_ADMIN]: 300,
+  [UserRole.OPERATOR]: 200,
+  [UserRole.EMPLOYEE]: 100,
+}
+
+export function normalizeUserRole(
+  role: string | null | undefined,
+  fallback: UserRole = UserRole.EMPLOYEE,
+) {
+  if (!role) {
+    return fallback
+  }
+
+  const normalized = role.trim()
+  if (!normalized) {
+    return fallback
+  }
+
+  if (normalized === UserRole.SUPER_ADMIN) {
+    return UserRole.SUPER_ADMIN
+  }
+
+  if (normalized === UserRole.ENTERPRISE_ADMIN || normalized === UserRole.ADMIN) {
+    return UserRole.ENTERPRISE_ADMIN
+  }
+
+  if (normalized === UserRole.OPERATOR || normalized === UserRole.EDITOR) {
+    return UserRole.OPERATOR
+  }
+
+  if (normalized === UserRole.EMPLOYEE || normalized === UserRole.VIEWER) {
+    return UserRole.EMPLOYEE
+  }
+
+  return fallback
+}
+
+export function userRoleRank(role: string | null | undefined) {
+  return USER_ROLE_RANKS[normalizeUserRole(role)] || USER_ROLE_RANKS[UserRole.EMPLOYEE]
+}
+
+export function userRoleSatisfies(
+  role: string | null | undefined,
+  requiredRole: string | UserRole,
+) {
+  return userRoleRank(role) >= userRoleRank(requiredRole)
+}
+
+export function isEnterpriseAssignableRole(role: string | null | undefined) {
+  const normalized = normalizeUserRole(role)
+  return ENTERPRISE_USER_ROLES.includes(
+    normalized as (typeof ENTERPRISE_USER_ROLES)[number],
+  )
 }
 
 export enum McUserType {
@@ -20,7 +89,7 @@ export class OrgMembership {
   @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   orgId: MongooseSchema.Types.ObjectId
 
-  @Prop({ type: String, enum: UserRole, default: UserRole.VIEWER })
+  @Prop({ type: String, enum: USER_ROLE_STORAGE_VALUES, default: UserRole.EMPLOYEE })
   role: UserRole
 
   @Prop({ type: Date, default: Date.now })
@@ -68,7 +137,7 @@ export class MediaClawUser extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, default: null, index: true })
   orgId: MongooseSchema.Types.ObjectId | null
 
-  @Prop({ type: String, enum: UserRole, default: UserRole.VIEWER })
+  @Prop({ type: String, enum: USER_ROLE_STORAGE_VALUES, default: UserRole.EMPLOYEE })
   role: UserRole
 
   @Prop({ type: String, enum: McUserType, default: McUserType.INDIVIDUAL })

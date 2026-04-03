@@ -13,6 +13,7 @@ import {
   PaymentMethod,
   PaymentProductType,
   PaymentStatus,
+  userRoleSatisfies,
   UserRole,
 } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
@@ -100,7 +101,9 @@ export class XorPayController {
     @Query('limit') limit?: string,
     @Query('scope') scope?: 'user' | 'org',
   ) {
-    const canReadOrgScope = scope === 'org' && user.role === UserRole.ADMIN && user.orgId
+    const canReadOrgScope = scope === 'org'
+      && userRoleSatisfies(user.role, UserRole.ENTERPRISE_ADMIN)
+      && user.orgId
 
     return this.xorPayService.listOrders(
       user.orgId || '',

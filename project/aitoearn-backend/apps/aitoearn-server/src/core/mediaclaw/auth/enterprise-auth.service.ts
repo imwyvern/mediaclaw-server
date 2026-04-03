@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import {
   BadRequestException,
   Injectable,
@@ -7,9 +7,14 @@ import {
 import { InjectModel } from '@nestjs/mongoose'
 import {
   BillingMode,
+  EnterpriseInvite,
+  EnterpriseInviteStatus,
+  isEnterpriseAssignableRole,
   McUserType,
   MediaClawUser,
+  normalizeUserRole,
   Organization,
+  OrganizationEnterpriseProfile,
   OrgStatus,
   OrgType,
   Subscription,
@@ -20,15 +25,6 @@ import {
 import { Model, Types } from 'mongoose'
 import { McAuthService } from './auth.service'
 
-interface EnterpriseInviteRecord {
-  token: string
-  orgId: string
-  phone: string
-  role: UserRole
-  expiresAt: number
-  invitedAt: string
-}
-
 interface RegisterEnterpriseInput {
   orgName: string
   adminPhone: string
@@ -36,12 +32,39 @@ interface RegisterEnterpriseInput {
   contactEmail?: string
   contactName?: string
   monthlyQuota?: number
+  companyName?: string
+  businessLicenseUrl?: string
+  unifiedSocialCreditCode?: string
+  legalRepresentative?: string
+  registeredAddress?: string
+  industry?: string
+  officialWebsite?: string
+  description?: string
+}
+
+type OrgMembershipRecord = {
+  orgId: { toString: () => string }
+  role: UserRole
+  joinedAt: Date
+}
+
+type OrganizationResponseInput = {
+  _id: { toString: () => string }
+  name: string
+  type: OrgType
+  status: OrgStatus
+  billingMode: BillingMode
+  contactName: string
+  contactPhone: string
+  contactEmail: string
+  monthlyQuota: number
+  monthlyUsed: number
+  subscriptionExpiresAt: Date | null
+  enterpriseProfile?: Partial<OrganizationEnterpriseProfile>
 }
 
 @Injectable()
 export class EnterpriseAuthService {
-  private readonly inviteStore = new Map<string, EnterpriseInviteRecord>()
-
   constructor(
     @InjectModel(MediaClawUser.name)
     private readonly userModel: Model<MediaClawUser>,
@@ -49,6 +72,8 @@ export class EnterpriseAuthService {
     private readonly organizationModel: Model<Organization>,
     @InjectModel(Subscription.name)
     private readonly subscriptionModel: Model<Subscription>,
+    @InjectModel(EnterpriseInvite.name)
+    private readonly enterpriseInviteModel: Model<EnterpriseInvite>,
     private readonly authService: McAuthService,
   ) {}
 
@@ -62,6 +87,7 @@ export class EnterpriseAuthService {
 
     const now = new Date()
     const trialEnd = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
+    const industry = this.normalizeOptionalString(data.industry)
     const organization = await this.organizationModel.create({
       name: orgName,
       type: OrgType.ENTERPRISE,
@@ -73,7 +99,17 @@ export class EnterpriseAuthService {
       monthlyQuota: Math.max(1, Math.trunc(Number(data.monthlyQuota) || 50)),
       monthlyUsed: 0,
       subscriptionExpiresAt: trialEnd,
-      settings: {},
+      enterpriseProfile: {
+        companyName: this.normalizeOptionalString(data.companyName) || orgName,
+        businessLicenseUrl: this.normalizeOptionalString(data.businessLicenseUrl) || '',
+        unifiedSocialCreditCode: this.normalizeOptionalString(data.unifiedSocialCreditCode) || '',
+        legalRepresentative: this.normalizeOptionalString(data.legalRepresentative) || '',
+        registeredAddress: this.normalizeOptionalString(data.registeredAddress) || '',
+        industry: industry || '',
+        officialWebsite: this.normalizeOptionalString(data.officialWebsite) || '',
+        description: this.normalizeOptionalString(data.description) || '',
+      },
+      settings: industry ? { industry } : {},
     })
 
     const subscription = await this.subscriptionModel.create({
@@ -91,15 +127,16 @@ export class EnterpriseAuthService {
       encryptedApiKey: '',
     })
 
+    const adminRole = UserRole.ENTERPRISE_ADMIN
     const { user, isNewUser } = await this.findOrCreateUserByPhone(data.adminPhone, {
       fallbackName: data.adminName?.trim() || `${orgName}管理员`,
-      defaultRole: UserRole.ADMIN,
+      defaultRole: adminRole,
     })
 
     const updatedUser = await this.assignUserToOrg(
       user,
       organization._id.toString(),
-      UserRole.ADMIN,
+      adminRole,
       true,
     )
 
@@ -110,49 +147,80 @@ export class EnterpriseAuthService {
     }
   }
 
-  async inviteByPhone(orgId: string, phone: string, role: UserRole) {
+  async inviteByPhone(
+    orgId: string,
+    phone: string,
+    role: UserRole,
+    invitedByUserId?: string,
+  ) {
     const organization = await this.organizationModel.findById(this.toObjectId(orgId, 'orgId')).exec()
     if (!organization) {
       throw new NotFoundException('Organization not found')
     }
 
     this.authService.validatePhoneNumber(phone)
-    this.ensureValidRole(role)
+    const normalizedRole = this.ensureValidRole(role)
 
     await this.authService.sendSmsCode(phone)
 
-    const token = randomBytes(24).toString('hex')
-    const expiresAt = Date.now() + 24 * 60 * 60 * 1000
-    const inviteRecord: EnterpriseInviteRecord = {
-      token,
-      orgId: organization._id.toString(),
-      phone,
-      role,
-      expiresAt,
-      invitedAt: new Date().toISOString(),
-    }
+    await this.enterpriseInviteModel.updateMany(
+      {
+        orgId: organization._id,
+        phone,
+        status: EnterpriseInviteStatus.PENDING,
+      },
+      {
+        $set: {
+          status: EnterpriseInviteStatus.REVOKED,
+        },
+      },
+    ).exec()
 
-    this.inviteStore.set(token, inviteRecord)
+    const token = randomBytes(24).toString('hex')
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    await this.enterpriseInviteModel.create({
+      orgId: organization._id,
+      phone,
+      role: normalizedRole,
+      tokenHash: this.hashInviteToken(token),
+      invitedByUserId: this.toOptionalObjectId(invitedByUserId),
+      invitedAt: new Date(),
+      expiresAt,
+      status: EnterpriseInviteStatus.PENDING,
+    })
 
     return {
       token,
       orgId: organization._id.toString(),
       orgName: organization.name,
       phone,
-      role,
-      expiresAt: new Date(expiresAt).toISOString(),
+      role: normalizedRole,
+      expiresAt: expiresAt.toISOString(),
       inviteSent: true,
     }
   }
 
   async acceptInvite(token: string, phone: string, code: string) {
-    const inviteRecord = this.inviteStore.get(token)
-    if (!inviteRecord || inviteRecord.expiresAt < Date.now()) {
+    const normalizedPhone = phone?.trim()
+    if (!normalizedPhone) {
+      throw new BadRequestException('phone is required')
+    }
+
+    const inviteRecord = await this.enterpriseInviteModel.findOne({
+      tokenHash: this.hashInviteToken(token),
+      phone: normalizedPhone,
+      status: EnterpriseInviteStatus.PENDING,
+    }).exec()
+
+    if (!inviteRecord) {
       throw new BadRequestException('Invite token is invalid or expired')
     }
 
-    if (inviteRecord.phone !== phone) {
-      throw new BadRequestException('Invite token does not match phone number')
+    if (inviteRecord.expiresAt.getTime() < Date.now()) {
+      await this.enterpriseInviteModel.findByIdAndUpdate(inviteRecord._id, {
+        status: EnterpriseInviteStatus.EXPIRED,
+      }).exec()
+      throw new BadRequestException('Invite token is invalid or expired')
     }
 
     const organization = await this.organizationModel.findById(inviteRecord.orgId).exec()
@@ -160,9 +228,9 @@ export class EnterpriseAuthService {
       throw new NotFoundException('Organization not found')
     }
 
-    await this.authService.consumeSmsCode(phone, code)
+    await this.authService.consumeSmsCode(normalizedPhone, code)
 
-    const { user, isNewUser } = await this.findOrCreateUserByPhone(phone, {
+    const { user, isNewUser } = await this.findOrCreateUserByPhone(normalizedPhone, {
       fallbackName: `${organization.name}成员`,
       defaultRole: inviteRecord.role,
     })
@@ -174,7 +242,10 @@ export class EnterpriseAuthService {
       true,
     )
 
-    this.inviteStore.delete(token)
+    await this.enterpriseInviteModel.findByIdAndUpdate(inviteRecord._id, {
+      status: EnterpriseInviteStatus.ACCEPTED,
+      acceptedAt: new Date(),
+    }).exec()
 
     return {
       organization: this.toOrgResponse(organization.toObject()),
@@ -198,7 +269,7 @@ export class EnterpriseAuthService {
       {
         $set: {
           orgId: membership.orgId,
-          role: membership.role,
+          role: normalizeUserRole(membership.role),
           userType: McUserType.ENTERPRISE,
         },
       },
@@ -241,7 +312,7 @@ export class EnterpriseAuthService {
         name: org.name,
         type: org.type,
         status: org.status,
-        role: membership?.role || UserRole.VIEWER,
+        role: normalizeUserRole(membership?.role, UserRole.EMPLOYEE),
         joinedAt: membership?.joinedAt || null,
         isActive: user.orgId?.toString() === org._id.toString(),
       }
@@ -257,13 +328,14 @@ export class EnterpriseAuthService {
   ) {
     let user = await this.userModel.findOne({ phone }).exec()
     let isNewUser = false
+    const defaultRole = normalizeUserRole(options.defaultRole)
 
     if (!user) {
       isNewUser = true
       user = await this.userModel.create({
         phone,
         name: options.fallbackName,
-        role: options.defaultRole,
+        role: defaultRole,
         userType: McUserType.ENTERPRISE,
         orgId: null,
         orgMemberships: [],
@@ -282,7 +354,8 @@ export class EnterpriseAuthService {
     makeActive: boolean,
   ) {
     const normalizedOrgId = this.toObjectId(orgId, 'orgId')
-    const memberships = this.mergeMemberships(user.orgMemberships || [], orgId, role)
+    const normalizedRole = normalizeUserRole(role)
+    const memberships = this.mergeMemberships(user.orgMemberships || [], orgId, normalizedRole)
 
     const updatedUser = await this.userModel.findByIdAndUpdate(
       user._id,
@@ -290,7 +363,7 @@ export class EnterpriseAuthService {
         $set: {
           orgMemberships: memberships,
           orgId: makeActive ? normalizedOrgId : user.orgId,
-          role: makeActive ? role : user.role,
+          role: makeActive ? normalizedRole : normalizeUserRole(user.role),
           userType: McUserType.ENTERPRISE,
           isActive: true,
           lastLoginAt: new Date(),
@@ -307,14 +380,11 @@ export class EnterpriseAuthService {
   }
 
   private mergeMemberships(
-    memberships: Array<{
-      orgId: { toString: () => string }
-      role: UserRole
-      joinedAt: Date
-    }>,
+    memberships: OrgMembershipRecord[],
     orgId: string,
     role: UserRole,
   ) {
+    const normalizedRole = normalizeUserRole(role)
     const existingIndex = memberships.findIndex(
       membership => membership.orgId.toString() === orgId,
     )
@@ -327,7 +397,7 @@ export class EnterpriseAuthService {
 
         return {
           ...membership,
-          role,
+          role: normalizedRole,
         }
       })
     }
@@ -336,7 +406,7 @@ export class EnterpriseAuthService {
       ...memberships,
       {
         orgId: this.toObjectId(orgId, 'orgId'),
-        role,
+        role: normalizedRole,
         joinedAt: new Date(),
       },
     ]
@@ -351,9 +421,34 @@ export class EnterpriseAuthService {
   }
 
   private ensureValidRole(role: UserRole) {
-    if (!Object.values(UserRole).includes(role)) {
+    const normalizedRole = normalizeUserRole(role)
+    if (!isEnterpriseAssignableRole(normalizedRole)) {
       throw new BadRequestException('Invalid role')
     }
+
+    return normalizedRole
+  }
+
+  private hashInviteToken(token: string) {
+    const normalizedToken = token?.trim()
+    if (!normalizedToken) {
+      throw new BadRequestException('token is required')
+    }
+
+    return createHash('sha256').update(normalizedToken).digest('hex')
+  }
+
+  private normalizeOptionalString(value?: string | null) {
+    const normalized = value?.trim()
+    return normalized ? normalized : null
+  }
+
+  private toOptionalObjectId(value?: string | null) {
+    if (!value || !Types.ObjectId.isValid(value)) {
+      return null
+    }
+
+    return new Types.ObjectId(value)
   }
 
   private toObjectId(value: string, field: string) {
@@ -364,19 +459,7 @@ export class EnterpriseAuthService {
     return new Types.ObjectId(value)
   }
 
-  private toOrgResponse(organization: {
-    _id: { toString: () => string }
-    name: string
-    type: OrgType
-    status: OrgStatus
-    billingMode: BillingMode
-    contactName: string
-    contactPhone: string
-    contactEmail: string
-    monthlyQuota: number
-    monthlyUsed: number
-    subscriptionExpiresAt: Date | null
-  }) {
+  private toOrgResponse(organization: OrganizationResponseInput) {
     return {
       id: organization._id.toString(),
       name: organization.name,
@@ -389,6 +472,16 @@ export class EnterpriseAuthService {
       monthlyQuota: organization.monthlyQuota,
       monthlyUsed: organization.monthlyUsed,
       subscriptionExpiresAt: organization.subscriptionExpiresAt,
+      enterpriseProfile: {
+        companyName: organization.enterpriseProfile?.companyName || organization.name,
+        businessLicenseUrl: organization.enterpriseProfile?.businessLicenseUrl || '',
+        unifiedSocialCreditCode: organization.enterpriseProfile?.unifiedSocialCreditCode || '',
+        legalRepresentative: organization.enterpriseProfile?.legalRepresentative || '',
+        registeredAddress: organization.enterpriseProfile?.registeredAddress || '',
+        industry: organization.enterpriseProfile?.industry || '',
+        officialWebsite: organization.enterpriseProfile?.officialWebsite || '',
+        description: organization.enterpriseProfile?.description || '',
+      },
     }
   }
 

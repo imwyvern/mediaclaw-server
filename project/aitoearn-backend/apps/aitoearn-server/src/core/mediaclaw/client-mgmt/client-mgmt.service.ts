@@ -9,6 +9,7 @@ import {
   Invoice,
   McUserType,
   MediaClawUser,
+  normalizeUserRole,
   Organization,
   OrgStatus,
   OrgType,
@@ -19,6 +20,7 @@ import {
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { EnterpriseAuthService } from '../auth/enterprise-auth.service'
 import {
   MEDIACLAW_PENDING_TASK_STATUSES,
   MEDIACLAW_SUCCESS_STATUSES,
@@ -50,6 +52,7 @@ export class ClientMgmtService {
     private readonly subscriptionModel: Model<Subscription>,
     @InjectModel(Invoice.name)
     private readonly invoiceModel: Model<Invoice>,
+    private readonly enterpriseAuthService: EnterpriseAuthService,
   ) {}
 
   async listOrgs(filters: OrgFilters, pagination: PaginationInput) {
@@ -82,6 +85,7 @@ export class ClientMgmtService {
         monthlyQuota: org.monthlyQuota,
         monthlyUsed: org.monthlyUsed,
         subscriptionExpiresAt: org.subscriptionExpiresAt,
+        enterpriseProfile: org.enterpriseProfile || null,
         createdAt: org.createdAt,
         updatedAt: org.updatedAt,
       })),
@@ -107,11 +111,20 @@ export class ClientMgmtService {
       activeSubscription,
       latestInvoice,
     ] = await Promise.all([
-      this.mediaClawUserModel.countDocuments({ orgId: normalizedOrgId, isActive: true }),
       this.mediaClawUserModel.countDocuments({
-        orgId: normalizedOrgId,
+        'orgMemberships.orgId': normalizedOrgId,
         isActive: true,
-        role: UserRole.ADMIN,
+      }),
+      this.mediaClawUserModel.countDocuments({
+        orgMemberships: {
+          $elemMatch: {
+            orgId: normalizedOrgId,
+            role: {
+              $in: [UserRole.ENTERPRISE_ADMIN, UserRole.SUPER_ADMIN],
+            },
+          },
+        },
+        isActive: true,
       }),
       this.brandModel.countDocuments({ orgId: normalizedOrgId, isActive: true }),
       this.videoTaskModel.aggregate<{
@@ -182,6 +195,7 @@ export class ClientMgmtService {
         monthlyQuota: org.monthlyQuota,
         monthlyUsed: org.monthlyUsed,
         subscriptionExpiresAt: org.subscriptionExpiresAt,
+        enterpriseProfile: org.enterpriseProfile || null,
         settings: org.settings,
         createdAt: org.createdAt,
         updatedAt: org.updatedAt,
@@ -254,7 +268,7 @@ export class ClientMgmtService {
     await this.ensureOrgExists(normalizedOrgId)
 
     const members = await this.mediaClawUserModel
-      .find({ orgId: normalizedOrgId })
+      .find({ 'orgMemberships.orgId': normalizedOrgId })
       .sort({ createdAt: 1 })
       .lean()
       .exec()
@@ -265,7 +279,7 @@ export class ClientMgmtService {
       email: member.email,
       name: member.name,
       avatarUrl: member.avatarUrl,
-      role: member.role,
+      role: normalizeUserRole(this.findMembershipRole(member, normalizedOrgId) || member.role),
       userType: member.userType,
       isActive: member.isActive,
       lastLoginAt: member.lastLoginAt,
@@ -275,31 +289,43 @@ export class ClientMgmtService {
   }
 
   async updateMemberRole(orgId: string, userId: string, role: UserRole) {
-    if (!Object.values(UserRole).includes(role)) {
-      throw new BadRequestException('Invalid user role')
-    }
-
     const normalizedOrgId = this.toObjectId(orgId, 'orgId')
     const normalizedUserId = this.toObjectId(userId, 'userId')
+    const normalizedRole = this.normalizeEnterpriseRole(role)
     await this.ensureOrgExists(normalizedOrgId)
 
     const member = await this.mediaClawUserModel
-      .findOneAndUpdate(
-        { _id: normalizedUserId, orgId: normalizedOrgId },
-        { role },
-        { new: true },
-      )
-      .lean()
+      .findOne({
+        _id: normalizedUserId,
+        'orgMemberships.orgId': normalizedOrgId,
+      })
       .exec()
 
     if (!member) {
       throw new NotFoundException('Organization member not found')
     }
 
+    member.orgMemberships = (member.orgMemberships || []).map((membership) => {
+      if (membership.orgId.toString() !== normalizedOrgId.toString()) {
+        return membership
+      }
+
+      return {
+        ...membership,
+        role: normalizedRole,
+      }
+    })
+
+    if (member.orgId?.toString() === normalizedOrgId.toString()) {
+      member.role = normalizedRole
+    }
+
+    await member.save()
+
     return {
       id: member._id.toString(),
       orgId: member.orgId?.toString() || null,
-      role: member.role,
+      role: normalizedRole,
       updatedAt: member.updatedAt,
     }
   }
@@ -310,21 +336,35 @@ export class ClientMgmtService {
     await this.ensureOrgExists(normalizedOrgId)
 
     const member = await this.mediaClawUserModel
-      .findOneAndUpdate(
-        { _id: normalizedUserId, orgId: normalizedOrgId },
-        {
-          orgId: null,
-          role: UserRole.VIEWER,
-          userType: McUserType.INDIVIDUAL,
-        },
-        { new: true },
-      )
-      .lean()
+      .findOne({
+        _id: normalizedUserId,
+        'orgMemberships.orgId': normalizedOrgId,
+      })
       .exec()
 
     if (!member) {
       throw new NotFoundException('Organization member not found')
     }
+
+    member.orgMemberships = (member.orgMemberships || []).filter(
+      membership => membership.orgId.toString() !== normalizedOrgId.toString(),
+    )
+
+    const nextMembership = member.orgMemberships[0] || null
+    if (member.orgId?.toString() === normalizedOrgId.toString()) {
+      member.orgId = nextMembership?.orgId || null
+      member.role = nextMembership
+        ? normalizeUserRole(nextMembership.role)
+        : UserRole.EMPLOYEE
+      member.userType = nextMembership ? McUserType.ENTERPRISE : McUserType.INDIVIDUAL
+    }
+
+    if (!member.orgMemberships.length && !member.orgId) {
+      member.userType = McUserType.INDIVIDUAL
+      member.role = UserRole.EMPLOYEE
+    }
+
+    await member.save()
 
     return {
       id: member._id.toString(),
@@ -332,57 +372,14 @@ export class ClientMgmtService {
     }
   }
 
-  async inviteMember(orgId: string, phone: string, role: UserRole = UserRole.VIEWER) {
-    if (!/^1\d{10}$/.test(phone)) {
-      throw new BadRequestException('Invalid phone number')
-    }
-    if (!Object.values(UserRole).includes(role)) {
-      throw new BadRequestException('Invalid user role')
-    }
-
+  async inviteMember(orgId: string, phone: string, role: UserRole = UserRole.EMPLOYEE) {
     const normalizedOrgId = this.toObjectId(orgId, 'orgId')
     await this.ensureOrgExists(normalizedOrgId)
-
-    const existing = await this.mediaClawUserModel.findOne({ phone }).lean().exec()
-
-    if (existing?.orgId && existing.orgId.toString() !== normalizedOrgId.toString()) {
-      throw new BadRequestException('User already belongs to another organization')
-    }
-
-    const user = await this.mediaClawUserModel
-      .findOneAndUpdate(
-        { phone },
-        {
-          $set: {
-            orgId: normalizedOrgId,
-            role,
-            userType: McUserType.ENTERPRISE,
-            isActive: true,
-          },
-          $setOnInsert: {
-            name: `用户${phone.slice(-4)}`,
-            phone,
-            email: '',
-            avatarUrl: '',
-            lastLoginAt: null,
-          },
-        },
-        {
-          new: true,
-          upsert: true,
-        },
-      )
-      .lean()
-      .exec()
-
-    return {
-      id: user._id.toString(),
-      orgId: user.orgId?.toString() || null,
-      phone: user.phone,
-      name: user.name,
-      role: user.role,
-      created: !existing,
-    }
+    return this.enterpriseAuthService.inviteByPhone(
+      normalizedOrgId.toString(),
+      phone,
+      this.normalizeEnterpriseRole(role),
+    )
   }
 
   private buildOrgQuery(filters: OrgFilters) {
@@ -407,6 +404,26 @@ export class ClientMgmtService {
     }
 
     return query
+  }
+
+  private findMembershipRole(
+    member: Pick<MediaClawUser, 'orgMemberships'>,
+    orgId: Types.ObjectId,
+  ) {
+    const membership = (member.orgMemberships || []).find(
+      item => item.orgId.toString() === orgId.toString(),
+    )
+
+    return membership?.role || null
+  }
+
+  private normalizeEnterpriseRole(role: UserRole) {
+    const normalizedRole = normalizeUserRole(role)
+    if (normalizedRole === UserRole.SUPER_ADMIN) {
+      throw new BadRequestException('Invalid user role')
+    }
+
+    return normalizedRole
   }
 
   private normalizePage(page?: number) {

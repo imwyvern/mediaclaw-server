@@ -821,14 +821,14 @@ export class ContentMgmtService {
 
   private getPendingRoles(maxLevel: number, level: number) {
     if (maxLevel <= 1) {
-      return [UserRole.ADMIN]
+      return [UserRole.ENTERPRISE_ADMIN]
     }
 
     if (level === 1) {
-      return [UserRole.EDITOR, UserRole.ADMIN]
+      return [UserRole.OPERATOR, UserRole.ENTERPRISE_ADMIN]
     }
 
-    return [UserRole.ADMIN]
+    return [UserRole.ENTERPRISE_ADMIN]
   }
 
   private buildApprovalState(maxLevel: number, submittedAt: Date) {

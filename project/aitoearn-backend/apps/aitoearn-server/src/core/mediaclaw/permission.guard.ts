@@ -6,6 +6,7 @@ import {
   SetMetadata,
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
+import { normalizeUserRole, userRoleSatisfies } from '@yikart/mongodb'
 
 export const ROLES_KEY = 'roles'
 export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles)
@@ -37,8 +38,20 @@ export class PermissionGuard implements CanActivate {
       throw new ForbiddenException('No role assigned')
     }
 
-    if (!requiredRoles.includes(user.role)) {
-      throw new ForbiddenException(`Role '${user.role}' is not authorized. Required: ${requiredRoles.join(', ')}`)
+    const normalizedRole = normalizeUserRole(user.role)
+    request['user'] = {
+      ...user,
+      role: normalizedRole,
+    }
+
+    const isAuthorized = requiredRoles.some(requiredRole =>
+      userRoleSatisfies(normalizedRole, requiredRole),
+    )
+
+    if (!isAuthorized) {
+      throw new ForbiddenException(
+        `Role '${normalizedRole}' is not authorized. Required: ${requiredRoles.join(', ')}`,
+      )
     }
 
     return true

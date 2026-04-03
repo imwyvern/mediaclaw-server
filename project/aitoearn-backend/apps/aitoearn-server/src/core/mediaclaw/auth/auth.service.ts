@@ -2,7 +2,13 @@ import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/commo
 import { JwtService } from '@nestjs/jwt'
 import { InjectModel } from '@nestjs/mongoose'
 import { AliSmsService } from '@yikart/ali-sms'
-import { McUserType, MediaClawUser, UserRole, VideoPack } from '@yikart/mongodb'
+import {
+  McUserType,
+  MediaClawUser,
+  normalizeUserRole,
+  UserRole,
+  VideoPack,
+} from '@yikart/mongodb'
 import axios from 'axios'
 import { Model } from 'mongoose'
 
@@ -101,7 +107,7 @@ export class McAuthService {
       user = await this.userModel.create({
         phone,
         name: `用户${phone.slice(-4)}`,
-        role: UserRole.ADMIN,
+        role: UserRole.ENTERPRISE_ADMIN,
         userType: McUserType.INDIVIDUAL,
         orgMemberships: [],
         isActive: true,
@@ -194,7 +200,7 @@ export class McAuthService {
     const payload = {
       id: user._id.toString(),
       orgId: user.orgId?.toString() || null,
-      role: user.role,
+      role: normalizeUserRole(user.role),
       phone: user.phone,
       name: user.name,
     }
@@ -210,7 +216,7 @@ export class McAuthService {
       id: user._id,
       phone: user.phone,
       name: user.name,
-      role: user.role,
+      role: normalizeUserRole(user.role),
       orgId: user.orgId,
       userType: user.userType,
       avatarUrl: user.avatarUrl,
@@ -317,7 +323,7 @@ export class McAuthService {
         avatarUrl: resolvedAvatarUrl,
         wechatOpenId: input.openId,
         wechatUnionId: input.unionId?.trim() || undefined,
-        role: UserRole.ADMIN,
+        role: UserRole.ENTERPRISE_ADMIN,
         userType: McUserType.INDIVIDUAL,
         orgMemberships: [],
         imBindings: [

@@ -1,6 +1,6 @@
 import type { Request } from 'express'
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common'
-import { UserRole } from '@yikart/mongodb'
+import { userRoleSatisfies, UserRole } from '@yikart/mongodb'
 import { verify } from 'jsonwebtoken'
 import { getRequiredEnv } from '../mediaclaw-env.util'
 
@@ -33,8 +33,12 @@ export class QueueDashboardAuthService {
       throw new UnauthorizedException('Invalid bearer token')
     }
 
-    if (typeof payload !== 'object' || !payload || payload.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('Admin role required')
+    if (
+      typeof payload !== 'object'
+      || !payload
+      || !userRoleSatisfies(payload.role, UserRole.SUPER_ADMIN)
+    ) {
+      throw new ForbiddenException('Super admin role required')
     }
 
     return payload

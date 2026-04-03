@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Organization } from '@yikart/mongodb'
+import { Organization, OrganizationEnterpriseProfile } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
 @Injectable()
@@ -45,13 +45,93 @@ export class OrgService {
   }
 
   private pickEditableFields(data: Partial<Organization>) {
-    return {
-      ...(typeof data.name === 'string' ? { name: data.name } : {}),
-      ...(typeof data.contactName === 'string' ? { contactName: data.contactName } : {}),
-      ...(typeof data.contactPhone === 'string' ? { contactPhone: data.contactPhone } : {}),
-      ...(typeof data.contactEmail === 'string' ? { contactEmail: data.contactEmail } : {}),
-      ...(data.settings && typeof data.settings === 'object' ? { settings: data.settings } : {}),
+    const updates: Record<string, unknown> = {}
+    const nextSettings = data.settings && typeof data.settings === 'object'
+      ? { ...data.settings }
+      : null
+
+    this.assignTrimmedString(updates, 'name', data.name)
+    this.assignTrimmedString(updates, 'contactName', data.contactName)
+    this.assignTrimmedString(updates, 'contactPhone', data.contactPhone)
+    this.assignTrimmedString(updates, 'contactEmail', data.contactEmail)
+
+    const enterpriseProfile = this.extractEnterpriseProfile(data)
+    if (enterpriseProfile) {
+      this.assignTrimmedString(
+        updates,
+        'enterpriseProfile.companyName',
+        enterpriseProfile.companyName,
+      )
+      this.assignTrimmedString(
+        updates,
+        'enterpriseProfile.businessLicenseUrl',
+        enterpriseProfile.businessLicenseUrl,
+      )
+      this.assignTrimmedString(
+        updates,
+        'enterpriseProfile.unifiedSocialCreditCode',
+        enterpriseProfile.unifiedSocialCreditCode,
+      )
+      this.assignTrimmedString(
+        updates,
+        'enterpriseProfile.legalRepresentative',
+        enterpriseProfile.legalRepresentative,
+      )
+      this.assignTrimmedString(
+        updates,
+        'enterpriseProfile.registeredAddress',
+        enterpriseProfile.registeredAddress,
+      )
+      this.assignTrimmedString(
+        updates,
+        'enterpriseProfile.industry',
+        enterpriseProfile.industry,
+      )
+      this.assignTrimmedString(
+        updates,
+        'enterpriseProfile.officialWebsite',
+        enterpriseProfile.officialWebsite,
+      )
+      this.assignTrimmedString(
+        updates,
+        'enterpriseProfile.description',
+        enterpriseProfile.description,
+      )
+
+      if (typeof enterpriseProfile.industry === 'string' && enterpriseProfile.industry.trim()) {
+        updates['settings'] = {
+          ...(nextSettings || {}),
+          industry: enterpriseProfile.industry.trim(),
+        }
+      }
     }
+
+    if (!updates['settings'] && nextSettings) {
+      updates['settings'] = nextSettings
+    }
+
+    return updates
+  }
+
+  private extractEnterpriseProfile(data: Partial<Organization>) {
+    const rawProfile = data.enterpriseProfile
+    if (!rawProfile || typeof rawProfile !== 'object') {
+      return null
+    }
+
+    return rawProfile as Partial<OrganizationEnterpriseProfile>
+  }
+
+  private assignTrimmedString(
+    updates: Record<string, unknown>,
+    key: string,
+    value: string | null | undefined,
+  ) {
+    if (typeof value !== 'string') {
+      return
+    }
+
+    updates[key] = value.trim()
   }
 
   private toObjectId(id: string) {

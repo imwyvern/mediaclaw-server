@@ -55,7 +55,7 @@ export class MarketplaceController {
     )
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN)
   @UseGuards(PermissionGuard)
   @Post('feature')
   async feature(

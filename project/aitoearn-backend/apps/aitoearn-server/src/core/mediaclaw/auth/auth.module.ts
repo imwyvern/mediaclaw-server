@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common'
 import { JwtModule } from '@nestjs/jwt'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
+  EnterpriseInvite,
+  EnterpriseInviteSchema,
   MediaClawUser,
   MediaClawUserSchema,
   Organization,
@@ -25,6 +27,7 @@ import { EnterpriseAuthService } from './enterprise-auth.service'
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: Organization.name, schema: OrganizationSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
+      { name: EnterpriseInvite.name, schema: EnterpriseInviteSchema },
     ]),
     JwtModule.register({
       secret: getRequiredEnv('JWT_SECRET'),

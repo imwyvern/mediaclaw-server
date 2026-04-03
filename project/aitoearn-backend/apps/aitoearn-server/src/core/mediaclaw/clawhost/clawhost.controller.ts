@@ -21,7 +21,7 @@ import {
 import { ClawHostService } from './clawhost.service'
 
 @UseGuards(PermissionGuard)
-@Roles(UserRole.ADMIN)
+@Roles(UserRole.ENTERPRISE_ADMIN)
 @MediaClawApiController('api/v1/clawhost')
 export class ClawHostController {
   constructor(private readonly clawHostService: ClawHostService) {}

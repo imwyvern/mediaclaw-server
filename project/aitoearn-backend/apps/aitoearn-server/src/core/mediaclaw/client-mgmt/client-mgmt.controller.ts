@@ -14,7 +14,7 @@ import { PermissionGuard, Roles } from '../permission.guard'
 import { ClientMgmtService } from './client-mgmt.service'
 
 @UseGuards(PermissionGuard)
-@Roles(UserRole.ADMIN)
+@Roles(UserRole.SUPER_ADMIN)
 @MediaClawApiController('api/v1/admin/orgs')
 export class ClientMgmtController {
   constructor(private readonly clientMgmtService: ClientMgmtService) {}

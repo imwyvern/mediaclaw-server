@@ -14,6 +14,7 @@ import {
   PaymentOrder,
   PaymentProductType,
   PaymentStatus,
+  userRoleSatisfies,
   UserRole,
   VideoPack,
 } from '@yikart/mongodb'
@@ -559,7 +560,7 @@ export class XorPayService {
       return true
     }
 
-    if (user.role !== UserRole.ADMIN) {
+    if (!userRoleSatisfies(user.role, UserRole.ENTERPRISE_ADMIN)) {
       return false
     }
 

@@ -30,6 +30,10 @@ import { CreditsBalance, CreditsBalanceSchema } from "./credits-balance.schema";
 import { CreditsRecord, CreditsRecordSchema } from "./credits-record.schema";
 import { DeliveryRecord, DeliveryRecordSchema } from "./delivery-record.schema";
 import {
+  EnterpriseInvite,
+  EnterpriseInviteSchema,
+} from "./enterprise-invite.schema";
+import {
   DiscoveryNotification,
   DiscoveryNotificationSchema,
 } from "./discovery-notification.schema";
@@ -133,6 +137,7 @@ export * from "./delivery-record.schema";
 export * from "./discovery-notification.schema";
 export * from "./distribution-rule.schema";
 export * from "./employee-assignment.schema";
+export * from "./enterprise-invite.schema";
 export * from "./engagement.task.schema";
 export * from "./interaction-record.schema";
 export * from "./iteration-log.schema";
@@ -178,6 +183,7 @@ export const schemas = [
   { name: CreditsBalance.name, schema: CreditsBalanceSchema },
   { name: CreditsRecord.name, schema: CreditsRecordSchema },
   { name: DeliveryRecord.name, schema: DeliveryRecordSchema },
+  { name: EnterpriseInvite.name, schema: EnterpriseInviteSchema },
   { name: PointsRecord.name, schema: PointsRecordSchema },
   { name: PlatformAccount.name, schema: PlatformAccountSchema },
   { name: AiLog.name, schema: AiLogSchema },
