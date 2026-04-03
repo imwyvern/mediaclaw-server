@@ -16,6 +16,7 @@ import { NotificationModule } from "../notification/notification.module";
 import { UsageModule } from "../usage/usage.module";
 import { PromptOptimizerModule } from "../prompt-optimizer/prompt-optimizer.module";
 import { VideoWorkerQueueModule } from "../worker/video-worker-queue.module";
+import { DedupModule } from "../dedup/dedup.module";
 import { VideoController } from "./video.controller";
 import { VideoService } from "./video.service";
 
@@ -32,6 +33,7 @@ import { VideoService } from "./video.service";
     EmployeeDispatchModule,
     NotificationModule,
     PromptOptimizerModule,
+    DedupModule,
     VideoWorkerQueueModule,
   ],
   controllers: [VideoController],

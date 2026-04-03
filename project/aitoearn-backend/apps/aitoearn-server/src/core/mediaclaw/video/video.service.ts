@@ -23,6 +23,7 @@ import { BillingService } from "../billing/billing.service";
 import { EmployeeDispatchService } from "../employee-dispatch/employee-dispatch.service";
 import { NotificationService } from "../notification/notification.service";
 import { PromptOptimizerService } from "../prompt-optimizer/prompt-optimizer.service";
+import { DedupService } from "../dedup/dedup.service";
 import {
   createStatusTransitionIterationEntry,
   mapVideoTaskStatusToProductionStage,
@@ -85,6 +86,8 @@ export class VideoService {
     private readonly notificationService?: NotificationService,
     @Optional()
     private readonly promptOptimizerService?: PromptOptimizerService,
+    @Optional()
+    private readonly dedupService?: DedupService,
     @InjectQueue(VIDEO_WORKER_QUEUE)
     @Optional()
     private readonly videoWorkerQueue?: Queue<VideoWorkerJobData>,
@@ -120,6 +123,20 @@ export class VideoService {
     await this.ensureBrandBelongsToOrg(data.brandId, normalizedOrgId);
     await this.ensurePipelineBelongsToOrg(data.pipelineId, normalizedOrgId);
     await this.ensureBatchBelongsToOrg(batchObjectId, normalizedOrgId);
+
+    if (this.dedupService && normalizedOrgId) {
+      const duplicateCheck = await this.dedupService.checkDuplicate(
+        normalizedOrgId.toString(),
+        this.buildDedupContentSignature(data),
+        "video_task",
+      );
+
+      if (duplicateCheck.isDuplicate) {
+        throw new BadRequestException(
+          `Duplicate content detected for this organization. Existing videoTaskId: ${duplicateCheck.existing?.videoTaskId || "unknown"}`,
+        );
+      }
+    }
 
     const taskId = new Types.ObjectId();
     const durationSec = this.resolveRequestedDurationSec(data);
@@ -222,6 +239,14 @@ export class VideoService {
 
     try {
       task = await this.videoTaskModel.create(taskPayload);
+      if (this.dedupService && normalizedOrgId) {
+        await this.dedupService.registerContent(
+          normalizedOrgId.toString(),
+          this.buildDedupContentSignature(data),
+          task._id.toString(),
+          "video_task",
+        );
+      }
       await this.enqueueTask(task._id.toString());
 
       if (task.batchId) {
@@ -1354,6 +1379,26 @@ export class VideoService {
   ) {
     const value = metadata?.[key];
     return typeof value === "string" ? value.trim() : "";
+  }
+
+  private buildDedupContentSignature(data: CreateTaskInput) {
+    const metadata = data.metadata || {};
+
+    return [
+      data.taskType,
+      data.brandId || "",
+      data.pipelineId || "",
+      data.source?.videoId?.trim() || "",
+      data.source?.url?.trim() || "",
+      data.sourceVideoUrl?.trim() || "",
+      this.readMetadataString(metadata, "scene"),
+      this.readMetadataString(metadata, "theme"),
+      this.readMetadataString(metadata, "campaign"),
+      this.readMetadataString(metadata, "platform"),
+      this.readMetadataString(metadata, "style"),
+    ]
+      .filter(Boolean)
+      .join(" | ");
   }
 
   private buildResolution(quality: Record<string, any>) {

@@ -17,6 +17,8 @@ import {
   ClawHostInstanceSchema,
   Competitor,
   CompetitorSchema,
+  ContentHash,
+  ContentHashSchema,
   CopyHistory,
   CopyHistorySchema,
   IterationLog,
@@ -72,6 +74,7 @@ import { ContentMgmtModule } from "./content-mgmt/content-mgmt.module";
 import { CopyModule } from "./copy/copy.module";
 import { CrawlerModule } from "./crawler/crawler.module";
 import { DataDashboardModule } from "./data-dashboard/data-dashboard.module";
+import { DedupModule } from "./dedup/dedup.module";
 import { DiscoveryModule } from "./discovery/discovery.module";
 import { DistributionModule } from "./distribution/distribution.module";
 import { EmployeeDispatchModule } from "./employee-dispatch/employee-dispatch.module";
@@ -110,6 +113,7 @@ const workerModuleImports =
       { name: Campaign.name, schema: CampaignSchema },
       { name: ClawHostInstance.name, schema: ClawHostInstanceSchema },
       { name: Competitor.name, schema: CompetitorSchema },
+      { name: ContentHash.name, schema: ContentHashSchema },
       { name: CopyHistory.name, schema: CopyHistorySchema },
       { name: IterationLog.name, schema: IterationLogSchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
@@ -150,6 +154,7 @@ const workerModuleImports =
     AcquisitionModule,
     CrawlerModule,
     DataDashboardModule,
+    DedupModule,
     DiscoveryModule,
     ClientMgmtModule,
     ContentMgmtModule,
