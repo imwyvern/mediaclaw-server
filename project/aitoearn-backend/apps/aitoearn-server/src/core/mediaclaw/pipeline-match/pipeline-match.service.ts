@@ -13,8 +13,6 @@ import {
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
-type TemplateRecord = Record<string, any>
-
 interface MatchPipelineRequest {
   referenceVideoUrl?: string
   category?: string
@@ -32,47 +30,125 @@ interface TemplateFilters {
   keyword?: string
 }
 
-interface TemplateMutationInput {
+interface CreateTemplateInput {
   templateId?: string
   name?: string
   description?: string
   categories?: string[]
   styles?: string[]
-  durationRange?: number[]
+  durationRange?: [number, number]
   costPerVideo?: number
   qualityStars?: number
   limitations?: string[]
   verifiedClients?: string[]
   defaultParams?: Record<string, unknown>
-  steps?: Array<{ name?: string, config?: Record<string, unknown>, order?: number }>
   status?: string
   type?: string
   isPublic?: boolean
-  createdBy?: string
-  usageCount?: number
+  createdBy: string
 }
 
-interface MatchResult {
-  id: string
-  templateId: string
-  name: string
-  type: PipelineType
-  matchScore: number
-  matchLevel: 'direct_match' | 'needs_param_tuning' | 'new_pipeline_needed'
-  matchDetails: {
-    category: number
-    style: number
-    budget: number
-    duration: number
-  }
-  adjustments: string[]
-  description: string
-  categories: string[]
-  styles: string[]
-  durationRange: number[]
-  costPerVideo: number
-  qualityStars: number
+interface UpdateTemplateInput {
+  name?: string
+  description?: string
+  categories?: string[]
+  styles?: string[]
+  durationRange?: [number, number]
+  costPerVideo?: number
+  qualityStars?: number
+  limitations?: string[]
+  verifiedClients?: string[]
+  defaultParams?: Record<string, unknown>
+  status?: string
+  type?: string
+  isPublic?: boolean
 }
+
+interface ReferenceAnalysis {
+  videoUrl: string
+  category: string
+  style: string
+  duration: number
+  keyElements: string[]
+  suggestedTemplateType: PipelineType
+  note: string
+}
+
+type TemplateRecord = Record<string, any> & {
+  _id: { toString(): string }
+}
+
+const TEMPLATE_SEEDS = [
+  {
+    templateId: 'b7-ai-live',
+    name: 'B7 AI Live',
+    description: '适合轻量商品直播感短视频的低成本模板。',
+    categories: ['美妆', '食品', '日用品'],
+    styles: ['产品展示', '微动', '场景化'],
+    durationRange: [10, 25] as [number, number],
+    costPerVideo: 19.5,
+    qualityStars: 3,
+    limitations: ['适合轻商品镜头', '复杂口播需要额外调参'],
+    verifiedClients: [],
+    defaultParams: {
+      duration: 15,
+      aspectRatio: '9:16',
+      subtitleStyle: {},
+      musicStyle: 'light-pop',
+      extra: {},
+    },
+    type: PipelineType.SEEDING,
+    status: PipelineTemplateStatus.ACTIVE,
+    isPublic: true,
+    createdBy: 'system',
+  },
+  {
+    templateId: 'b9-product-showcase',
+    name: 'B9 Product Showcase',
+    description: '高还原产品展示和开箱对标模板。',
+    categories: ['美妆', '食品', '饮料'],
+    styles: ['对标复刻', '产品展示', '开箱'],
+    durationRange: [15, 45] as [number, number],
+    costPerVideo: 58,
+    qualityStars: 5,
+    limitations: ['成本较高', '需要更完整的商品素材'],
+    verifiedClients: [],
+    defaultParams: {
+      duration: 30,
+      aspectRatio: '9:16',
+      subtitleStyle: {},
+      musicStyle: 'showcase',
+      extra: {},
+    },
+    type: PipelineType.NEW_PRODUCT,
+    status: PipelineTemplateStatus.ACTIVE,
+    isPublic: true,
+    createdBy: 'system',
+  },
+  {
+    templateId: 'b10-explainer',
+    name: 'B10 Explainer',
+    description: '适合教程、规则讲解、知识型内容的低成本模板。',
+    categories: ['教学', '科普', '酒吧'],
+    styles: ['科普教学', '规则讲解', '教程'],
+    durationRange: [20, 90] as [number, number],
+    costPerVideo: 1,
+    qualityStars: 4,
+    limitations: ['强依赖清晰脚本', '真人出镜感较弱'],
+    verifiedClients: [],
+    defaultParams: {
+      duration: 45,
+      aspectRatio: '9:16',
+      subtitleStyle: {},
+      musicStyle: 'explainer',
+      extra: {},
+    },
+    type: PipelineType.BRAND_STORY,
+    status: PipelineTemplateStatus.ACTIVE,
+    isPublic: true,
+    createdBy: 'system',
+  },
+]
 
 @Injectable()
 export class PipelineMatchService implements OnModuleInit {
@@ -84,98 +160,107 @@ export class PipelineMatchService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    try {
-      await this.seedTemplates()
-    }
-    catch (error) {
-      this.logger.warn(`Failed to seed pipeline templates: ${error instanceof Error ? error.message : 'unknown_error'}`)
-    }
+    await this.ensureSeedTemplates()
   }
 
-  async matchPipeline(request: MatchPipelineRequest) {
-    const referenceAnalysis = request.referenceVideoUrl
-      ? await this.analyzeReferenceVideo(request.referenceVideoUrl)
+  async matchPipeline(input: MatchPipelineRequest) {
+    const referenceAnalysis = input.referenceVideoUrl
+      ? await this.analyzeReferenceVideo(input.referenceVideoUrl)
       : null
-    const normalizedRequest = this.normalizeMatchRequest(request, referenceAnalysis)
+    const request = this.normalizeMatchRequest(input, referenceAnalysis)
     const templates = await this.pipelineTemplateModel.find({
       status: { $ne: PipelineTemplateStatus.DEPRECATED },
     }).lean().exec() as TemplateRecord[]
 
     const results = templates
-      .map(template => this.scoreTemplate(template, normalizedRequest))
+      .map((template) => {
+        const categoryMatch = this.calculateCategoryMatch(request, template)
+        const styleMatch = this.calculateStyleMatch(request, template)
+        const budgetFit = this.calculateBudgetFit(request, template)
+        const durationFit = this.calculateDurationFit(request, template)
+        const matchScore = Number((
+          categoryMatch.score * 40
+          + styleMatch.score * 30
+          + budgetFit.score * 15
+          + durationFit.score * 15
+        ).toFixed(2))
+
+        return {
+          templateId: template['templateId'] || template['_id'].toString(),
+          name: template['name'],
+          matchScore,
+          matchLevel: this.resolveMatchLevel(matchScore),
+          matchDetails: {
+            categoryMatch,
+            styleMatch,
+            budgetFit,
+            durationFit,
+          },
+          adjustments: this.buildAdjustments(request, template),
+          costPerVideo: Number(template['costPerVideo'] || 0),
+          qualityStars: Number(template['qualityStars'] || 0),
+        }
+      })
       .sort((left, right) => right.matchScore - left.matchScore)
 
-    const bestMatch = results[0] || null
-
     return {
-      request: normalizedRequest,
+      request,
       referenceAnalysis,
-      total: results.length,
-      bestMatch,
       results,
-      suggestion: !bestMatch || bestMatch.matchScore < 60
-        ? this.suggestNewPipeline(normalizedRequest, results)
+      suggestion: results[0] && results[0].matchScore < 60
+        ? this.suggestNewPipeline(request, results)
         : null,
     }
   }
 
-  async analyzeReferenceVideo(videoUrl: string) {
-    const normalizedUrl = this.readString(videoUrl)
-    if (!normalizedUrl) {
-      throw new BadRequestException('videoUrl is required')
-    }
-
-    const urlHint = normalizedUrl.toLowerCase()
-    const category = this.pickFirstMatch(urlHint, [
-      ['beauty', 'makeup', 'lipstick', 'skincare', '美妆'],
-      ['food', 'snack', '食品'],
-      ['drink', 'beverage', '饮料'],
-      ['teach', 'tutorial', 'course', '教学'],
+  async analyzeReferenceVideo(videoUrl: string): Promise<ReferenceAnalysis> {
+    const normalizedUrl = this.normalizeRequiredString(videoUrl, 'videoUrl')
+    const tokens = normalizedUrl.toLowerCase()
+    const category = this.pickFirstMatching(tokens, [
+      ['makeup', 'lipstick', 'skincare', 'beauty', '美妆'],
+      ['food', 'snack', 'drink', '食品', '饮料'],
+      ['tutorial', 'guide', 'explain', '教学', '教程', '规则'],
       ['bar', 'cocktail', '酒吧'],
-    ]) || '通用'
-    const style = this.pickFirstMatch(urlHint, [
+    ])
+    const style = this.pickFirstMatching(tokens, [
       ['unbox', '开箱'],
-      ['live', '直播', 'scene', '场景化'],
-      ['explain', 'tutorial', 'guide', 'rules', '科普教学'],
-      ['product', 'showcase', '产品展示'],
-    ]) || '产品展示'
-    const duration = this.extractDurationHint(urlHint) || 30
+      ['live', '直播', 'scene', '场景'],
+      ['tutorial', 'guide', '教程', '讲解'],
+      ['showcase', 'product', '产品'],
+    ])
 
     return {
       videoUrl: normalizedUrl,
-      category,
-      style,
-      duration,
-      keyElements: [category, style, 'cta ending'],
-      suggestedTemplateType: style === '科普教学'
-        ? 'b10-explainer'
-        : style === '开箱'
-          ? 'b9-product-showcase'
-          : 'b7-ai-live',
+      category: category || '通用',
+      style: style || '产品展示',
+      duration: this.extractDurationFromUrl(tokens),
+      keyElements: [category || '通用', style || '产品展示'].filter(Boolean),
+      suggestedTemplateType: this.inferPipelineType(category || '', style || ''),
       note: 'TODO: integrate with ContentRemixAgent for real reference video analysis',
     }
   }
 
-  suggestNewPipeline(request: MatchPipelineRequest, matchResults: MatchResult[]) {
-    const bestMatch = matchResults[0] || null
+  suggestNewPipeline(request: MatchPipelineRequest, matchResults: Array<Record<string, any>>) {
+    const topResult = matchResults[0] || null
+    const requiredChanges = topResult && Array.isArray(topResult['adjustments']) && topResult['adjustments'].length > 0
+      ? topResult['adjustments']
+      : ['缺少可复用模板，需要新建基础管线']
+    const estimatedDevDays = Math.max(1, Math.min(requiredChanges.length, 5))
 
     return {
-      baseTemplateId: bestMatch?.templateId || 'b10-explainer',
-      requiredChanges: [
-        request.category ? `补充品类能力: ${request.category}` : '补充品类标签',
-        request.style ? `补充风格能力: ${request.style}` : '补充风格标签',
-        request.duration ? `支持 ${request.duration}s 时长` : '增加更多时长档位',
-      ],
-      estimatedDevTime: bestMatch && bestMatch.matchScore >= 40 ? '1-2 days' : '3-5 days',
-      estimatedCost: request.budget && request.budget > 0
-        ? Math.max(request.budget, bestMatch?.costPerVideo || 1)
-        : bestMatch?.costPerVideo || 19.5,
+      baseTemplateId: topResult?.['templateId'] || null,
+      requiredChanges,
+      estimatedDevTime: `${estimatedDevDays}d`,
+      estimatedCost: Number((
+        Number(topResult?.['costPerVideo'] || 20)
+        + requiredChanges.length * 8
+      ).toFixed(2)),
     }
   }
 
   async listTemplates(filters: TemplateFilters = {}) {
     const query: Record<string, unknown> = {}
-    const normalizedStatus = this.normalizeTemplateStatus(filters.status)
+    const normalizedStatus = this.normalizeTemplateStatus(filters.status, false)
     const normalizedType = this.normalizePipelineType(filters.type, false)
 
     if (normalizedStatus) {
@@ -185,63 +270,116 @@ export class PipelineMatchService implements OnModuleInit {
       query['type'] = normalizedType
     }
 
-    const items = await this.pipelineTemplateModel.find(query)
-      .sort({ qualityStars: -1, usageCount: -1, createdAt: -1 })
+    const templates = await this.pipelineTemplateModel.find(query)
+      .sort({ qualityStars: -1, costPerVideo: 1, createdAt: -1 })
       .lean()
       .exec() as TemplateRecord[]
 
-    const normalizedCategory = this.normalizeKeyword(filters.category)
-    const normalizedStyle = this.normalizeKeyword(filters.style)
-    const normalizedKeyword = this.normalizeKeyword(filters.keyword)
+    const categoryKeyword = this.normalizeKeyword(filters.category)
+    const styleKeyword = this.normalizeKeyword(filters.style)
+    const keyword = this.normalizeKeyword(filters.keyword)
 
-    return items
-      .filter((item) => {
-        if (normalizedCategory && !this.matchesKeywordList(item['categories'], normalizedCategory)) {
+    return templates
+      .filter((template) => {
+        if (categoryKeyword && !this.containsKeywordInList(template['categories'], categoryKeyword)) {
           return false
         }
-        if (normalizedStyle && !this.matchesKeywordList(item['styles'], normalizedStyle)) {
+        if (styleKeyword && !this.containsKeywordInList(template['styles'], styleKeyword)) {
           return false
         }
-        if (!normalizedKeyword) {
+        if (!keyword) {
           return true
         }
 
         return [
-          item['templateId'],
-          item['name'],
-          item['description'],
-        ].some(candidate => this.normalizeKeyword(candidate).includes(normalizedKeyword))
+          template['templateId'],
+          template['name'],
+          template['description'],
+        ].some(item => this.normalizeKeyword(item).includes(keyword))
       })
-      .map(item => this.toTemplateResponse(item))
+      .map(template => this.toTemplateResponse(template))
   }
 
-  async createTemplate(data: TemplateMutationInput) {
-    const payload = this.normalizeTemplateMutation(data, true)
+  async createTemplate(input: CreateTemplateInput) {
+    const name = this.normalizeRequiredString(input.name, 'name')
+    const templateId = await this.resolveUniqueTemplateId(input.templateId, name)
+    const createdBy = this.normalizeRequiredString(input.createdBy, 'createdBy')
 
-    const existing = await this.pipelineTemplateModel.findOne({ templateId: payload.templateId }).lean().exec()
-    if (existing) {
-      throw new BadRequestException('templateId already exists')
-    }
+    const created = await this.pipelineTemplateModel.create({
+      templateId,
+      name,
+      description: this.normalizeOptionalString(input.description),
+      categories: this.normalizeStringList(input.categories),
+      styles: this.normalizeStringList(input.styles),
+      durationRange: this.normalizeDurationRange(input.durationRange),
+      costPerVideo: this.normalizeNumber(input.costPerVideo),
+      qualityStars: this.normalizeQualityStars(input.qualityStars),
+      limitations: this.normalizeStringList(input.limitations),
+      verifiedClients: this.normalizeStringList(input.verifiedClients),
+      defaultParams: this.normalizeDefaultParams(input.defaultParams),
+      status: this.normalizeTemplateStatus(input.status) || PipelineTemplateStatus.ACTIVE,
+      type: this.normalizePipelineType(input.type) || this.inferPipelineTypeFromTemplate(input),
+      isPublic: Boolean(input.isPublic),
+      createdBy,
+      usageCount: 0,
+      steps: [],
+    })
 
-    const created = await this.pipelineTemplateModel.create(payload)
     return this.toTemplateResponse(created.toObject())
   }
 
-  async updateTemplate(id: string, data: TemplateMutationInput) {
-    const existing = await this.findTemplateByIdOrTemplateId(id)
+  async updateTemplate(id: string, input: UpdateTemplateInput) {
+    const query = this.buildTemplateLookupQuery(id)
+    const existing = await this.pipelineTemplateModel.findOne(query).lean().exec() as TemplateRecord | null
     if (!existing) {
       throw new NotFoundException('Pipeline template not found')
     }
 
-    const updates = this.normalizeTemplateMutation({
-      ...existing,
-      ...data,
-      createdBy: existing['createdBy'] || 'system',
-    }, false)
+    const updatePayload: Record<string, unknown> = {}
 
-    const updated = await this.pipelineTemplateModel.findByIdAndUpdate(
-      existing['_id'],
-      { $set: updates },
+    if ('name' in input) {
+      updatePayload['name'] = this.normalizeRequiredString(input.name, 'name')
+    }
+    if ('description' in input) {
+      updatePayload['description'] = this.normalizeOptionalString(input.description)
+    }
+    if ('categories' in input) {
+      updatePayload['categories'] = this.normalizeStringList(input.categories)
+    }
+    if ('styles' in input) {
+      updatePayload['styles'] = this.normalizeStringList(input.styles)
+    }
+    if ('durationRange' in input) {
+      updatePayload['durationRange'] = this.normalizeDurationRange(input.durationRange)
+    }
+    if ('costPerVideo' in input) {
+      updatePayload['costPerVideo'] = this.normalizeNumber(input.costPerVideo)
+    }
+    if ('qualityStars' in input) {
+      updatePayload['qualityStars'] = this.normalizeQualityStars(input.qualityStars)
+    }
+    if ('limitations' in input) {
+      updatePayload['limitations'] = this.normalizeStringList(input.limitations)
+    }
+    if ('verifiedClients' in input) {
+      updatePayload['verifiedClients'] = this.normalizeStringList(input.verifiedClients)
+    }
+    if ('defaultParams' in input) {
+      updatePayload['defaultParams'] = this.normalizeDefaultParams(input.defaultParams)
+    }
+    if ('status' in input) {
+      updatePayload['status'] = this.normalizeTemplateStatus(input.status) || PipelineTemplateStatus.ACTIVE
+    }
+    if ('type' in input) {
+      updatePayload['type'] = this.normalizePipelineType(input.type) || existing['type']
+    }
+    if ('isPublic' in input && typeof input.isPublic === 'boolean') {
+      updatePayload['isPublic'] = input.isPublic
+    }
+
+    const updated = await this.pipelineTemplateModel.findOneAndUpdate(
+      query,
+      { $set: updatePayload },
       { new: true },
     ).lean().exec() as TemplateRecord | null
 
@@ -252,411 +390,346 @@ export class PipelineMatchService implements OnModuleInit {
     return this.toTemplateResponse(updated)
   }
 
-  private async seedTemplates() {
-    const seedTemplates: Array<{
-      templateId: string
-      name: string
-      description: string
-      categories: string[]
-      styles: string[]
-      durationRange: [number, number]
-      costPerVideo: number
-      qualityStars: number
-      limitations: string[]
-      verifiedClients: string[]
-      defaultParams: {
-        duration: number
-        aspectRatio: string
-        subtitleStyle: Record<string, unknown>
-        musicStyle: string
-        extra: Record<string, unknown>
-      }
-      status: PipelineTemplateStatus
-      type: PipelineType
-      isPublic: boolean
-      createdBy: string
-      usageCount: number
-      steps: Array<{ name: string, order: number, config: Record<string, unknown> }>
-    }> = [
-      {
-        templateId: 'b7-ai-live',
-        name: 'B7 AI Live',
-        description: '低成本 AI 直播感产品讲解模板，适合快速批量起量。',
-        categories: ['美妆', '食品', '日用品'],
-        styles: ['产品展示', '微动', '场景化'],
-        durationRange: [15, 45],
-        costPerVideo: 19.5,
-        qualityStars: 3,
-        limitations: ['镜头语言较轻量', '不适合高质感棚拍'],
-        verifiedClients: [],
-        defaultParams: {
-          duration: 30,
-          aspectRatio: '9:16',
-          subtitleStyle: { tone: '直播感' },
-          musicStyle: 'light-pop',
-          extra: {},
-        },
-        status: PipelineTemplateStatus.ACTIVE,
-        type: PipelineType.PROMO,
-        isPublic: true,
-        createdBy: 'system:pipeline-match',
-        usageCount: 0,
-        steps: [
-          { name: 'script', order: 1, config: { mode: 'ai-live' } },
-          { name: 'avatar', order: 2, config: { motion: 'micro' } },
-          { name: 'render', order: 3, config: { ratio: '9:16' } },
-        ],
-      },
-      {
-        templateId: 'b9-product-showcase',
-        name: 'B9 Product Showcase',
-        description: '高质量产品展示与对标复刻模板，适合重点商品打磨。',
-        categories: ['美妆', '食品', '饮料'],
-        styles: ['对标复刻', '产品展示', '开箱'],
-        durationRange: [20, 60],
-        costPerVideo: 58,
-        qualityStars: 5,
-        limitations: ['制作成本较高', '需要更完整素材包'],
-        verifiedClients: [],
-        defaultParams: {
-          duration: 35,
-          aspectRatio: '9:16',
-          subtitleStyle: { tone: 'premium' },
-          musicStyle: 'cinematic-pop',
-          extra: {},
-        },
-        status: PipelineTemplateStatus.ACTIVE,
-        type: PipelineType.NEW_PRODUCT,
-        isPublic: true,
-        createdBy: 'system:pipeline-match',
-        usageCount: 0,
-        steps: [
-          { name: 'benchmark-analysis', order: 1, config: { mode: 'replica' } },
-          { name: 'product-packshot', order: 2, config: { lighting: 'studio' } },
-          { name: 'render', order: 3, config: { ratio: '9:16' } },
-        ],
-      },
-      {
-        templateId: 'b10-explainer',
-        name: 'B10 Explainer',
-        description: '低成本规则讲解与教程模板，适合知识型和说明型内容。',
-        categories: ['教学', '科普', '酒吧'],
-        styles: ['科普教学', '规则讲解', '教程'],
-        durationRange: [30, 120],
-        costPerVideo: 1,
-        qualityStars: 4,
-        limitations: ['视觉张力有限', '依赖脚本结构清晰度'],
-        verifiedClients: [],
-        defaultParams: {
-          duration: 45,
-          aspectRatio: '9:16',
-          subtitleStyle: { tone: 'clean' },
-          musicStyle: 'minimal',
-          extra: {},
-        },
-        status: PipelineTemplateStatus.ACTIVE,
-        type: PipelineType.BRAND_STORY,
-        isPublic: true,
-        createdBy: 'system:pipeline-match',
-        usageCount: 0,
-        steps: [
-          { name: 'outline', order: 1, config: { mode: 'explainer' } },
-          { name: 'script', order: 2, config: { emphasis: 'education' } },
-          { name: 'render', order: 3, config: { subtitle: 'guided' } },
-        ],
-      },
-    ]
-
-    await this.pipelineTemplateModel.bulkWrite(
-      seedTemplates.map(template => ({
-        updateOne: {
-          filter: { templateId: template.templateId },
-          update: {
-            $set: {
-              templateId: template.templateId,
-              name: template.name,
-              description: template.description,
-              categories: template.categories,
-              styles: template.styles,
-              durationRange: template.durationRange,
-              costPerVideo: template.costPerVideo,
-              qualityStars: template.qualityStars,
-              limitations: template.limitations,
-              verifiedClients: template.verifiedClients,
-              defaultParams: template.defaultParams,
-              status: template.status,
-              type: template.type,
-              isPublic: template.isPublic,
-              steps: template.steps,
-            },
-            $setOnInsert: {
-              createdBy: template.createdBy,
-              usageCount: template.usageCount,
-            },
+  private async ensureSeedTemplates() {
+    for (const seed of TEMPLATE_SEEDS) {
+      await this.pipelineTemplateModel.findOneAndUpdate(
+        { templateId: seed.templateId },
+        {
+          $set: {
+            ...seed,
+            categories: this.normalizeStringList(seed.categories),
+            styles: this.normalizeStringList(seed.styles),
+            limitations: this.normalizeStringList(seed.limitations),
+            verifiedClients: this.normalizeStringList(seed.verifiedClients),
+            durationRange: this.normalizeDurationRange(seed.durationRange),
+            defaultParams: this.normalizeDefaultParams(seed.defaultParams),
           },
-          upsert: true,
+          $setOnInsert: {
+            usageCount: 0,
+            steps: [],
+          },
         },
-      })),
-    )
+        { upsert: true },
+      ).exec()
+    }
+
+    this.logger.log(`Pipeline template seeds ensured: ${TEMPLATE_SEEDS.length}`)
   }
 
-  private scoreTemplate(template: TemplateRecord, request: MatchPipelineRequest): MatchResult {
-    const categoryScore = this.scoreCategory(template, request)
-    const styleScore = this.scoreStyle(template, request)
-    const budgetScore = this.scoreBudget(template, request)
-    const durationScore = this.scoreDuration(template, request)
-    const matchScore = Number((categoryScore + styleScore + budgetScore + durationScore).toFixed(2))
-    const matchLevel = matchScore > 80
-      ? 'direct_match'
-      : matchScore >= 60
-        ? 'needs_param_tuning'
-        : 'new_pipeline_needed'
-
+  private normalizeMatchRequest(
+    input: MatchPipelineRequest,
+    referenceAnalysis: ReferenceAnalysis | null,
+  ) {
     return {
-      id: template['_id'].toString(),
-      templateId: this.readString(template['templateId']) || template['_id'].toString(),
-      name: this.readString(template['name']),
-      type: template['type'] as PipelineType,
-      matchScore,
-      matchLevel,
-      matchDetails: {
-        category: categoryScore,
-        style: styleScore,
-        budget: budgetScore,
-        duration: durationScore,
-      },
-      adjustments: this.buildAdjustments(template, request),
-      description: this.readString(template['description']),
-      categories: this.readStringList(template['categories']),
-      styles: this.readStringList(template['styles']),
-      durationRange: this.normalizeDurationRange(template['durationRange']),
-      costPerVideo: this.toPositiveNumber(template['costPerVideo']),
-      qualityStars: this.toPositiveNumber(template['qualityStars']),
+      referenceVideoUrl: this.normalizeOptionalString(input.referenceVideoUrl),
+      category: this.normalizeOptionalString(input.category) || referenceAnalysis?.category || '',
+      style: this.normalizeOptionalString(input.style) || referenceAnalysis?.style || '',
+      duration: this.normalizeNumber(input.duration) || Number(referenceAnalysis?.duration || 0),
+      budget: this.normalizeNumber(input.budget),
+      description: this.normalizeOptionalString(input.description),
     }
   }
 
-  private buildAdjustments(template: TemplateRecord, request: MatchPipelineRequest) {
+  private calculateCategoryMatch(request: Record<string, any>, template: TemplateRecord) {
+    const requestedCategory = this.normalizeOptionalString(request['category'])
+    const templateCategories = this.normalizeStringList(template['categories'])
+
+    if (!requestedCategory || templateCategories.length === 0) {
+      return {
+        requested: requestedCategory || null,
+        matched: false,
+        score: 0.5,
+      }
+    }
+
+    const exactMatch = templateCategories.some(
+      category => category.toLowerCase() === requestedCategory.toLowerCase(),
+    )
+    if (exactMatch) {
+      return {
+        requested: requestedCategory,
+        matched: true,
+        score: 1,
+      }
+    }
+
+    const partialMatch = templateCategories.some(
+      category => category.includes(requestedCategory) || requestedCategory.includes(category),
+    )
+    return {
+      requested: requestedCategory,
+      matched: partialMatch,
+      score: partialMatch ? 0.7 : 0,
+    }
+  }
+
+  private calculateStyleMatch(request: Record<string, any>, template: TemplateRecord) {
+    const requestedStyle = this.normalizeOptionalString(request['style'])
+    const templateStyles = this.normalizeStringList(template['styles'])
+
+    if (!requestedStyle || templateStyles.length === 0) {
+      return {
+        requested: requestedStyle || null,
+        matched: false,
+        score: 0.5,
+      }
+    }
+
+    const exactMatch = templateStyles.some(
+      style => style.toLowerCase() === requestedStyle.toLowerCase(),
+    )
+    if (exactMatch) {
+      return {
+        requested: requestedStyle,
+        matched: true,
+        score: 1,
+      }
+    }
+
+    const partialMatch = templateStyles.some(
+      style => style.includes(requestedStyle) || requestedStyle.includes(style),
+    )
+    return {
+      requested: requestedStyle,
+      matched: partialMatch,
+      score: partialMatch ? 0.7 : 0,
+    }
+  }
+
+  private calculateBudgetFit(request: Record<string, any>, template: TemplateRecord) {
+    const budget = Number(request['budget'] || 0)
+    const templateCost = Number(template['costPerVideo'] || 0)
+
+    if (budget <= 0 || templateCost <= 0) {
+      return {
+        requested: budget || null,
+        estimated: templateCost || null,
+        score: 0.5,
+      }
+    }
+
+    if (templateCost <= budget) {
+      return {
+        requested: budget,
+        estimated: templateCost,
+        score: 1,
+      }
+    }
+
+    const overflowRatio = (templateCost - budget) / Math.max(budget, 1)
+    return {
+      requested: budget,
+      estimated: templateCost,
+      score: Math.max(0, Number((1 - overflowRatio).toFixed(2))),
+    }
+  }
+
+  private calculateDurationFit(request: Record<string, any>, template: TemplateRecord) {
+    const duration = Number(request['duration'] || 0)
+    const range = Array.isArray(template['durationRange']) ? template['durationRange'] : []
+
+    if (duration <= 0 || range.length < 2) {
+      return {
+        requested: duration || null,
+        range: range.length === 2 ? range : null,
+        score: 0.5,
+      }
+    }
+
+    const minDuration = Number(range[0] || 0)
+    const maxDuration = Number(range[1] || 0)
+    if (duration >= minDuration && duration <= maxDuration) {
+      return {
+        requested: duration,
+        range: [minDuration, maxDuration],
+        score: 1,
+      }
+    }
+
+    const nearest = duration < minDuration ? minDuration : maxDuration
+    const tolerance = Math.max(5, Math.abs(maxDuration - minDuration) || Math.round(duration * 0.25))
+    const distance = Math.abs(duration - nearest)
+    return {
+      requested: duration,
+      range: [minDuration, maxDuration],
+      score: Math.max(0, Number((1 - distance / tolerance).toFixed(2))),
+    }
+  }
+
+  private buildAdjustments(request: Record<string, any>, template: TemplateRecord) {
     const adjustments: string[] = []
-    const costPerVideo = this.toPositiveNumber(template['costPerVideo'])
-    const durationRange = this.normalizeDurationRange(template['durationRange'])
+    const categories = this.normalizeStringList(template['categories'])
+    const styles = this.normalizeStringList(template['styles'])
+    const durationRange = Array.isArray(template['durationRange']) ? template['durationRange'] : []
+    const requestedCategory = this.normalizeOptionalString(request['category'])
+    const requestedStyle = this.normalizeOptionalString(request['style'])
+    const requestedDuration = Number(request['duration'] || 0)
+    const requestedBudget = Number(request['budget'] || 0)
+    const templateCost = Number(template['costPerVideo'] || 0)
 
-    if (request.budget && costPerVideo > request.budget) {
-      adjustments.push(`预算偏低，建议从 ${costPerVideo} 调整到 ${request.budget} 以上或降低模板质量配置`)
+    if (requestedCategory && categories.length > 0 && !categories.some(
+      category => category.toLowerCase() === requestedCategory.toLowerCase(),
+    )) {
+      adjustments.push(`补充 ${requestedCategory} 品类素材映射`)
     }
-
-    if (request.duration && durationRange.length === 2) {
-      if (request.duration < durationRange[0]) {
-        adjustments.push(`时长偏短，建议将脚本压缩到 ${durationRange[0]}s 以上的结构`)
+    if (requestedStyle && styles.length > 0 && !styles.some(
+      style => style.toLowerCase() === requestedStyle.toLowerCase(),
+    )) {
+      adjustments.push(`增加 ${requestedStyle} 风格参数调优`)
+    }
+    if (requestedDuration > 0 && durationRange.length === 2) {
+      const minDuration = Number(durationRange[0] || 0)
+      const maxDuration = Number(durationRange[1] || 0)
+      if (requestedDuration < minDuration || requestedDuration > maxDuration) {
+        adjustments.push(`时长从 ${minDuration}-${maxDuration}s 调整到 ${requestedDuration}s`)
       }
-      if (request.duration > durationRange[1]) {
-        adjustments.push(`时长偏长，建议拆分为 ${durationRange[1]}s 内的分段表达`)
-      }
     }
-
-    if (request.style && !this.matchesKeywordList(template['styles'], this.normalizeKeyword(request.style))) {
-      adjustments.push(`需补充风格调参以适配 ${request.style}`)
-    }
-
-    if (request.category && !this.matchesKeywordList(template['categories'], this.normalizeKeyword(request.category))) {
-      adjustments.push(`需补充 ${request.category} 品类知识和素材规范`)
+    if (requestedBudget > 0 && templateCost > requestedBudget) {
+      adjustments.push('预算超出，需要裁剪镜头或切换低成本素材')
     }
 
     return adjustments
   }
 
-  private scoreCategory(template: TemplateRecord, request: MatchPipelineRequest) {
-    const requestedCategory = this.normalizeKeyword(request.category)
-    if (!requestedCategory) {
-      return 24
+  private resolveMatchLevel(matchScore: number) {
+    if (matchScore > 80) {
+      return 'direct_match'
     }
-
-    return this.matchesKeywordList(template['categories'], requestedCategory) ? 40 : 0
+    if (matchScore >= 60) {
+      return 'needs_param_tuning'
+    }
+    return 'new_pipeline_needed'
   }
 
-  private scoreStyle(template: TemplateRecord, request: MatchPipelineRequest) {
-    const requestedStyle = this.normalizeKeyword(request.style)
-    if (!requestedStyle) {
-      return 18
-    }
-
-    return this.matchesKeywordList(template['styles'], requestedStyle) ? 30 : 0
-  }
-
-  private scoreBudget(template: TemplateRecord, request: MatchPipelineRequest) {
-    const budget = this.toPositiveNumber(request.budget)
-    const costPerVideo = this.toPositiveNumber(template['costPerVideo'])
-
-    if (!budget || !costPerVideo) {
-      return 9
-    }
-
-    if (costPerVideo <= budget) {
-      return 15
-    }
-
-    const ratio = budget / costPerVideo
-    if (ratio >= 0.8) {
-      return 10
-    }
-    if (ratio >= 0.5) {
-      return 6
-    }
-    return 0
-  }
-
-  private scoreDuration(template: TemplateRecord, request: MatchPipelineRequest) {
-    const duration = this.toPositiveNumber(request.duration)
-    const durationRange = this.normalizeDurationRange(template['durationRange'])
-
-    if (!duration || durationRange.length !== 2) {
-      return 9
-    }
-
-    if (duration >= durationRange[0] && duration <= durationRange[1]) {
-      return 15
-    }
-
-    const distance = duration < durationRange[0]
-      ? durationRange[0] - duration
-      : duration - durationRange[1]
-
-    if (distance <= 10) {
-      return 10
-    }
-    if (distance <= 20) {
-      return 6
-    }
-    return 0
-  }
-
-  private async findTemplateByIdOrTemplateId(id: string) {
-    const normalizedId = this.readString(id)
-    if (!normalizedId) {
-      throw new BadRequestException('template id is required')
-    }
-
-    if (Types.ObjectId.isValid(normalizedId)) {
-      const byObjectId = await this.pipelineTemplateModel.findById(new Types.ObjectId(normalizedId)).lean().exec()
-      if (byObjectId) {
-        return byObjectId as TemplateRecord
-      }
-    }
-
-    return this.pipelineTemplateModel.findOne({ templateId: normalizedId }).lean().exec() as Promise<TemplateRecord | null>
-  }
-
-  private normalizeMatchRequest(
-    request: MatchPipelineRequest,
-    referenceAnalysis?: {
-      category?: string
-      style?: string
-      duration?: number
-    } | null,
-  ): MatchPipelineRequest {
+  private toTemplateResponse(template: TemplateRecord) {
     return {
-      referenceVideoUrl: this.readString(request.referenceVideoUrl),
-      category: this.readString(request.category) || this.readString(referenceAnalysis?.category),
-      style: this.readString(request.style) || this.readString(referenceAnalysis?.style),
-      duration: this.toPositiveNumber(request.duration) || this.toPositiveNumber(referenceAnalysis?.duration) || undefined,
-      budget: this.toPositiveNumber(request.budget) || undefined,
-      description: this.readString(request.description),
+      id: template['_id'].toString(),
+      templateId: template['templateId'] || template['_id'].toString(),
+      name: template['name'],
+      description: template['description'] || '',
+      categories: template['categories'] || [],
+      styles: template['styles'] || [],
+      durationRange: template['durationRange'] || null,
+      costPerVideo: Number(template['costPerVideo'] || 0),
+      qualityStars: Number(template['qualityStars'] || 0),
+      limitations: template['limitations'] || [],
+      verifiedClients: template['verifiedClients'] || [],
+      defaultParams: template['defaultParams'] || {},
+      status: template['status'] || PipelineTemplateStatus.ACTIVE,
+      type: template['type'],
+      isPublic: Boolean(template['isPublic']),
+      createdBy: template['createdBy'],
+      usageCount: Number(template['usageCount'] || 0),
+      capabilityTags: this.buildCapabilityTags(template),
+      createdAt: template['createdAt'] || null,
+      updatedAt: template['updatedAt'] || null,
     }
   }
 
-  private normalizeTemplateMutation(data: TemplateMutationInput, requireTemplateId: boolean) {
-    const templateId = this.readString(data.templateId)
-    const name = this.readString(data.name)
-    const createdBy = this.readString(data.createdBy) || 'system'
+  private buildCapabilityTags(template: TemplateRecord) {
+    const tags = [
+      ...this.normalizeStringList(template['categories']),
+      ...this.normalizeStringList(template['styles']),
+      template['status'] || PipelineTemplateStatus.ACTIVE,
+      template['qualityStars'] ? `${template['qualityStars']}星` : '',
+    ].filter(Boolean)
 
-    if (requireTemplateId && !templateId) {
+    return Array.from(new Set(tags))
+  }
+
+  private async resolveUniqueTemplateId(templateId: string | undefined, name: string) {
+    const baseId = this.normalizeOptionalString(templateId) || this.slugify(name)
+    if (!baseId) {
       throw new BadRequestException('templateId is required')
     }
-    if (!name) {
-      throw new BadRequestException('name is required')
+
+    const existing = await this.pipelineTemplateModel.findOne({ templateId: baseId }).lean().exec()
+    if (existing) {
+      throw new BadRequestException('templateId already exists')
     }
 
-    return {
-      templateId,
-      name,
-      description: this.readString(data.description),
-      categories: this.readStringList(data.categories),
-      styles: this.readStringList(data.styles),
-      durationRange: this.normalizeDurationRange(data.durationRange),
-      costPerVideo: this.toPositiveNumber(data.costPerVideo),
-      qualityStars: this.normalizeQualityStars(data.qualityStars),
-      limitations: this.readStringList(data.limitations),
-      verifiedClients: this.readStringList(data.verifiedClients),
-      defaultParams: this.normalizeDefaultParams(data.defaultParams),
-      steps: this.normalizeSteps(data.steps),
-      status: this.normalizeTemplateStatus(data.status) || PipelineTemplateStatus.ACTIVE,
-      type: this.normalizePipelineType(data.type, true) || PipelineType.PROMO,
-      isPublic: data.isPublic ?? true,
-      createdBy,
-      usageCount: Number.isFinite(Number(data.usageCount)) && Number(data.usageCount) >= 0
-        ? Number(data.usageCount)
-        : 0,
-    }
+    return baseId
   }
 
   private normalizeDefaultParams(value: Record<string, unknown> | undefined) {
-    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-    const extra = source['extra'] && typeof source['extra'] === 'object' && !Array.isArray(source['extra'])
-      ? source['extra'] as Record<string, unknown>
-      : {}
+    const source = value || {}
+    const duration = this.normalizeNumber(source['duration']) || 15
+    const aspectRatio = this.normalizeOptionalString(source['aspectRatio']) || '9:16'
+    const subtitleStyle = this.asRecord(source['subtitleStyle']) || {}
+    const musicStyle = this.normalizeOptionalString(source['musicStyle'])
+    const extra = {
+      ...(this.asRecord(source['extra']) || {}),
+    }
+
+    for (const [key, currentValue] of Object.entries(source)) {
+      if (['duration', 'aspectRatio', 'subtitleStyle', 'musicStyle', 'extra'].includes(key)) {
+        continue
+      }
+      extra[key] = currentValue
+    }
 
     return {
-      duration: this.toPositiveNumber(source['duration']) || 15,
-      aspectRatio: this.readString(source['aspectRatio']) || '9:16',
-      subtitleStyle: source['subtitleStyle'] && typeof source['subtitleStyle'] === 'object' && !Array.isArray(source['subtitleStyle'])
-        ? source['subtitleStyle']
-        : {},
-      musicStyle: this.readString(source['musicStyle']),
+      duration,
+      aspectRatio,
+      subtitleStyle,
+      musicStyle,
       extra,
     }
   }
 
-  private normalizeSteps(value: TemplateMutationInput['steps']) {
+  private normalizeDurationRange(value: [number, number] | undefined) {
+    if (!Array.isArray(value) || value.length < 2) {
+      return undefined
+    }
+
+    const first = this.normalizeNumber(value[0])
+    const second = this.normalizeNumber(value[1])
+    if (first <= 0 || second <= 0) {
+      return undefined
+    }
+
+    return first <= second ? [first, second] as [number, number] : [second, first] as [number, number]
+  }
+
+  private normalizeQualityStars(value: unknown) {
+    const normalized = Math.round(this.normalizeNumber(value))
+    if (normalized <= 0) {
+      return 0
+    }
+    return Math.min(Math.max(normalized, 1), 5)
+  }
+
+  private normalizeNumber(value: unknown) {
+    const normalized = Number(value || 0)
+    return Number.isFinite(normalized) ? normalized : 0
+  }
+
+  private normalizeOptionalString(value: unknown) {
+    return typeof value === 'string' ? value.trim() : ''
+  }
+
+  private normalizeRequiredString(value: unknown, field: string) {
+    const normalized = this.normalizeOptionalString(value)
+    if (!normalized) {
+      throw new BadRequestException(`${field} is required`)
+    }
+    return normalized
+  }
+
+  private normalizeStringList(value: unknown) {
     if (!Array.isArray(value)) {
       return []
     }
 
-    return value
-      .map((item, index) => ({
-        name: this.readString(item?.name),
-        config: item?.config && typeof item.config === 'object' && !Array.isArray(item.config)
-          ? item.config
-          : {},
-        order: Number.isFinite(Number(item?.order)) ? Number(item?.order) : index + 1,
-      }))
-      .filter(item => item.name)
+    return Array.from(new Set(value
+      .map(item => typeof item === 'string' ? item.trim() : '')
+      .filter(Boolean)))
   }
 
-  private normalizeDurationRange(value: unknown) {
-    if (!Array.isArray(value) || value.length < 2) {
-      return []
-    }
-
-    const first = this.toPositiveNumber(value[0])
-    const second = this.toPositiveNumber(value[1])
-    if (!first || !second) {
-      return []
-    }
-
-    return first <= second ? [first, second] : [second, first]
-  }
-
-  private normalizeQualityStars(value: unknown) {
-    const numeric = this.toPositiveNumber(value)
-    if (!numeric) {
-      return 0
-    }
-    return Math.min(Math.max(Math.round(numeric), 1), 5)
-  }
-
-  private normalizeTemplateStatus(value?: string) {
-    const normalized = this.readString(value).toLowerCase()
+  private normalizeTemplateStatus(value: unknown, defaultToActive = true) {
+    const normalized = this.normalizeOptionalString(value).toLowerCase()
     if (!normalized) {
-      return null
+      return defaultToActive ? PipelineTemplateStatus.ACTIVE : null
     }
 
     if (normalized === PipelineTemplateStatus.ACTIVE) {
@@ -669,101 +742,102 @@ export class PipelineMatchService implements OnModuleInit {
       return PipelineTemplateStatus.DEPRECATED
     }
 
-    throw new BadRequestException('Invalid pipeline template status')
+    throw new BadRequestException('Invalid template status')
   }
 
-  private normalizePipelineType(value?: string, strict = true) {
-    const normalized = this.readString(value).toLowerCase()
+  private normalizePipelineType(value: unknown, throwOnInvalid = true) {
+    const normalized = this.normalizeOptionalString(value).toLowerCase()
     if (!normalized) {
       return null
     }
 
-    const supportedTypes = new Set(Object.values(PipelineType))
-    if (supportedTypes.has(normalized as PipelineType)) {
-      return normalized as PipelineType
+    for (const candidate of Object.values(PipelineType)) {
+      if (candidate === normalized) {
+        return candidate
+      }
     }
 
-    if (strict) {
+    if (throwOnInvalid) {
       throw new BadRequestException('Invalid pipeline type')
     }
-
     return null
   }
 
-  private toTemplateResponse(item: TemplateRecord) {
-    return {
-      id: item['_id'].toString(),
-      templateId: this.readString(item['templateId']) || item['_id'].toString(),
-      name: this.readString(item['name']),
-      description: this.readString(item['description']),
-      type: item['type'] || PipelineType.PROMO,
-      categories: this.readStringList(item['categories']),
-      styles: this.readStringList(item['styles']),
-      durationRange: this.normalizeDurationRange(item['durationRange']),
-      costPerVideo: this.toPositiveNumber(item['costPerVideo']),
-      qualityStars: this.toPositiveNumber(item['qualityStars']),
-      limitations: this.readStringList(item['limitations']),
-      verifiedClients: this.readStringList(item['verifiedClients']),
-      defaultParams: item['defaultParams'] || {},
-      steps: Array.isArray(item['steps']) ? item['steps'] : [],
-      status: item['status'] || PipelineTemplateStatus.ACTIVE,
-      isPublic: Boolean(item['isPublic']),
-      createdBy: this.readString(item['createdBy']),
-      usageCount: Number(item['usageCount'] || 0),
-      createdAt: item['createdAt'] || null,
-      updatedAt: item['updatedAt'] || null,
+  private inferPipelineType(category: string, style: string) {
+    const tokens = `${category} ${style}`.toLowerCase()
+    if (tokens.includes('教程') || tokens.includes('教学') || tokens.includes('讲解') || tokens.includes('explain')) {
+      return PipelineType.BRAND_STORY
     }
+    if (tokens.includes('新品') || tokens.includes('开箱') || tokens.includes('product')) {
+      return PipelineType.NEW_PRODUCT
+    }
+    if (tokens.includes('直播') || tokens.includes('live')) {
+      return PipelineType.SEEDING
+    }
+    return PipelineType.PROMO
   }
 
-  private matchesKeywordList(values: unknown, keyword: string) {
-    const normalizedValues = this.readStringList(values).map(item => this.normalizeKeyword(item))
-    return normalizedValues.some(item => item.includes(keyword) || keyword.includes(item))
+  private inferPipelineTypeFromTemplate(input: CreateTemplateInput) {
+    return this.inferPipelineType(
+      this.normalizeStringList(input.categories).join(' '),
+      this.normalizeStringList(input.styles).join(' '),
+    )
   }
 
-  private pickFirstMatch(value: string, groups: string[][]) {
+  private buildTemplateLookupQuery(id: string) {
+    const normalized = this.normalizeRequiredString(id, 'templateId')
+    if (Types.ObjectId.isValid(normalized)) {
+      return {
+        $or: [
+          { _id: new Types.ObjectId(normalized) },
+          { templateId: normalized },
+        ],
+      }
+    }
+
+    return { templateId: normalized }
+  }
+
+  private normalizeKeyword(value: unknown) {
+    return this.normalizeOptionalString(value).toLowerCase()
+  }
+
+  private containsKeywordInList(list: unknown, keyword: string) {
+    return this.normalizeStringList(list).some(item => item.toLowerCase().includes(keyword))
+  }
+
+  private slugify(value: string) {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9一-龥]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+  }
+
+  private pickFirstMatching(source: string, groups: string[][]) {
     for (const group of groups) {
-      if (group.some(token => value.includes(token.toLowerCase()))) {
-        return group[group.length - 1]
+      const matched = group.find(item => source.includes(item.toLowerCase()))
+      if (matched) {
+        return matched
       }
     }
 
     return ''
   }
 
-  private extractDurationHint(value: string) {
-    const matched = value.match(/(\d{1,3})(?:s|sec|seconds)/)
+  private extractDurationFromUrl(source: string) {
+    const matched = source.match(/(\d{1,3})s/)
     if (!matched) {
-      return 0
+      return 30
     }
 
-    return this.toPositiveNumber(matched[1])
+    const duration = Number(matched[1] || 30)
+    return Number.isFinite(duration) ? duration : 30
   }
 
-  private normalizeKeyword(value: unknown) {
-    return this.readString(value).toLowerCase()
-  }
-
-  private readStringList(value: unknown) {
-    if (!Array.isArray(value)) {
-      return []
-    }
-
-    return Array.from(new Set(
-      value
-        .map(item => this.readString(item))
-        .filter(Boolean),
-    ))
-  }
-
-  private readString(value: unknown) {
-    return typeof value === 'string' ? value.trim() : ''
-  }
-
-  private toPositiveNumber(value: unknown) {
-    const numeric = Number(value || 0)
-    if (!Number.isFinite(numeric) || numeric <= 0) {
-      return 0
-    }
-    return Number(numeric.toFixed(2))
+  private asRecord(value: unknown) {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null
   }
 }
