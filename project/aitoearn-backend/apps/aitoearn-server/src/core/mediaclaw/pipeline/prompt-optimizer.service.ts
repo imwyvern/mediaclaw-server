@@ -1,49 +1,89 @@
 import { InjectQueue } from '@nestjs/bullmq'
 import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { OrgApiKeyProvider, VideoTask, VideoTaskStatus } from '@yikart/mongodb'
+import {
+  IterationFailureCategory,
+  IterationLog,
+  IterationLogStage,
+  IterationLogStatus,
+  VideoTask,
+  VideoTaskStatus,
+} from '@yikart/mongodb'
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
-import { requestJson } from './pipeline.utils'
-import type { PipelineJobContext } from './pipeline.types'
-import { ByokService } from '../settings/byok.service'
+import type { PipelineQualityReport } from './pipeline.types'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from '../worker/worker.constants'
 
-interface DeepSeekResponse {
-  choices?: Array<{
-    message?: {
-      content?: string
-    }
-  }>
+type PromptRetryStrategy = 'retry_optimized' | 'fallback_strategy' | 'needs_manual_review'
+
+interface FailureAnalysisHeuristicInput {
+  taskId: string
+  orgId?: string | null
+  batchId?: string | null
+  stage: IterationLogStage
+  failedStep: VideoWorkerStep
+  retryTargetStep: VideoWorkerStep
+  originalPrompt: string
+  errorMessage: string
+  qualityScore?: FailureQualityScore | null
 }
 
-interface GeminiResponse {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        text?: string
-      }>
-    }
-  }>
+interface LogIterationInput {
+  status: IterationLogStatus
+  iteration?: number
+  batchId?: string | null
+  originalPrompt?: string
+  optimizedPrompt?: string
+  failureAnalysis?: {
+    failReason: string
+    failCategory: IterationFailureCategory
+    suggestedFixes: string[]
+    confidence: number
+  } | null
+  qualityScore?: FailureQualityScore | null
+  costCredits?: number
+  durationMs?: number
+  strategyUsed?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface FailureQualityScore {
+  total: number
+  production: number
+  virality: number
+  dimensions: Record<string, number>
 }
 
 export interface FailureAnalysisResult {
   taskId: string
   orgId?: string | null
-  failedStep: string
+  batchId?: string | null
+  iteration: number
+  stage: IterationLogStage
+  failedStep: VideoWorkerStep
+  retryTargetStep: VideoWorkerStep
   originalPrompt: string
+  optimizedPrompt: string
   errorMessage: string
+  failReason: string
   failureReason: string
   rootCause: string
+  failCategory: IterationFailureCategory
+  suggestedFixes: string[]
   suggestedChanges: string[]
+  confidence: number
+  strategyUsed: string
+  qualityScore?: FailureQualityScore | null
 }
 
 export interface OptimizedPromptResult {
   taskId: string
-  failedStep: string
+  failedStep: VideoWorkerStep
+  retryTargetStep: VideoWorkerStep
   originalPrompt: string
   optimizedPrompt: string
   failureReason: string
+  strategyUsed: string
 }
 
 @Injectable()
@@ -56,61 +96,150 @@ export class PromptOptimizerService {
     @InjectQueue(VIDEO_WORKER_QUEUE)
     @Optional()
     private readonly workerQueue?: Queue<VideoWorkerJobData>,
+    @InjectModel(IterationLog.name)
     @Optional()
-    private readonly byokService?: ByokService,
+    private readonly iterationLogModel?: Model<IterationLog>,
   ) {}
 
-  async analyzeFailure(taskId: string): Promise<FailureAnalysisResult> {
+  async analyzeFailure(
+    taskId: string,
+    stageInput?: string,
+    originalPromptInput?: string,
+    errorOrQualityResult?: unknown,
+  ): Promise<FailureAnalysisResult> {
     const task = await this.getTask(taskId)
-    const failedStep = this.readFailedStep(task)
-    const originalPrompt = this.readOriginalPrompt(task, failedStep)
-    const errorMessage = this.readErrorMessage(task)
+    const failedStep = this.resolveFailedWorkerStep(task, stageInput)
+    const stage = this.toIterationStage(stageInput || failedStep)
+    const retryTargetStep = this.resolveRetryTargetStep(stage, failedStep)
+    const originalPrompt = originalPromptInput?.trim() || this.readOriginalPrompt(task, retryTargetStep)
+    const errorMessage = this.readErrorMessage(task, errorOrQualityResult)
+    const qualityScore = this.extractQualityScore(errorOrQualityResult)
+    const iteration = await this.resolveNextIteration(taskId)
 
-    const analysis = await this.requestFailureAnalysis({
+    const heuristic = this.buildFailureAnalysis({
       taskId,
       orgId: task.orgId?.toString() || null,
+      batchId: task.batchId?.toString() || null,
+      stage,
       failedStep,
+      retryTargetStep,
       originalPrompt,
       errorMessage,
+      qualityScore,
+    })
+    const optimized = await this.generateOptimizedPrompt(taskId, heuristic)
+
+    const analysis: FailureAnalysisResult = {
+      ...heuristic,
+      iteration,
+      optimizedPrompt: optimized.optimizedPrompt,
+      strategyUsed: optimized.strategyUsed,
+    }
+
+    await this.logIteration(taskId, stage, {
+      iteration,
+      status: 'failed',
+      batchId: task.batchId?.toString() || null,
+      originalPrompt,
+      optimizedPrompt: optimized.optimizedPrompt,
+      failureAnalysis: {
+        failReason: analysis.failReason,
+        failCategory: analysis.failCategory,
+        suggestedFixes: analysis.suggestedFixes,
+        confidence: analysis.confidence,
+      },
+      qualityScore,
+      costCredits: Number(task.creditsConsumed || 0),
+      strategyUsed: 'default',
+      metadata: {
+        errorMessage,
+        failedStep,
+        retryTargetStep,
+      },
     })
 
-    const optimized = await this.generateOptimizedPrompt(taskId, analysis)
-    await this.persistAnalysis(task, analysis, optimized)
-
+    await this.persistAnalysis(task, analysis)
     return analysis
   }
 
-  async generateOptimizedPrompt(
-    taskId: string,
-    failureAnalysis: FailureAnalysisResult,
-  ): Promise<OptimizedPromptResult> {
-    const optimizedPrompt = await this.requestOptimizedPrompt(failureAnalysis)
+  async optimizePrompt(
+    originalPrompt: string,
+    failureAnalysis: Pick<FailureAnalysisResult, 'failCategory' | 'failReason' | 'suggestedFixes' | 'stage'>,
+  ) {
+    const normalizedOriginalPrompt = originalPrompt.trim()
+    const guidance: string[] = []
+
+    switch (failureAnalysis.failCategory) {
+      case 'quality':
+        guidance.push('Raise visual quality requirements, tighten output fidelity, and preserve platform-safe clarity.')
+        guidance.push('Keep motion stable, frame clean, and brand elements readable.')
+        break
+      case 'content':
+        guidance.push('Align the output closer to the requested topic, audience intent, and platform context.')
+        guidance.push('Remove irrelevant narrative branches and keep the message single-threaded.')
+        break
+      case 'brand_mismatch':
+        guidance.push('Explicitly preserve brand colors, slogans, tone, and prohibited-word constraints.')
+        guidance.push('Reject outputs that drift away from the brand profile or target product.')
+        break
+      default:
+        guidance.push('Reduce ambiguity, require deterministic structure, and minimize provider-side parsing risk.')
+        guidance.push('Keep the response compact, explicit, and execution-safe.')
+        break
+    }
+
+    const optimizedPrompt = [
+      normalizedOriginalPrompt,
+      '',
+      '[Optimization patch]',
+      `Stage: ${failureAnalysis.stage}`,
+      `Failure: ${failureAnalysis.failReason}`,
+      ...guidance.map(item => `- ${item}`),
+      ...failureAnalysis.suggestedFixes.map(item => `- ${item}`),
+      '- Use a deterministic output structure and avoid unnecessary filler.',
+      '',
+      'TODO: replace this heuristic prompt patcher with LLM-based optimization.',
+    ].filter(Boolean).join('\n')
+
+    return optimizedPrompt.trim()
+  }
+
+  async shouldRetry(videoTaskId: string) {
+    const iteration = await this.resolveCurrentIteration(videoTaskId)
+
+    if (iteration < 2) {
+      return {
+        currentIteration: iteration,
+        shouldRetry: true,
+        strategy: 'retry_optimized' as PromptRetryStrategy,
+      }
+    }
+
+    if (iteration === 2) {
+      return {
+        currentIteration: iteration,
+        shouldRetry: true,
+        strategy: 'fallback_strategy' as PromptRetryStrategy,
+      }
+    }
 
     return {
-      taskId,
-      failedStep: failureAnalysis.failedStep,
-      originalPrompt: failureAnalysis.originalPrompt,
-      optimizedPrompt,
-      failureReason: failureAnalysis.failureReason,
+      currentIteration: iteration,
+      shouldRetry: false,
+      strategy: 'needs_manual_review' as PromptRetryStrategy,
     }
   }
 
-  async retryWithOptimizedPrompt(taskId: string) {
+  async retryWithOptimizedPrompt(taskId: string, strategyOverride?: PromptRetryStrategy) {
     const task = await this.getTask(taskId)
-    const failedStep = this.readFailedStep(task)
-    const workerStep = this.toWorkerStep(failedStep)
-
-    if (!workerStep) {
-      throw new BadRequestException('No retryable failed step found')
-    }
+    const lastAnalysis = this.readLastAnalysis(task)
+    const retryTargetStep = this.resolveRetryTargetStep(
+      lastAnalysis?.stage || this.toIterationStage(this.readFailedStep(task)),
+      lastAnalysis?.failedStep || this.readFailedStep(task),
+    )
 
     if (!this.workerQueue) {
       throw new BadRequestException('Worker queue is not configured')
-    }
-
-    const optimizedPrompt = this.readOptimizedPrompt(task, failedStep)
-    if (!optimizedPrompt) {
-      throw new BadRequestException('Optimized prompt is not available')
     }
 
     const pipelineContext = this.readPipelineContext(task)
@@ -118,50 +247,418 @@ export class PromptOptimizerService {
       throw new BadRequestException('Pipeline context is not available for retry')
     }
 
-    const nextContext: PipelineJobContext = {
+    const originalOptimizedPrompt = this.readOptimizedPrompt(task, retryTargetStep)
+    if (!originalOptimizedPrompt) {
+      throw new BadRequestException('Optimized prompt is not available')
+    }
+
+    const strategy = strategyOverride || 'retry_optimized'
+    const optimizedPrompt = strategy === 'fallback_strategy'
+      ? this.applyFallbackStrategy(originalOptimizedPrompt)
+      : originalOptimizedPrompt
+
+    const nextContext = {
       ...pipelineContext,
       prompts: {
         ...(pipelineContext.prompts || {}),
-        [failedStep]: optimizedPrompt,
+        [retryTargetStep]: optimizedPrompt,
       },
     }
 
     await this.workerQueue.add(
-      workerStep,
+      retryTargetStep,
       {
         taskId: task._id.toString(),
         context: nextContext,
       },
       {
-        jobId: `${task._id.toString()}:${workerStep}:optimized:${Date.now()}`,
+        jobId: `${task._id.toString()}:${retryTargetStep}:optimized:${Date.now()}`,
+      },
+    )
+
+    const currentIteration = await this.resolveCurrentIteration(taskId)
+    await this.logIteration(
+      taskId,
+      this.toIterationStage(lastAnalysis?.stage || retryTargetStep),
+      {
+        iteration: currentIteration || 1,
+        status: 'retried',
+        batchId: task.batchId?.toString() || null,
+        originalPrompt: lastAnalysis?.originalPrompt || this.readOriginalPrompt(task, retryTargetStep),
+        optimizedPrompt,
+        failureAnalysis: lastAnalysis
+          ? {
+              failReason: lastAnalysis.failReason,
+              failCategory: lastAnalysis.failCategory,
+              suggestedFixes: lastAnalysis.suggestedFixes,
+              confidence: lastAnalysis.confidence,
+            }
+          : null,
+        qualityScore: lastAnalysis?.qualityScore || null,
+        costCredits: Number(task.creditsConsumed || 0),
+        strategyUsed: strategy,
+        metadata: {
+          retryTargetStep,
+          source: 'prompt_optimizer',
+        },
       },
     )
 
     await this.videoTaskModel.findByIdAndUpdate(task._id, {
       $set: {
-        status: this.mapRetryStatus(workerStep),
+        status: this.mapRetryStatus(retryTargetStep),
         errorMessage: '',
         completedAt: null,
         'metadata.failedStep': null,
         'metadata.pipelineContext': nextContext,
+        'metadata.promptOptimizer.lastRetry': {
+          retryTargetStep,
+          strategy,
+          retriedAt: new Date().toISOString(),
+        },
       },
       $push: {
         promptFixes: {
-          originalPrompt: this.readOriginalPrompt(task, failedStep),
+          originalPrompt: lastAnalysis?.originalPrompt || this.readOriginalPrompt(task, retryTargetStep),
           optimizedPrompt,
-          failureReason: this.readFailureReason(task),
+          failureReason: lastAnalysis?.failReason || this.readErrorMessage(task),
           retriedAt: new Date(),
           result: 'retry_queued',
+          analysis: lastAnalysis || {},
         },
       },
     }).exec()
 
     return {
       taskId: task._id.toString(),
-      failedStep,
+      failedStep: retryTargetStep,
       optimizedPrompt,
       retryQueued: true,
+      strategy,
     }
+  }
+
+  async logIteration(videoTaskId: string, stageInput: string, input: LogIterationInput) {
+    const iterationLogModel = this.requireIterationLogModel()
+    const task = await this.getTask(videoTaskId)
+    const stage = this.toIterationStage(stageInput)
+    const iteration = input.iteration || await this.resolveNextIteration(videoTaskId)
+
+    const created = await iterationLogModel.create({
+      videoTaskId,
+      batchId: input.batchId || task.batchId?.toString() || '',
+      iteration,
+      stage,
+      status: input.status,
+      originalPrompt: input.originalPrompt || '',
+      optimizedPrompt: input.optimizedPrompt || '',
+      failureAnalysis: input.failureAnalysis || null,
+      qualityScore: input.qualityScore || null,
+      costCredits: Number(input.costCredits || 0),
+      durationMs: Number(input.durationMs || 0),
+      strategyUsed: input.strategyUsed || 'default',
+      metadata: input.metadata || {},
+    })
+
+    return this.toIterationLogResponse(created.toObject())
+  }
+
+  async getIterationHistory(videoTaskId: string) {
+    const iterationLogModel = this.requireIterationLogModel()
+    const items = await iterationLogModel.find({ videoTaskId })
+      .sort({ iteration: 1, createdAt: 1 })
+      .lean()
+      .exec()
+
+    return items.map(item => this.toIterationLogResponse(item))
+  }
+
+  async getBatchIterationSummary(batchId: string) {
+    const normalizedBatchId = batchId.trim()
+    if (!normalizedBatchId) {
+      throw new BadRequestException('batchId is required')
+    }
+
+    const iterationLogModel = this.requireIterationLogModel()
+    const [logs, tasks] = await Promise.all([
+      iterationLogModel.find({ batchId: normalizedBatchId }).lean().exec(),
+      this.videoTaskModel.find({ batchId: this.toOptionalObjectId(normalizedBatchId) }).lean().exec(),
+    ])
+
+    const uniqueTaskIds = new Set<string>()
+    const successfulTaskIds = new Set<string>()
+    const failureCategories = new Map<string, number>()
+    const successIterations = new Map<string, number>()
+
+    for (const item of logs) {
+      uniqueTaskIds.add(item.videoTaskId)
+      const category = item.failureAnalysis?.failCategory
+      if (category) {
+        failureCategories.set(category, (failureCategories.get(category) || 0) + 1)
+      }
+    }
+
+    for (const task of tasks) {
+      const taskId = task._id.toString()
+      if (uniqueTaskIds.size === 0 || uniqueTaskIds.has(taskId)) {
+        uniqueTaskIds.add(taskId)
+      }
+
+      if (this.isSuccessfulTaskStatus(task.status)) {
+        successfulTaskIds.add(taskId)
+      }
+    }
+
+    for (const item of logs) {
+      if (!successfulTaskIds.has(item.videoTaskId)) {
+        continue
+      }
+
+      const current = successIterations.get(item.videoTaskId)
+      if (!current || item.iteration < current) {
+        successIterations.set(item.videoTaskId, item.iteration)
+      }
+    }
+
+    const avgIterationsToSuccess = successIterations.size > 0
+      ? Number(
+          (
+            Array.from(successIterations.values()).reduce((sum, value) => sum + value, 0)
+            / successIterations.size
+          ).toFixed(2),
+        )
+      : 0
+
+    const commonFailureCategories = Array.from(failureCategories.entries())
+      .sort((left, right) => right[1] - left[1])
+      .map(([category, count]) => ({ category, count }))
+
+    const successRate = uniqueTaskIds.size > 0
+      ? Number(((successfulTaskIds.size / uniqueTaskIds.size) * 100).toFixed(2))
+      : 0
+
+    return {
+      batchId: normalizedBatchId,
+      totalIterations: logs.length,
+      totalTasks: uniqueTaskIds.size,
+      successfulTasks: successfulTaskIds.size,
+      successRate,
+      commonFailureCategories,
+      avgIterationsToSuccess,
+    }
+  }
+
+  private async generateOptimizedPrompt(
+    taskId: string,
+    failureAnalysis: Omit<FailureAnalysisResult, 'iteration' | 'optimizedPrompt' | 'strategyUsed'>,
+  ): Promise<OptimizedPromptResult> {
+    const optimizedPrompt = await this.optimizePrompt(failureAnalysis.originalPrompt, failureAnalysis)
+
+    return {
+      taskId,
+      failedStep: failureAnalysis.failedStep,
+      retryTargetStep: failureAnalysis.retryTargetStep,
+      originalPrompt: failureAnalysis.originalPrompt,
+      optimizedPrompt,
+      failureReason: failureAnalysis.failReason,
+      strategyUsed: 'retry_optimized',
+    }
+  }
+
+  private buildFailureAnalysis(input: FailureAnalysisHeuristicInput): Omit<FailureAnalysisResult, 'iteration' | 'optimizedPrompt' | 'strategyUsed'> {
+    const message = input.errorMessage.toLowerCase()
+    const failCategory = this.resolveFailureCategory(message, input.qualityScore)
+
+    let failReason = 'Prompt robustness is insufficient for the failed pipeline stage'
+    let rootCause = 'Prompt instructions are not specific enough for the provider and stage constraints'
+    let confidence = 0.72
+    const suggestedFixes = [
+      'Add stricter task constraints and success criteria.',
+      'Reduce ambiguous wording and keep output expectations explicit.',
+      'Preserve brand, platform, and format requirements in the same prompt.',
+    ]
+
+    if (input.qualityScore && input.qualityScore.total < 75) {
+      failReason = 'Quality score is below the retry threshold'
+      rootCause = 'The generated result did not meet production or virality expectations'
+      suggestedFixes.unshift('Raise visual quality, rhythm, and clarity constraints for the generation stage.')
+      confidence = 0.88
+    }
+
+    if (message.includes('timeout') || message.includes('timed out')) {
+      failReason = 'Provider timed out during stage execution'
+      rootCause = 'Prompt context is too broad or the provider response path is unstable'
+      suggestedFixes.unshift('Shorten the prompt and keep only the minimum actionable context.')
+      confidence = 0.92
+    }
+    else if (
+      message.includes('401')
+      || message.includes('403')
+      || message.includes('unauthorized')
+      || message.includes('forbidden')
+      || message.includes('http 5')
+    ) {
+      failReason = 'Technical provider error interrupted prompt execution'
+      rootCause = 'Remote provider authentication or infrastructure is unstable'
+      suggestedFixes.unshift('Validate provider availability before requeueing the next iteration.')
+      confidence = 0.91
+    }
+    else if (message.includes('brand') || message.includes('logo') || message.includes('color')) {
+      failReason = 'Generated result drifted away from required brand elements'
+      rootCause = 'Brand constraints are under-specified in the generation prompt'
+      suggestedFixes.unshift('Explicitly require brand colors, slogans, tone, and prohibited-word constraints.')
+      confidence = 0.86
+    }
+    else if (
+      message.includes('irrelevant')
+      || message.includes('mismatch')
+      || message.includes('topic')
+      || message.includes('content')
+    ) {
+      failReason = 'Generated content is not aligned with the requested topic or audience intent'
+      rootCause = 'The prompt does not anchor the output tightly enough to the source task'
+      suggestedFixes.unshift('Re-anchor the prompt to the task theme, platform, and content objective.')
+      confidence = 0.83
+    }
+    else if (message.includes('json') || message.includes('parse') || message.includes('schema')) {
+      failReason = 'Provider returned an invalid structured response'
+      rootCause = 'Prompt does not constrain the output format enough'
+      suggestedFixes.unshift('Explicitly require a single valid response structure.')
+      confidence = 0.9
+    }
+
+    return {
+      taskId: input.taskId,
+      orgId: input.orgId || null,
+      batchId: input.batchId || null,
+      stage: input.stage,
+      failedStep: input.failedStep,
+      retryTargetStep: input.retryTargetStep,
+      originalPrompt: input.originalPrompt,
+      errorMessage: input.errorMessage,
+      failReason,
+      failureReason: failReason,
+      rootCause,
+      failCategory,
+      suggestedFixes: Array.from(new Set(suggestedFixes)),
+      suggestedChanges: Array.from(new Set(suggestedFixes)),
+      confidence,
+      qualityScore: input.qualityScore || null,
+    }
+  }
+
+  private resolveFailureCategory(
+    errorMessage: string,
+    qualityScore?: FailureQualityScore | null,
+  ): IterationFailureCategory {
+    if (qualityScore && qualityScore.total < 75) {
+      return 'quality'
+    }
+
+    if (
+      errorMessage.includes('brand')
+      || errorMessage.includes('logo')
+      || errorMessage.includes('palette')
+      || errorMessage.includes('color')
+    ) {
+      return 'brand_mismatch'
+    }
+
+    if (
+      errorMessage.includes('irrelevant')
+      || errorMessage.includes('content mismatch')
+      || errorMessage.includes('topic')
+      || errorMessage.includes('audience')
+    ) {
+      return 'content'
+    }
+
+    return 'technical'
+  }
+
+  private async persistAnalysis(task: VideoTask, analysis: FailureAnalysisResult) {
+    const optimizedPrompts = {
+      ...(task.metadata?.['optimizedPrompts'] || {}),
+      [analysis.retryTargetStep]: analysis.optimizedPrompt,
+    }
+
+    await this.videoTaskModel.findByIdAndUpdate(task._id, {
+      $set: {
+        'metadata.promptOptimizer.lastAnalysis': analysis,
+        'metadata.promptOptimizer.lastIteration': analysis.iteration,
+        'metadata.promptOptimizer.retryTargetStep': analysis.retryTargetStep,
+        'metadata.optimizedPrompts': optimizedPrompts,
+      },
+      $push: {
+        promptFixes: {
+          originalPrompt: analysis.originalPrompt,
+          optimizedPrompt: analysis.optimizedPrompt,
+          failureReason: analysis.failReason,
+          retriedAt: null,
+          result: 'analyzed',
+          analysis,
+        },
+      },
+    }).exec()
+  }
+
+  private extractQualityScore(errorOrQualityResult?: unknown): FailureQualityScore | null {
+    if (!errorOrQualityResult || typeof errorOrQualityResult !== 'object') {
+      return null
+    }
+
+    const qualityReport = errorOrQualityResult as PipelineQualityReport & {
+      total?: number
+      production?: number
+      virality?: number
+    }
+    const metrics = qualityReport.metrics
+    if (!metrics) {
+      return null
+    }
+
+    const durationScore = Math.max(0, 100 - Math.abs((metrics.duration || 0) - 15) * 4)
+    const resolutionScore = Math.min(100, Math.round((Math.min(metrics.width || 0, metrics.height || 0) / 720) * 100))
+    const fileSizeScore = Math.min(100, Math.round(((metrics.fileSize || 0) / (1024 * 1024)) * 20))
+    const subtitleScore = metrics.hasSubtitles ? 100 : 60
+    const production = this.averageScore([durationScore, resolutionScore, fileSizeScore, subtitleScore])
+
+    const viralityDimensions: Record<string, number> = {
+      clarity: subtitleScore,
+      retention: durationScore,
+      quality: resolutionScore,
+      distribution_readiness: fileSizeScore,
+      hook_strength: durationScore,
+      readability: subtitleScore,
+      platform_fit: Math.min(100, Math.round((resolutionScore * 0.6) + (subtitleScore * 0.4))),
+    }
+    const virality = this.averageScore(Object.values(viralityDimensions))
+    const total = Number(((production * 0.4) + (virality * 0.6)).toFixed(2))
+
+    return {
+      total,
+      production,
+      virality,
+      dimensions: viralityDimensions,
+    }
+  }
+
+  private averageScore(values: number[]) {
+    if (values.length === 0) {
+      return 0
+    }
+
+    return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2))
+  }
+
+  private applyFallbackStrategy(prompt: string) {
+    return [
+      prompt,
+      '',
+      '[Fallback strategy]',
+      '- Use a more conservative generation plan and favor stable defaults.',
+      '- Prefer lower-variance output over aggressive creativity.',
+    ].join('\n')
   }
 
   private async getTask(taskId: string) {
@@ -175,6 +672,43 @@ export class PromptOptimizerService {
     }
 
     return task
+  }
+
+  private requireIterationLogModel() {
+    if (!this.iterationLogModel) {
+      throw new BadRequestException('Iteration log model is not configured')
+    }
+
+    return this.iterationLogModel
+  }
+
+  private async resolveCurrentIteration(taskId: string) {
+    const iterationLogModel = this.requireIterationLogModel()
+    const latest = await iterationLogModel.findOne({ videoTaskId: taskId })
+      .sort({ iteration: -1, createdAt: -1 })
+      .lean()
+      .exec()
+
+    if (latest?.iteration) {
+      return Number(latest.iteration)
+    }
+
+    const task = await this.getTask(taskId)
+    return Array.isArray(task.promptFixes) ? task.promptFixes.length : 0
+  }
+
+  private async resolveNextIteration(taskId: string) {
+    return (await this.resolveCurrentIteration(taskId)) + 1
+  }
+
+  private resolveFailedWorkerStep(task: VideoTask, stageInput?: string): VideoWorkerStep {
+    const fromInput = this.normalizeWorkerStep(stageInput)
+    if (fromInput) {
+      return fromInput
+    }
+
+    const failedStep = this.readFailedStep(task)
+    return this.normalizeWorkerStep(failedStep) || 'render-video'
   }
 
   private readFailedStep(task: VideoTask) {
@@ -196,7 +730,7 @@ export class PromptOptimizerService {
     return 'render-video'
   }
 
-  private readOriginalPrompt(task: VideoTask, failedStep: string) {
+  private readOriginalPrompt(task: VideoTask, failedStep: VideoWorkerStep) {
     const prompts = this.readPipelineContext(task)?.['prompts']
     const promptFromContext = prompts && typeof prompts[failedStep] === 'string'
       ? String(prompts[failedStep]).trim()
@@ -210,20 +744,37 @@ export class PromptOptimizerService {
       return `Generate platform-ready copy for ${task.sourceVideoUrl || 'the produced video'} and keep it aligned with the task metadata.`
     }
 
+    if (failedStep === 'edit-frames') {
+      return `Edit the frames to preserve brand consistency for source ${task.sourceVideoUrl || 'unknown source'}.`
+    }
+
     return `Optimize the ${failedStep} stage for task ${task._id.toString()} using source ${task.sourceVideoUrl || 'unknown source'} while preserving brand consistency.`
   }
 
-  private readErrorMessage(task: VideoTask) {
+  private readErrorMessage(task: VideoTask, errorOrQualityResult?: unknown) {
+    if (typeof errorOrQualityResult === 'string' && errorOrQualityResult.trim()) {
+      return errorOrQualityResult.trim()
+    }
+
+    if (
+      errorOrQualityResult
+      && typeof errorOrQualityResult === 'object'
+      && 'errors' in errorOrQualityResult
+      && Array.isArray((errorOrQualityResult as { errors?: unknown[] }).errors)
+    ) {
+      const errors = (errorOrQualityResult as { errors: unknown[] }).errors
+        .map(item => typeof item === 'string' ? item.trim() : '')
+        .filter(Boolean)
+      if (errors.length > 0) {
+        return errors.join('; ')
+      }
+    }
+
     const latestError = [...(task.errorLog || [])].reverse()[0]
     return task.errorMessage || latestError?.message || 'Unknown pipeline failure'
   }
 
-  private readFailureReason(task: VideoTask) {
-    const lastPromptFix = [...(task.promptFixes || [])].reverse()[0]
-    return lastPromptFix?.failureReason || this.readErrorMessage(task)
-  }
-
-  private readOptimizedPrompt(task: VideoTask, failedStep: string) {
+  private readOptimizedPrompt(task: VideoTask, failedStep: VideoWorkerStep) {
     const optimizedPrompts = task.metadata?.['optimizedPrompts']
     const value = optimizedPrompts && typeof optimizedPrompts === 'object'
       ? optimizedPrompts[failedStep]
@@ -232,430 +783,86 @@ export class PromptOptimizerService {
     return typeof value === 'string' ? value.trim() : ''
   }
 
-  private readPipelineContext(task: VideoTask): PipelineJobContext | null {
+  private readPipelineContext(task: VideoTask) {
     const pipelineContext = task.metadata?.['pipelineContext']
     return pipelineContext && typeof pipelineContext === 'object'
-      ? pipelineContext as PipelineJobContext
+      ? pipelineContext as VideoWorkerJobData['context']
       : null
   }
 
-  private async requestFailureAnalysis(input: {
-    taskId: string
-    orgId?: string | null
-    failedStep: string
-    originalPrompt: string
-    errorMessage: string
-  }): Promise<FailureAnalysisResult> {
-    const provider = await this.resolveProvider(input.orgId)
-    if (provider === 'deepseek') {
-      const analysis = await this.requestDeepSeekAnalysis(input)
-      if (analysis) {
-        return analysis
-      }
-    }
-
-    if (provider === 'gemini') {
-      const analysis = await this.requestGeminiAnalysis(input)
-      if (analysis) {
-        return analysis
-      }
-    }
-
-    return this.buildHeuristicAnalysis(input)
-  }
-
-  private async requestOptimizedPrompt(analysis: FailureAnalysisResult) {
-    const provider = await this.resolveProvider(analysis.orgId)
-    if (provider === 'deepseek') {
-      const optimizedPrompt = await this.requestDeepSeekOptimizedPrompt(analysis)
-      if (optimizedPrompt) {
-        return optimizedPrompt
-      }
-    }
-
-    if (provider === 'gemini') {
-      const optimizedPrompt = await this.requestGeminiOptimizedPrompt(analysis)
-      if (optimizedPrompt) {
-        return optimizedPrompt
-      }
-    }
-
-    return [
-      analysis.originalPrompt,
-      '',
-      'Optimization guidance:',
-      `- Focus on fixing: ${analysis.failureReason}`,
-      ...analysis.suggestedChanges.map(item => `- ${item}`),
-      '- Keep the output deterministic and structurally valid.',
-    ].join('\n')
-  }
-
-  private async resolveProvider(orgId?: string | null) {
-    const deepseekKey = await this.resolveApiKey(orgId, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
-    if (deepseekKey) {
-      return 'deepseek'
-    }
-
-    const geminiKey = await this.resolveApiKey(orgId, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
-    if (geminiKey) {
-      return 'gemini'
-    }
-
-    return 'heuristic'
-  }
-  private async resolveApiKey(
-    orgId: string | null | undefined,
-    provider: OrgApiKeyProvider,
-    fallbackEnvName: string,
-  ) {
-    if (this.byokService) {
-      const key = await this.byokService.getProviderRuntimeKey(orgId, provider, fallbackEnvName)
-      if (key) {
-        return key
-      }
-    }
-
-    return process.env[fallbackEnvName]?.trim() || ''
-  }
-  private async requestDeepSeekAnalysis(input: {
-    taskId: string
-    orgId?: string | null
-    failedStep: string
-    originalPrompt: string
-    errorMessage: string
-  }) {
-    const apiKey = await this.resolveApiKey(input.orgId, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
-    if (!apiKey) {
-      return null
-    }
-
-    try {
-      const response = await requestJson<DeepSeekResponse>(
-        `${(process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com').replace(/\/+$/, '')}/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || 'deepseek-chat',
-            messages: [
-              { role: 'system', content: 'Return valid JSON only.' },
-              {
-                role: 'user',
-                content: [
-                  'Analyze a MediaClaw pipeline failure and return JSON with fields:',
-                  'failureReason, rootCause, suggestedChanges.',
-                  `taskId: ${input.taskId}`,
-                  `failedStep: ${input.failedStep}`,
-                  `errorMessage: ${input.errorMessage}`,
-                  `originalPrompt: ${input.originalPrompt}`,
-                ].join('\n'),
-              },
-            ],
-            response_format: { type: 'json_object' },
-            temperature: 0.2,
-          }),
-          timeoutMs: 60_000,
-        },
-      )
-
-      const content = response.choices?.[0]?.message?.content
-      return this.normalizeAnalysisPayload(input, this.safeParseJson(content))
-    }
-    catch (error) {
-      this.logger.warn(`Prompt optimizer deepseek analysis failed: ${error instanceof Error ? error.message : String(error)}`)
-      return null
-    }
-  }
-
-  private async requestGeminiAnalysis(input: {
-    taskId: string
-    orgId?: string | null
-    failedStep: string
-    originalPrompt: string
-    errorMessage: string
-  }) {
-    const apiKey = await this.resolveApiKey(input.orgId, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
-    if (!apiKey) {
-      return null
-    }
-
-    try {
-      const model = process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
-      const response = await requestJson<GeminiResponse>(
-        `${(process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    text: [
-                      'Analyze a MediaClaw pipeline failure and return JSON with fields:',
-                      'failureReason, rootCause, suggestedChanges.',
-                      `taskId: ${input.taskId}`,
-                      `failedStep: ${input.failedStep}`,
-                      `errorMessage: ${input.errorMessage}`,
-                      `originalPrompt: ${input.originalPrompt}`,
-                    ].join('\n'),
-                  },
-                ],
-              },
-            ],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.2,
-            },
-          }),
-          timeoutMs: 60_000,
-        },
-      )
-
-      const content = response.candidates?.[0]?.content?.parts?.[0]?.text
-      return this.normalizeAnalysisPayload(input, this.safeParseJson(content))
-    }
-    catch (error) {
-      this.logger.warn(`Prompt optimizer gemini analysis failed: ${error instanceof Error ? error.message : String(error)}`)
-      return null
-    }
-  }
-
-  private async requestDeepSeekOptimizedPrompt(analysis: FailureAnalysisResult) {
-    const apiKey = await this.resolveApiKey(analysis.orgId, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
-    if (!apiKey) {
-      return null
-    }
-
-    try {
-      const response = await requestJson<DeepSeekResponse>(
-        `${(process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com').replace(/\/+$/, '')}/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || 'deepseek-chat',
-            messages: [
-              { role: 'system', content: 'Return plain text only.' },
-              {
-                role: 'user',
-                content: [
-                  'Rewrite the following MediaClaw pipeline prompt so the failed step is more robust.',
-                  `failedStep: ${analysis.failedStep}`,
-                  `failureReason: ${analysis.failureReason}`,
-                  `rootCause: ${analysis.rootCause}`,
-                  `suggestedChanges: ${analysis.suggestedChanges.join('; ')}`,
-                  'originalPrompt:',
-                  analysis.originalPrompt,
-                ].join('\n'),
-              },
-            ],
-            temperature: 0.4,
-          }),
-          timeoutMs: 60_000,
-        },
-      )
-
-      return response.choices?.[0]?.message?.content?.trim() || null
-    }
-    catch (error) {
-      this.logger.warn(`Prompt optimizer deepseek rewrite failed: ${error instanceof Error ? error.message : String(error)}`)
-      return null
-    }
-  }
-
-  private async requestGeminiOptimizedPrompt(analysis: FailureAnalysisResult) {
-    const apiKey = await this.resolveApiKey(analysis.orgId, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
-    if (!apiKey) {
-      return null
-    }
-
-    try {
-      const model = process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
-      const response = await requestJson<GeminiResponse>(
-        `${(process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    text: [
-                      'Rewrite the following MediaClaw pipeline prompt so the failed step is more robust.',
-                      `failedStep: ${analysis.failedStep}`,
-                      `failureReason: ${analysis.failureReason}`,
-                      `rootCause: ${analysis.rootCause}`,
-                      `suggestedChanges: ${analysis.suggestedChanges.join('; ')}`,
-                      'originalPrompt:',
-                      analysis.originalPrompt,
-                    ].join('\n'),
-                  },
-                ],
-              },
-            ],
-            generationConfig: {
-              temperature: 0.4,
-            },
-          }),
-          timeoutMs: 60_000,
-        },
-      )
-
-      return response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null
-    }
-    catch (error) {
-      this.logger.warn(`Prompt optimizer gemini rewrite failed: ${error instanceof Error ? error.message : String(error)}`)
-      return null
-    }
-  }
-
-  private buildHeuristicAnalysis(input: {
-    taskId: string
-    orgId?: string | null
-    failedStep: string
-    originalPrompt: string
-    errorMessage: string
-  }): FailureAnalysisResult {
-    const message = input.errorMessage.toLowerCase()
-    let failureReason = 'Prompt is not robust enough for the downstream provider'
-    let rootCause = 'Prompt constraints are underspecified'
-    const suggestedChanges = [
-      'Add stricter structure and output constraints',
-      'Reduce ambiguity and remove conflicting instructions',
-      'Keep provider-specific requirements explicit',
-    ]
-
-    if (message.includes('timeout')) {
-      failureReason = 'Provider timed out while processing the request'
-      rootCause = 'Prompt or payload is too large or too open-ended'
-      suggestedChanges.unshift('Shorten the prompt and reduce unnecessary context')
-    }
-    else if (message.includes('401') || message.includes('403') || message.includes('unauthorized')) {
-      failureReason = 'Provider credentials are invalid or missing'
-      rootCause = 'Authentication failed before prompt execution'
-      suggestedChanges.unshift('Validate provider credentials before retrying')
-    }
-    else if (message.includes('json') || message.includes('parse')) {
-      failureReason = 'Provider returned an invalid structured response'
-      rootCause = 'Prompt does not constrain the response format enough'
-      suggestedChanges.unshift('Explicitly require a single deterministic response format')
-    }
-
-    return {
-      taskId: input.taskId,
-      orgId: input.orgId || null,
-      failedStep: input.failedStep,
-      originalPrompt: input.originalPrompt,
-      errorMessage: input.errorMessage,
-      failureReason,
-      rootCause,
-      suggestedChanges,
-    }
-  }
-
-  private normalizeAnalysisPayload(
-    input: {
-      taskId: string
-      orgId?: string | null
-      failedStep: string
-      originalPrompt: string
-      errorMessage: string
-    },
-    payload: Record<string, any> | null,
-  ) {
-    if (!payload) {
-      return null
-    }
-
-    const suggestedChanges = Array.isArray(payload['suggestedChanges'])
-      ? payload['suggestedChanges'].map(item => typeof item === 'string' ? item.trim() : '').filter(Boolean)
-      : []
-
-    return {
-      taskId: input.taskId,
-      orgId: input.orgId || null,
-      failedStep: input.failedStep,
-      originalPrompt: input.originalPrompt,
-      errorMessage: input.errorMessage,
-      failureReason: typeof payload['failureReason'] === 'string' && payload['failureReason'].trim()
-        ? payload['failureReason'].trim()
-        : 'Prompt is not robust enough for the downstream provider',
-      rootCause: typeof payload['rootCause'] === 'string' && payload['rootCause'].trim()
-        ? payload['rootCause'].trim()
-        : 'Prompt constraints are underspecified',
-      suggestedChanges: suggestedChanges.length > 0
-        ? suggestedChanges
-        : ['Add stricter structure and output constraints'],
-    }
-  }
-
-  private async persistAnalysis(
-    task: VideoTask,
-    analysis: FailureAnalysisResult,
-    optimized: OptimizedPromptResult,
-  ) {
-    const failedStep = analysis.failedStep
-    const optimizedPrompts = {
-      ...(task.metadata?.['optimizedPrompts'] || {}),
-      [failedStep]: optimized.optimizedPrompt,
-    }
-
-    await this.videoTaskModel.findByIdAndUpdate(task._id, {
-      $set: {
-        'metadata.promptOptimizer.lastAnalysis': analysis,
-        'metadata.optimizedPrompts': optimizedPrompts,
-      },
-      $push: {
-        promptFixes: {
-          originalPrompt: analysis.originalPrompt,
-          optimizedPrompt: optimized.optimizedPrompt,
-          failureReason: analysis.failureReason,
-          retriedAt: null,
-          result: 'analyzed',
-        },
-      },
-    }).exec()
-  }
-
-  private safeParseJson(content?: string) {
-    if (!content?.trim()) {
-      return null
-    }
-
-    try {
-      return JSON.parse(content) as Record<string, any>
-    }
-    catch {
-      return null
-    }
-  }
-
-  private toWorkerStep(step: string): VideoWorkerStep | null {
-    const candidates: VideoWorkerStep[] = [
-      'analyze-source',
-      'edit-frames',
-      'render-video',
-      'quality-check',
-      'generate-copy',
-    ]
-
-    return candidates.includes(step as VideoWorkerStep)
-      ? step as VideoWorkerStep
+  private readLastAnalysis(task: VideoTask) {
+    const analysis = task.metadata?.['promptOptimizer']?.['lastAnalysis']
+    return analysis && typeof analysis === 'object'
+      ? analysis as FailureAnalysisResult
       : null
+  }
+
+  private resolveRetryTargetStep(stage: string, failedStep: string): VideoWorkerStep {
+    const normalizedFailedStep = this.normalizeWorkerStep(failedStep)
+    if (normalizedFailedStep && normalizedFailedStep !== 'quality-check') {
+      return normalizedFailedStep
+    }
+
+    switch (this.toIterationStage(stage)) {
+      case 'frame_edit':
+        return 'edit-frames'
+      case 'copy_generate':
+        return 'generate-copy'
+      case 'subtitle':
+      case 'quality_check':
+      case 'i2v_generate':
+      default:
+        return 'render-video'
+    }
+  }
+
+  private toIterationStage(value?: string): IterationLogStage {
+    switch ((value || '').trim().toLowerCase()) {
+      case 'edit-frames':
+      case 'frame_edit':
+      case 'frame-edit':
+        return 'frame_edit'
+      case 'generate-copy':
+      case 'copy_generate':
+      case 'copy-generate':
+        return 'copy_generate'
+      case 'subtitle':
+        return 'subtitle'
+      case 'quality-check':
+      case 'quality_check':
+      case 'quality-checker':
+        return 'quality_check'
+      case 'render-video':
+      case 'i2v_generate':
+      case 'i2v-generate':
+      default:
+        return 'i2v_generate'
+    }
+  }
+
+  private normalizeWorkerStep(value?: string): VideoWorkerStep | null {
+    switch ((value || '').trim().toLowerCase()) {
+      case 'analyze-source':
+        return 'analyze-source'
+      case 'edit-frames':
+      case 'frame_edit':
+      case 'frame-edit':
+        return 'edit-frames'
+      case 'render-video':
+      case 'i2v_generate':
+      case 'i2v-generate':
+        return 'render-video'
+      case 'generate-copy':
+      case 'copy_generate':
+      case 'copy-generate':
+      case 'subtitle':
+        return 'generate-copy'
+      case 'quality-check':
+      case 'quality_check':
+        return 'quality-check'
+      default:
+        return null
+    }
   }
 
   private mapRetryStatus(step: VideoWorkerStep) {
@@ -672,6 +879,44 @@ export class PromptOptimizerService {
         return VideoTaskStatus.GENERATING_COPY
       default:
         return VideoTaskStatus.PENDING
+    }
+  }
+
+  private isSuccessfulTaskStatus(status?: string) {
+    return [
+      VideoTaskStatus.COMPLETED,
+      VideoTaskStatus.PENDING_REVIEW,
+      VideoTaskStatus.APPROVED,
+      VideoTaskStatus.PUBLISHED,
+    ].includes((status || '') as VideoTaskStatus)
+  }
+
+  private toOptionalObjectId(value?: string | null) {
+    if (!value || !Types.ObjectId.isValid(value)) {
+      return null
+    }
+
+    return new Types.ObjectId(value)
+  }
+
+  private toIterationLogResponse(item: Record<string, any>) {
+    return {
+      id: item['_id']?.toString?.() || null,
+      videoTaskId: item['videoTaskId'],
+      batchId: item['batchId'] || null,
+      iteration: item['iteration'],
+      stage: item['stage'],
+      status: item['status'],
+      originalPrompt: item['originalPrompt'] || '',
+      optimizedPrompt: item['optimizedPrompt'] || '',
+      failureAnalysis: item['failureAnalysis'] || null,
+      qualityScore: item['qualityScore'] || null,
+      costCredits: Number(item['costCredits'] || 0),
+      durationMs: Number(item['durationMs'] || 0),
+      strategyUsed: item['strategyUsed'] || 'default',
+      metadata: item['metadata'] || {},
+      createdAt: item['createdAt'] || null,
+      updatedAt: item['updatedAt'] || null,
     }
   }
 }

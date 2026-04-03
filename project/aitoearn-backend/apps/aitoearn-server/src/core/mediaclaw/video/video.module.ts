@@ -1,5 +1,5 @@
-import { Module } from '@nestjs/common'
-import { MongooseModule } from '@nestjs/mongoose'
+import { Module } from "@nestjs/common";
+import { MongooseModule } from "@nestjs/mongoose";
 import {
   Brand,
   BrandSchema,
@@ -9,14 +9,15 @@ import {
   ProductionBatchSchema,
   VideoTask,
   VideoTaskSchema,
-} from '@yikart/mongodb'
-import { BillingModule } from '../billing/billing.module'
-import { EmployeeDispatchModule } from '../employee-dispatch/employee-dispatch.module'
-import { NotificationModule } from '../notification/notification.module'
-import { UsageModule } from '../usage/usage.module'
-import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
-import { VideoController } from './video.controller'
-import { VideoService } from './video.service'
+} from "@yikart/mongodb";
+import { BillingModule } from "../billing/billing.module";
+import { EmployeeDispatchModule } from "../employee-dispatch/employee-dispatch.module";
+import { NotificationModule } from "../notification/notification.module";
+import { UsageModule } from "../usage/usage.module";
+import { PromptOptimizerModule } from "../prompt-optimizer/prompt-optimizer.module";
+import { VideoWorkerQueueModule } from "../worker/video-worker-queue.module";
+import { VideoController } from "./video.controller";
+import { VideoService } from "./video.service";
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { VideoService } from './video.service'
     UsageModule,
     EmployeeDispatchModule,
     NotificationModule,
+    PromptOptimizerModule,
     VideoWorkerQueueModule,
   ],
   controllers: [VideoController],

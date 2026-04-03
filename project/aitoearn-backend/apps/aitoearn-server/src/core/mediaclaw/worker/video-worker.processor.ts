@@ -6,7 +6,6 @@ import { ContentMgmtService } from '../content-mgmt/content-mgmt.service'
 import { CopyService } from '../copy/copy.service'
 import { DistributionService } from '../distribution/distribution.service'
 import { PipelineService } from '../pipeline/pipeline.service'
-import { PromptOptimizerService } from '../pipeline/prompt-optimizer.service'
 import { VideoService } from '../video/video.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from './worker.constants'
 
@@ -31,8 +30,6 @@ export class VideoWorkerProcessor extends WorkerHost {
     private readonly pipelineService?: PipelineService,
     @Optional()
     private readonly contentMgmtService?: ContentMgmtService,
-    @Optional()
-    private readonly promptOptimizerService?: PromptOptimizerService,
   ) {
     super()
   }
@@ -168,9 +165,6 @@ export class VideoWorkerProcessor extends WorkerHost {
       })
 
       if (attemptsMade >= maxAttempts) {
-        await this.promptOptimizerService?.analyzeFailure(taskId).catch((analysisError) => {
-          this.logger.warn(`Prompt optimizer analyzeFailure failed for ${taskId}: ${analysisError instanceof Error ? analysisError.message : String(analysisError)}`)
-        })
         await this.videoService.updateStatus(taskId, VideoTaskStatus.FAILED, {
           errorMessage: message,
           step,
@@ -179,7 +173,7 @@ export class VideoWorkerProcessor extends WorkerHost {
           },
         })
 
-        if (!this.promptOptimizerService || !context) {
+        if (!context) {
           await this.pipelineService?.cleanupWorkspace(context)
         }
       }

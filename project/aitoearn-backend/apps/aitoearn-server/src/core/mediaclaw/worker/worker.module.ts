@@ -3,6 +3,7 @@ import { ContentMgmtModule } from '../content-mgmt/content-mgmt.module'
 import { CopyModule } from '../copy/copy.module'
 import { DistributionModule } from '../distribution/distribution.module'
 import { PipelineModule } from '../pipeline/pipeline.module'
+import { PromptOptimizerModule } from '../prompt-optimizer/prompt-optimizer.module'
 import { VideoModule } from '../video/video.module'
 import { VideoWorkerQueueModule } from './video-worker-queue.module'
 import { VideoWorkerProcessor } from './video-worker.processor'
@@ -13,6 +14,7 @@ import { VideoWorkerProcessor } from './video-worker.processor'
     CopyModule,
     DistributionModule,
     PipelineModule,
+    PromptOptimizerModule,
     VideoWorkerQueueModule,
     VideoModule,
   ],
