@@ -6,6 +6,7 @@ import { WithTimestampSchema } from './timestamp.schema'
 
 export enum ClawHostInstanceStatus {
   CREATING = 'creating',
+  PENDING_MANUAL_SETUP = 'pending_manual_setup',
   RUNNING = 'running',
   STOPPED = 'stopped',
   ERROR = 'error',

@@ -58,36 +58,22 @@ export class ClawHostService {
       instanceId,
       orgId: orgId.trim(),
       clientName: clientName.trim(),
-      status: ClawHostInstanceStatus.CREATING,
+      status: ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
       config,
       skills: [],
-      healthStatus: {
-        lastCheck: now,
-        isHealthy: false,
-        latency: 0,
-      },
+      healthStatus: this.buildPendingManualHealthStatus(now),
       k8sNamespace,
       k8sPodName,
     })
 
-    await this.stubCreateK8sPod(created.instanceId, created.k8sNamespace, created.k8sPodName)
+    this.logger.warn({
+      message: 'ClawHost instance requires manual setup',
+      instanceId: created.instanceId,
+      namespace: created.k8sNamespace,
+      podName: created.k8sPodName,
+    })
 
-    const running = await this.clawHostInstanceModel.findByIdAndUpdate(
-      created._id,
-      {
-        $set: {
-          status: ClawHostInstanceStatus.RUNNING,
-          healthStatus: this.buildHealthyStatus(now),
-        },
-      },
-      { new: true },
-    ).lean().exec()
-
-    if (!running) {
-      throw new NotFoundException('ClawHost instance not found')
-    }
-
-    return this.toResponse(running)
+    return this.toResponse(created.toObject() as ClawHostInstance)
   }
 
   async stopInstance(orgId: string, instanceId: string) {
@@ -126,8 +112,8 @@ export class ClawHostService {
       existing._id,
       {
         $set: {
-          status: ClawHostInstanceStatus.RUNNING,
-          healthStatus: this.buildHealthyStatus(new Date()),
+          status: ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
+          healthStatus: this.buildPendingManualHealthStatus(new Date()),
         },
       },
       { new: true },
@@ -308,15 +294,11 @@ export class ClawHostService {
   async getInstanceLogs(orgId: string, instanceId: string, lines = 100) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     const normalizedLines = Math.min(Math.max(lines, 1), 500)
-    const now = new Date()
 
     return {
       instanceId: instance.instanceId,
       lines: normalizedLines,
-      logs: Array.from({ length: normalizedLines }, (_, index) => {
-        const lineNumber = normalizedLines - index
-        return `[${now.toISOString()}] [${instance.k8sPodName}] stub log line ${lineNumber}`
-      }),
+      logs: this.buildManualSetupLogs(instance).slice(0, normalizedLines),
     }
   }
 
@@ -384,10 +366,22 @@ export class ClawHostService {
     }
   }
 
+  private buildPendingManualHealthStatus(now: Date): ClawHostHealthStatus {
+    return {
+      lastCheck: now,
+      isHealthy: false,
+      latency: 0,
+    }
+  }
+
   private buildHealthStatus(
     instance: Pick<ClawHostInstance, 'instanceId' | 'k8sPodName' | 'status'>,
     checkedAt: Date = new Date(),
   ): ClawHostHealthStatus {
+    if (instance.status === ClawHostInstanceStatus.PENDING_MANUAL_SETUP) {
+      return this.buildPendingManualHealthStatus(checkedAt)
+    }
+
     const latency = this.deriveLatency(instance.instanceId)
     const isHealthy = Boolean(instance.k8sPodName) && latency < 1_000
 
@@ -454,13 +448,15 @@ export class ClawHostService {
     return Math.min(Math.floor(normalized), 100)
   }
 
-  private async stubCreateK8sPod(instanceId: string, namespace: string, podName: string) {
-    this.logger.log({
-      message: 'Stubbed ClawHost pod creation',
-      instanceId,
-      namespace,
-      podName,
-    })
+  private buildManualSetupLogs(
+    instance: Pick<ClawHostInstance, 'instanceId' | 'k8sNamespace' | 'k8sPodName' | 'config'>,
+  ) {
+    return [
+      `[${new Date().toISOString()}] manual_setup_required instance=${instance.instanceId}`,
+      `[${new Date().toISOString()}] namespace=${instance.k8sNamespace} pod=${instance.k8sPodName}`,
+      `[${new Date().toISOString()}] requested_resources cpu=${instance.config.cpu} memory=${instance.config.memory} storage=${instance.config.storage}`,
+      `[${new Date().toISOString()}] next_step=provision_container_and_attach_runtime`,
+    ]
   }
 
   private toResponse(instance: ClawHostInstance) {
