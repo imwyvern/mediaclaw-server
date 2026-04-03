@@ -9,6 +9,8 @@ import {
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
+import { TikHubPlatform, TikHubService } from '../acquisition/tikhub.service'
+
 interface AnalyticsMetricsInput {
   views?: number
   likes?: number
@@ -34,6 +36,16 @@ interface AnalyticsMetricSet {
 type AnalyticsRecord = Record<string, any>
 type VideoTaskRecord = Record<string, any>
 
+interface ResolvedCollectionMetrics {
+  source: 'tikhub' | 'mediacrawler' | 'unavailable'
+  reason?: string
+  metrics: AnalyticsMetricsInput | null
+  publishPostId: string
+  publishPostUrl: string
+  dataSource?: VideoAnalyticsDataSource
+  raw: Record<string, unknown>
+}
+
 @Injectable()
 export class AnalyticsCollectorService {
   private readonly logger = new Logger(AnalyticsCollectorService.name)
@@ -44,6 +56,7 @@ export class AnalyticsCollectorService {
     private readonly videoTaskModel: Model<VideoTask>,
     @InjectModel(VideoAnalytics.name)
     private readonly videoAnalyticsModel: Model<VideoAnalytics>,
+    private readonly tikHubService: TikHubService,
   ) {}
 
   @Cron('0 3 * * *')
@@ -137,36 +150,39 @@ export class AnalyticsCollectorService {
 
   async collectForVideo(videoTaskId: string) {
     const task = await this.getVideoTaskRecordOrFail(videoTaskId)
-    const publishedAt = this.resolvePublishedAt(task)
-    const daysSincePublish = this.diffDays(publishedAt, new Date())
     const lastSnapshot = await this.videoAnalyticsModel.findOne({ videoTaskId: task['_id'] })
       .sort({ recordedAt: -1 })
       .lean()
       .exec() as AnalyticsRecord | null
-    const stubMetrics = this.generateStubMetrics(task, lastSnapshot, daysSincePublish)
     const platform = this.readPlatform(task) || 'unknown'
+    const collected = await this.resolveCollectionMetrics(task)
+    if (!collected.metrics) {
+      return {
+        source: collected.source,
+        reason: collected.reason || '',
+        videoTaskId: task['_id'].toString(),
+        metrics: null,
+        snapshot: lastSnapshot ? this.toSnapshotResponse(lastSnapshot) : null,
+        raw: collected.raw,
+      }
+    }
 
-    // TODO: Replace this stubbed growth model with TikHub/Mediacrawler collectors.
     const snapshot = await this.recordSnapshot(
       task['_id'].toString(),
       platform,
       {
-        ...stubMetrics,
-        publishPostId: this.readPublishPostId(task),
-        publishPostUrl: this.readPublishPostUrl(task),
-        raw: {
-          stub: true,
-          collector: 'analytics-collector',
-          generatedAt: new Date().toISOString(),
-          baselineMetrics: lastSnapshot ? this.readMetrics(lastSnapshot) : this.readTaskMetrics(task),
-        },
+        ...collected.metrics,
+        publishPostId: collected.publishPostId,
+        publishPostUrl: collected.publishPostUrl,
+        raw: collected.raw,
       },
-      VideoAnalyticsDataSource.TIKHUB,
+      collected.dataSource || VideoAnalyticsDataSource.TIKHUB,
     )
 
     return {
-      source: 'tikhub_stub',
+      source: collected.source,
       videoTaskId: task['_id'].toString(),
+      metrics: this.normalizeMetrics(collected.metrics),
       snapshot,
     }
   }
@@ -211,7 +227,12 @@ export class AnalyticsCollectorService {
       try {
         const result = await this.collectForVideo(task['_id'].toString())
         items.push(result)
-        collected += 1
+        if (result['metrics']) {
+          collected += 1
+        }
+        else {
+          skipped += 1
+        }
       }
       catch (error) {
         failed += 1
@@ -332,7 +353,6 @@ export class AnalyticsCollectorService {
   }
 
   async runDailyCollection() {
-    // TODO: Wire this into BullMQ scheduled jobs once the production scheduler is available.
     const summary = await this.collectForOrg(undefined, this.defaultCollectionWindowDays)
     this.logger.log({
       message: 'Daily analytics collection finished',
@@ -515,51 +535,108 @@ export class AnalyticsCollectorService {
     }
   }
 
-  private generateStubMetrics(
-    task: VideoTaskRecord,
-    lastSnapshot: AnalyticsRecord | null,
-    daysSincePublish: number,
-  ): AnalyticsMetricSet {
-    const baseline = lastSnapshot ? this.readMetrics(lastSnapshot) : this.readTaskMetrics(task)
-    const seedViews = baseline.views > 0
-      ? baseline.views
-      : this.randomInt(600, 1800) + Math.max(daysSincePublish, 0) * this.randomInt(60, 140)
-    const growthMultiplier = daysSincePublish <= 7
-      ? 0.18
-      : daysSincePublish <= 30
-        ? 0.09
-        : 0.04
-    const growthViews = Math.max(25, Math.round(seedViews * growthMultiplier + this.randomInt(18, 120)))
-    const nextViews = seedViews + growthViews
+  private async resolveCollectionMetrics(task: VideoTaskRecord): Promise<ResolvedCollectionMetrics> {
+    const platform = this.toTikHubPlatform(this.readPlatform(task))
+    const publishPostId = this.readPublishPostId(task)
+    const publishPostUrl = this.readPublishPostUrl(task)
 
-    const nextLikes = Math.max(
-      baseline.likes,
-      baseline.likes + Math.max(3, Math.round(growthViews * (0.045 + Math.random() * 0.035))),
-    )
-    const nextComments = Math.max(
-      baseline.comments,
-      baseline.comments + Math.max(1, Math.round(growthViews * (0.008 + Math.random() * 0.01))),
-    )
-    const nextShares = Math.max(
-      baseline.shares,
-      baseline.shares + Math.max(1, Math.round(growthViews * (0.004 + Math.random() * 0.008))),
-    )
-    const nextSaves = Math.max(
-      baseline.saves,
-      baseline.saves + Math.max(1, Math.round(growthViews * (0.006 + Math.random() * 0.01))),
-    )
-    const nextFollowers = Math.max(
-      baseline.followers,
-      baseline.followers + Math.max(0, Math.round(growthViews * (0.001 + Math.random() * 0.003))),
-    )
+    if (!platform) {
+      return this.buildUnavailableCollectionResult('unsupported_platform', publishPostId, publishPostUrl, {
+        platform: this.readPlatform(task),
+      })
+    }
 
+    if (publishPostId) {
+      const detail = await this.tikHubService.getVideoDetail(platform, publishPostId)
+      if (detail.source === 'tikhub' && detail.data) {
+        return {
+          source: 'tikhub',
+          metrics: {
+            ...detail.data.metrics,
+            publishPostId: detail.data.videoId || publishPostId,
+            publishPostUrl: detail.data.contentUrl || publishPostUrl,
+          },
+          publishPostId: detail.data.videoId || publishPostId,
+          publishPostUrl: detail.data.contentUrl || publishPostUrl,
+          dataSource: VideoAnalyticsDataSource.TIKHUB,
+          raw: {
+            collector: 'analytics-collector',
+            request: detail.request,
+            response: detail.data,
+            collectedAt: new Date().toISOString(),
+          },
+        }
+      }
+    }
+
+    if (publishPostId) {
+      const performance = await this.tikHubService.trackPerformance(publishPostId)
+      if (performance.source === 'tikhub' && performance.data) {
+        return {
+          source: 'tikhub',
+          metrics: {
+            ...performance.data.metrics,
+            publishPostId: performance.data.videoId || publishPostId,
+            publishPostUrl: performance.data.contentUrl || publishPostUrl,
+          },
+          publishPostId: performance.data.videoId || publishPostId,
+          publishPostUrl: performance.data.contentUrl || publishPostUrl,
+          dataSource: VideoAnalyticsDataSource.TIKHUB,
+          raw: {
+            collector: 'analytics-collector',
+            response: performance.data,
+            collectedAt: new Date().toISOString(),
+          },
+        }
+      }
+    }
+
+    return this.buildUnavailableCollectionResult(
+      publishPostId ? 'metrics_unavailable' : 'missing_publish_post_id',
+      publishPostId,
+      publishPostUrl,
+      {
+        platform,
+        publishPostId,
+        publishPostUrl,
+      },
+    )
+  }
+
+  private buildUnavailableCollectionResult(
+    reason: string,
+    publishPostId: string,
+    publishPostUrl: string,
+    raw: Record<string, unknown>,
+  ): ResolvedCollectionMetrics {
     return {
-      views: nextViews,
-      likes: nextLikes,
-      comments: nextComments,
-      shares: nextShares,
-      saves: nextSaves,
-      followers: nextFollowers,
+      source: 'unavailable',
+      reason,
+      metrics: null,
+      publishPostId,
+      publishPostUrl,
+      raw: {
+        collector: 'analytics-collector',
+        collectedAt: new Date().toISOString(),
+        ...raw,
+      },
+    }
+  }
+
+  private toTikHubPlatform(platform: string): TikHubPlatform | null {
+    switch (platform.trim().toLowerCase()) {
+      case 'douyin':
+        return 'douyin'
+      case 'xiaohongshu':
+      case 'xhs':
+      case 'rednote':
+        return 'xhs'
+      case 'kuaishou':
+        return 'kuaishou'
+      case 'bilibili':
+        return 'bilibili'
+      default:
+        return null
     }
   }
 
@@ -601,12 +678,6 @@ export class AnalyticsCollectorService {
 
   private daysAgo(days: number) {
     return new Date(Date.now() - Math.max(0, days) * 24 * 60 * 60 * 1000)
-  }
-
-  private randomInt(min: number, max: number) {
-    const normalizedMin = Math.ceil(min)
-    const normalizedMax = Math.floor(max)
-    return Math.floor(Math.random() * (normalizedMax - normalizedMin + 1)) + normalizedMin
   }
 
   private startOfUtcDay(date: Date) {

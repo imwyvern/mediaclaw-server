@@ -7,12 +7,14 @@ import {
   VideoTaskSchema,
 } from '@yikart/mongodb'
 
+import { AcquisitionModule } from '../acquisition/acquisition.module'
 import { AnalyticsCollectorService } from './analytics-collector.service'
 import { AnalyticsController } from './analytics.controller'
 import { AnalyticsService } from './analytics.service'
 
 @Module({
   imports: [
+    AcquisitionModule,
     MongooseModule.forFeature([
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: VideoAnalytics.name, schema: VideoAnalyticsSchema },

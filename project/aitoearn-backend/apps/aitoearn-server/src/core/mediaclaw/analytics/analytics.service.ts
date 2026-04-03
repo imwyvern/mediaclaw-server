@@ -184,7 +184,9 @@ export class AnalyticsService {
     )
 
     return {
-      source: 'tikhub_stub',
+      source: summary['items']?.some((item: Record<string, unknown>) => item['source'] === 'tikhub')
+        ? 'tikhub'
+        : 'unavailable',
       scope: 'organization',
       ...summary,
     }
