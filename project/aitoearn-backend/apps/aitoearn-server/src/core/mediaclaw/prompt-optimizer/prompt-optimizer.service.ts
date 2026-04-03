@@ -1,4 +1,5 @@
 import { InjectQueue } from '@nestjs/bullmq'
+import axios from 'axios'
 import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
@@ -6,12 +7,14 @@ import {
   IterationLog,
   IterationLogStage,
   IterationLogStatus,
+  OrgApiKeyProvider,
   VideoTask,
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import type { PipelineJobContext } from '../pipeline/pipeline.types'
+import { ByokService } from '../settings/byok.service'
 import {
   VIDEO_WORKER_QUEUE,
   VideoWorkerJobData,
@@ -65,6 +68,11 @@ export interface PromptOptimizerFailureResult {
   failureAnalysis: PromptOptimizerFailureAnalysis
 }
 
+interface PromptOptimizationResponse {
+  optimizedPrompt: string
+  strategyUsed: string
+}
+
 @Injectable()
 export class PromptOptimizerLoopService {
   private readonly logger = new Logger(PromptOptimizerLoopService.name)
@@ -77,6 +85,8 @@ export class PromptOptimizerLoopService {
     @InjectQueue(VIDEO_WORKER_QUEUE)
     @Optional()
     private readonly workerQueue?: Queue<VideoWorkerJobData>,
+    @Optional()
+    private readonly byokService?: ByokService,
   ) {}
 
   async analyzeFailure(
@@ -95,11 +105,14 @@ export class PromptOptimizerLoopService {
     const failReason = this.resolveFailureReason(errorMessage, failCategory)
     const suggestedFixes = this.buildSuggestedFixes(stage, failCategory)
     const confidence = this.resolveConfidence(failCategory, qualityScore)
-    const optimizedPrompt = await this.optimizePrompt(originalPrompt, {
+    const optimization = await this.optimizePrompt(originalPrompt, {
       stage,
       failCategory,
       failReason,
       suggestedFixes,
+    }, {
+      orgId: task.orgId?.toString() || null,
+      qualityScore,
     })
 
     return {
@@ -108,7 +121,7 @@ export class PromptOptimizerLoopService {
       iteration: (await this.resolveCurrentIteration(videoTaskId)) + 1,
       stage,
       originalPrompt,
-      optimizedPrompt,
+      optimizedPrompt: optimization.optimizedPrompt,
       failReason,
       failCategory,
       suggestedFixes,
@@ -124,6 +137,39 @@ export class PromptOptimizerLoopService {
   }
 
   async optimizePrompt(
+    originalPrompt: string,
+    failureAnalysis: {
+      stage: IterationLogStage
+      failCategory: IterationFailureCategory
+      failReason: string
+      suggestedFixes: string[]
+    },
+    options: {
+      orgId?: string | null
+      qualityScore?: PromptOptimizerQualityScore | null
+    } = {},
+  ): Promise<PromptOptimizationResponse> {
+    const heuristicPrompt = this.buildHeuristicOptimizedPrompt(originalPrompt, failureAnalysis)
+    const llmOptimizedPrompt = await this.optimizePromptWithLlm(
+      originalPrompt,
+      failureAnalysis,
+      options,
+    )
+
+    if (llmOptimizedPrompt) {
+      return {
+        optimizedPrompt: llmOptimizedPrompt,
+        strategyUsed: 'retry_optimized_llm',
+      }
+    }
+
+    return {
+      optimizedPrompt: heuristicPrompt,
+      strategyUsed: 'retry_optimized',
+    }
+  }
+
+  private buildHeuristicOptimizedPrompt(
     originalPrompt: string,
     failureAnalysis: {
       stage: IterationLogStage
@@ -163,11 +209,48 @@ export class PromptOptimizerLoopService {
       ...guidance.map((item) => `- ${item}`),
       ...failureAnalysis.suggestedFixes.map((item) => `- ${item}`),
       '- Add negative constraints for low-quality, off-topic, or unstable output patterns.',
-      'TODO: replace this heuristic optimizer with an LLM-based prompt refinement flow.',
     ]
       .filter(Boolean)
       .join('\n')
       .trim()
+  }
+
+  private async optimizePromptWithLlm(
+    originalPrompt: string,
+    failureAnalysis: {
+      stage: IterationLogStage
+      failCategory: IterationFailureCategory
+      failReason: string
+      suggestedFixes: string[]
+    },
+    options: {
+      orgId?: string | null
+      qualityScore?: PromptOptimizerQualityScore | null
+    },
+  ) {
+    const provider = await this.resolveOptimizationProvider(options.orgId)
+    if (!provider) {
+      return ''
+    }
+
+    const llmPrompt = this.buildLlmOptimizationPrompt(
+      originalPrompt,
+      failureAnalysis,
+      options.qualityScore || null,
+    )
+
+    try {
+      if (provider.name === 'deepseek') {
+        return await this.requestDeepSeekOptimization(provider.apiKey, llmPrompt)
+      }
+
+      return await this.requestGeminiOptimization(provider.apiKey, llmPrompt)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_prompt_optimizer_llm_error'
+      this.logger.warn(`Prompt optimizer LLM fallback to heuristic: ${message}`)
+      return ''
+    }
   }
 
   async shouldRetry(videoTaskId: string) {
@@ -832,6 +915,179 @@ export class PromptOptimizerLoopService {
       metadata: item['metadata'] || {},
       createdAt: item['createdAt'] || null,
       updatedAt: item['updatedAt'] || null,
+    }
+  }
+
+  private async resolveOptimizationProvider(orgId?: string | null) {
+    const preferredProvider = process.env['MEDIACLAW_PROMPT_OPTIMIZER_PROVIDER']?.trim().toLowerCase()
+    const deepseekKey = await this.resolveApiKey(
+      orgId,
+      OrgApiKeyProvider.DEEPSEEK,
+      ['MEDIACLAW_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'],
+    )
+    const geminiKey = await this.resolveApiKey(
+      orgId,
+      OrgApiKeyProvider.GEMINI,
+      ['MEDIACLAW_GEMINI_API_KEY', 'GEMINI_API_KEY'],
+    )
+
+    if (preferredProvider === 'deepseek' && deepseekKey) {
+      return { name: 'deepseek' as const, apiKey: deepseekKey }
+    }
+    if (preferredProvider === 'gemini' && geminiKey) {
+      return { name: 'gemini' as const, apiKey: geminiKey }
+    }
+    if (deepseekKey) {
+      return { name: 'deepseek' as const, apiKey: deepseekKey }
+    }
+    if (geminiKey) {
+      return { name: 'gemini' as const, apiKey: geminiKey }
+    }
+
+    return null
+  }
+
+  private async resolveApiKey(
+    orgId: string | null | undefined,
+    provider: OrgApiKeyProvider,
+    fallbackEnvNames: readonly string[],
+  ) {
+    if (this.byokService) {
+      const key = await this.byokService.resolveApiKey(orgId, provider, fallbackEnvNames)
+      if (key) {
+        return key
+      }
+    }
+
+    for (const envName of fallbackEnvNames) {
+      const value = process.env[envName]?.trim()
+      if (value) {
+        return value
+      }
+    }
+
+    return ''
+  }
+
+  private buildLlmOptimizationPrompt(
+    originalPrompt: string,
+    failureAnalysis: {
+      stage: IterationLogStage
+      failCategory: IterationFailureCategory
+      failReason: string
+      suggestedFixes: string[]
+    },
+    qualityScore?: PromptOptimizerQualityScore | null,
+  ) {
+    return [
+      '你是 MediaClaw 的视频生成 Prompt 优化器。',
+      '请基于失败原因和质量评分，输出一个更稳定、可执行、可重试的优化后 prompt。',
+      '只返回 JSON，格式必须为 {"optimizedPrompt":"..."}。',
+      '要求：',
+      '1. 保留原始任务意图、品牌约束、平台约束。',
+      '2. 消除歧义，补足失败环节缺失的执行条件、输出要求、负向约束。',
+      '3. 不能只返回修改建议，必须返回完整可直接重试的 prompt。',
+      '4. 不要输出 Markdown，不要解释。',
+      '',
+      `阶段: ${failureAnalysis.stage}`,
+      `失败类别: ${failureAnalysis.failCategory}`,
+      `失败原因: ${failureAnalysis.failReason}`,
+      `建议修复: ${failureAnalysis.suggestedFixes.join('；') || '无'}`,
+      qualityScore
+        ? `质量评分: ${JSON.stringify(qualityScore)}`
+        : '质量评分: 无',
+      '',
+      '原始 prompt:',
+      originalPrompt.trim(),
+    ].join('\n')
+  }
+
+  private async requestDeepSeekOptimization(apiKey: string, prompt: string) {
+    const baseUrl = process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com'
+    const model = process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || 'deepseek-chat'
+    const response = await axios.post(
+      `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
+      {
+        model,
+        messages: [
+          { role: 'system', content: 'Return valid JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60_000,
+      },
+    )
+
+    const content = response.data?.choices?.[0]?.message?.content
+    return this.extractOptimizedPrompt(content)
+  }
+
+  private async requestGeminiOptimization(apiKey: string, prompt: string) {
+    const baseUrl = process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta'
+    const model = process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
+    const response = await axios.post(
+      `${baseUrl.replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
+      {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.2,
+        },
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: 60_000,
+      },
+    )
+
+    const content = response.data?.candidates?.[0]?.content?.parts?.[0]?.text
+    return this.extractOptimizedPrompt(content)
+  }
+
+  private extractOptimizedPrompt(value: unknown) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return ''
+    }
+
+    const parsed = this.parseJsonObject(value)
+    if (parsed) {
+      const optimizedPrompt = parsed['optimizedPrompt']
+      return typeof optimizedPrompt === 'string' ? optimizedPrompt.trim() : ''
+    }
+
+    return value.trim()
+  }
+
+  private parseJsonObject(value: string) {
+    try {
+      return JSON.parse(value) as Record<string, unknown>
+    }
+    catch {
+      const matched = value.match(/\{[\s\S]*\}/)
+      if (!matched) {
+        return null
+      }
+
+      try {
+        return JSON.parse(matched[0]) as Record<string, unknown>
+      }
+      catch {
+        return null
+      }
     }
   }
 }

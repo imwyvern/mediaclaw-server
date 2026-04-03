@@ -6,6 +6,7 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { SettingsModule } from '../settings/settings.module'
 import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { PromptOptimizerController } from './prompt-optimizer.controller'
 import { PromptOptimizerLoopService } from './prompt-optimizer.service'
@@ -16,6 +17,7 @@ import { PromptOptimizerLoopService } from './prompt-optimizer.service'
       { name: IterationLog.name, schema: IterationLogSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
+    SettingsModule,
     VideoWorkerQueueModule,
   ],
   controllers: [PromptOptimizerController],

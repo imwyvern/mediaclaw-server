@@ -197,8 +197,6 @@ export class PromptOptimizerService {
       ...guidance.map(item => `- ${item}`),
       ...failureAnalysis.suggestedFixes.map(item => `- ${item}`),
       '- Use a deterministic output structure and avoid unnecessary filler.',
-      '',
-      'TODO: replace this heuristic prompt patcher with LLM-based optimization.',
     ].filter(Boolean).join('\n')
 
     return optimizedPrompt.trim()
