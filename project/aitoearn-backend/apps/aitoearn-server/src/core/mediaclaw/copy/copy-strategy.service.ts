@@ -49,6 +49,16 @@ interface TopPatternSummary {
   }>
 }
 
+interface CopyStrategyHints {
+  updatedAt: string
+  recommendedTitleLengthRange: string | null
+  recommendedTones: string[]
+  optimalHashtagCount: number
+  blueWordPolicy: 'prefer_blue_words' | 'use_blue_words_selectively'
+  topPatterns: TopPatternSummary[]
+  promptGuidance: string
+}
+
 @Injectable()
 export class CopyStrategyService {
   constructor(
@@ -249,7 +259,7 @@ export class CopyStrategyService {
     const worstBlueWordGroup = insights['blueWordEffectiveness']
       .find((item: Record<string, unknown>) => item['hasBlueWords'] === false)
 
-    const strategyHints = {
+    const strategyHints: CopyStrategyHints = {
       updatedAt: new Date().toISOString(),
       recommendedTitleLengthRange: bestPattern?.titleLengthRange || null,
       recommendedTones: insights['emotionalToneInsights']
@@ -262,7 +272,19 @@ export class CopyStrategyService {
         ? 'prefer_blue_words'
         : 'use_blue_words_selectively',
       topPatterns,
-      note: 'TODO: feed these hints into the copy generation prompt after the loop is validated.',
+      promptGuidance: this.buildPromptGuidance({
+        recommendedTitleLengthRange: bestPattern?.titleLengthRange || null,
+        recommendedTones: insights['emotionalToneInsights']
+          .slice(0, 2)
+          .map((item: Record<string, unknown>) => item['emotionalTone'])
+          .filter((item): item is string => typeof item === 'string'),
+        optimalHashtagCount: insights['optimalHashtagCount'],
+        blueWordPolicy: bestBlueWordGroup && worstBlueWordGroup
+          && Number(bestBlueWordGroup['avgPerformanceScore'] || 0) > Number(worstBlueWordGroup['avgPerformanceScore'] || 0)
+          ? 'prefer_blue_words'
+          : 'use_blue_words_selectively',
+        topPatterns,
+      }),
     }
 
     const updated = await this.organizationModel.findByIdAndUpdate(
@@ -280,6 +302,49 @@ export class CopyStrategyService {
     }
 
     return strategyHints
+  }
+
+  private buildPromptGuidance(input: {
+    recommendedTitleLengthRange: string | null
+    recommendedTones: string[]
+    optimalHashtagCount: number
+    blueWordPolicy: 'prefer_blue_words' | 'use_blue_words_selectively'
+    topPatterns: TopPatternSummary[]
+  }) {
+    const patternLines = input.topPatterns.slice(0, 3).map((pattern, index) => {
+      const examples = pattern.exampleCopies
+        .slice(0, 2)
+        .map(example => example.title)
+        .filter(Boolean)
+        .join(' / ')
+
+      return [
+        `${index + 1}. 标题长度区间: ${pattern.titleLengthRange}`,
+        `情绪语气: ${pattern.emotionalTone}`,
+        `蓝词策略: ${pattern.hasBlueWords ? '明显使用' : '克制使用'}`,
+        `标签数量: ${Number(pattern.avgHashtagCount || 0).toFixed(1)}`,
+        `平均 CTR: ${Number(pattern.avgCtr || 0).toFixed(4)}`,
+        examples ? `参考标题: ${examples}` : '',
+      ].filter(Boolean).join('；')
+    })
+
+    return [
+      input.recommendedTitleLengthRange
+        ? `优先使用 ${input.recommendedTitleLengthRange} 的标题长度。`
+        : '',
+      input.recommendedTones.length > 0
+        ? `优先沿用这些高表现情绪语气: ${input.recommendedTones.join('、')}。`
+        : '',
+      input.optimalHashtagCount > 0
+        ? `hashtags 优先控制在 ${input.optimalHashtagCount} 个左右。`
+        : '',
+      input.blueWordPolicy === 'prefer_blue_words'
+        ? '蓝词应作为主要互动钩子保留在标题或评论引导里。'
+        : '蓝词只在能显著增强互动时使用，避免堆砌。',
+      patternLines.length > 0
+        ? `近期高表现模式:\n${patternLines.join('\n')}`
+        : '',
+    ].filter(Boolean).join('\n')
   }
 
   async getCopyInsights(orgId: string, period = '30d') {

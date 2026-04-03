@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/commo
 import { InjectModel } from '@nestjs/mongoose'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { Brand, CopyHistory, OrgApiKeyProvider, UsageHistoryType } from '@yikart/mongodb'
+import { Brand, CopyHistory, OrgApiKeyProvider, Organization, UsageHistoryType } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { ByokService } from '../settings/byok.service'
 import { UsageService } from '../usage/usage.service'
@@ -90,6 +90,14 @@ interface GeminiResponse {
   }
 }
 
+interface CopyStrategyPromptHints {
+  promptGuidance?: string
+  recommendedTones?: string[]
+  recommendedTitleLengthRange?: string | null
+  optimalHashtagCount?: number
+  blueWordPolicy?: string
+}
+
 @Injectable()
 export class CopyEngineService {
   private readonly logger = new Logger(CopyEngineService.name)
@@ -97,6 +105,7 @@ export class CopyEngineService {
   constructor(
     @InjectModel(Brand.name) private readonly brandModel: Model<Brand>,
     @InjectModel(CopyHistory.name) private readonly copyHistoryModel: Model<CopyHistory>,
+    @InjectModel(Organization.name) private readonly organizationModel: Model<Organization>,
     @Optional() private readonly usageService?: UsageService,
     @Optional() private readonly byokService?: ByokService,
   ) {}
@@ -143,6 +152,9 @@ export class CopyEngineService {
     const historyExamples = resolvedOrgId
       ? await this.getHistoricalExamples(resolvedOrgId)
       : []
+    const strategyHints = resolvedOrgId
+      ? await this.getCopyStrategyHints(resolvedOrgId)
+      : null
 
     const llmResult = await this.generateWithProvider({
       brandName,
@@ -155,6 +167,7 @@ export class CopyEngineService {
         title: match.title,
         subtitle: match.subtitle,
       })),
+      strategyHints,
       metadata,
     })
 
@@ -344,6 +357,7 @@ export class CopyEngineService {
     sourceHint: string
     historyExamples: HistoricalCopyExample[]
     dedupMatches: Array<{ title: string, subtitle: string }>
+    strategyHints: CopyStrategyPromptHints | null
     metadata: Record<string, any>
   }): Promise<CopyLlmResult> {
     const prompt = this.buildPrompt(input)
@@ -405,6 +419,7 @@ export class CopyEngineService {
     sourceHint: string
     historyExamples: HistoricalCopyExample[]
     dedupMatches: Array<{ title: string, subtitle: string }>
+    strategyHints: CopyStrategyPromptHints | null
     metadata: Record<string, any>
   }) {
     const platform = this.readMetadataString(input.metadata, 'platform') || '通用短视频平台'
@@ -423,6 +438,7 @@ export class CopyEngineService {
     const variantHints = avoidTitles.length > 0
       ? avoidTitles.map(item => `- ${item}`).join('\n')
       : '- 暂无已生成标题'
+    const strategyPrompt = this.buildStrategyPrompt(input.strategyHints)
 
     return [
       '你是 MediaClaw 的品牌短视频文案引擎，只能输出 JSON。',
@@ -442,7 +458,65 @@ export class CopyEngineService {
       dedupHints,
       '本次还需避开已生成标题:',
       variantHints,
+      strategyPrompt ? '当前组织已验证的高表现文案策略:' : '',
+      strategyPrompt,
       'hashtags 统一带 # 前缀，blueWords 更适合小红书互动语境。',
+    ].filter(Boolean).join('\n')
+  }
+
+  private async getCopyStrategyHints(orgId: string): Promise<CopyStrategyPromptHints | null> {
+    if (!Types.ObjectId.isValid(orgId)) {
+      return null
+    }
+
+    const organization = await this.organizationModel.findById(
+      new Types.ObjectId(orgId),
+    ).lean().exec() as Record<string, any> | null
+
+    if (!organization) {
+      return null
+    }
+
+    const settings = this.asRecord(organization['settings'])
+    const strategy = this.asRecord(settings?.['copyStrategy'])
+    if (!strategy) {
+      return null
+    }
+
+    return {
+      promptGuidance: this.readString(strategy['promptGuidance']),
+      recommendedTones: this.readStringArray(strategy['recommendedTones']),
+      recommendedTitleLengthRange: this.readString(strategy['recommendedTitleLengthRange']) || null,
+      optimalHashtagCount: Number(strategy['optimalHashtagCount'] || 0),
+      blueWordPolicy: this.readString(strategy['blueWordPolicy']),
+    }
+  }
+
+  private buildStrategyPrompt(strategyHints: CopyStrategyPromptHints | null) {
+    if (!strategyHints) {
+      return ''
+    }
+
+    const promptGuidance = strategyHints.promptGuidance?.trim()
+    if (promptGuidance) {
+      return promptGuidance
+    }
+
+    return [
+      strategyHints.recommendedTitleLengthRange
+        ? `标题长度优先控制在 ${strategyHints.recommendedTitleLengthRange}。`
+        : '',
+      (strategyHints.recommendedTones || []).length > 0
+        ? `优先情绪语气: ${(strategyHints.recommendedTones || []).join('、')}。`
+        : '',
+      strategyHints.optimalHashtagCount
+        ? `hashtags 优先控制在 ${strategyHints.optimalHashtagCount} 个左右。`
+        : '',
+      strategyHints.blueWordPolicy === 'prefer_blue_words'
+        ? '蓝词应作为主要互动引导。'
+        : strategyHints.blueWordPolicy
+          ? '蓝词应克制使用，避免堆砌。'
+          : '',
     ].filter(Boolean).join('\n')
   }
 
@@ -980,6 +1054,28 @@ export class CopyEngineService {
 
     return value
       .map(item => typeof item === 'string' ? item.trim() : '')
+      .filter(Boolean)
+  }
+
+  private asRecord(value: unknown): Record<string, any> | null {
+    if (!value || Array.isArray(value) || typeof value !== 'object') {
+      return null
+    }
+
+    return value as Record<string, any>
+  }
+
+  private readString(value: unknown) {
+    return typeof value === 'string' ? value.trim() : ''
+  }
+
+  private readStringArray(value: unknown) {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return value
+      .map(item => this.readString(item))
       .filter(Boolean)
   }
 
