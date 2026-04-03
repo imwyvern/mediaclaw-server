@@ -8,11 +8,13 @@ import {
   VideoPack,
   VideoPackSchema,
 } from '@yikart/mongodb'
+import { UsageModule } from '../usage/usage.module'
 import { BillingController } from './billing.controller'
 import { BillingService } from './billing.service'
 
 @Module({
   imports: [
+    UsageModule,
     MongooseModule.forFeature([
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: PaymentOrder.name, schema: PaymentOrderSchema },

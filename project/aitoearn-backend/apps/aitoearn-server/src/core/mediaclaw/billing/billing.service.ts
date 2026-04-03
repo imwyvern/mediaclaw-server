@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Invoice, InvoiceStatus, PackStatus, PaymentOrder, VideoPack } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { UsageService } from '../usage/usage.service'
 
 @Injectable()
 export class BillingService {
@@ -11,6 +12,7 @@ export class BillingService {
     @InjectModel(VideoPack.name) private readonly videoPackModel: Model<VideoPack>,
     @InjectModel(PaymentOrder.name) private readonly paymentOrderModel: Model<PaymentOrder>,
     @InjectModel(Invoice.name) private readonly invoiceModel: Model<Invoice>,
+    private readonly usageService: UsageService,
   ) {}
 
   async createTrialPack(userId: string) {
@@ -145,6 +147,26 @@ export class BillingService {
     ])
 
     return { orders, total, page, limit }
+  }
+
+  async getUsageSummary(
+    userId: string,
+    orgId?: string | null,
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const monthStart = new Date()
+    monthStart.setUTCDate(1)
+    monthStart.setUTCHours(0, 0, 0, 0)
+
+    return this.usageService.getUsageSummary(
+      {
+        userId,
+        orgId: orgId || null,
+      },
+      startDate || monthStart,
+      endDate || new Date(),
+    )
   }
 
   async getInvoices(orgId: string, page = 1, limit = 20) {

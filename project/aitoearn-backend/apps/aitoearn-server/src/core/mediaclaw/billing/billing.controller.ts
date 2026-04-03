@@ -8,6 +8,15 @@ import { BillingService } from './billing.service'
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}
 
+  @Get('usage-summary')
+  async getUsageSummary(
+    @GetToken() user: { id: string, orgId?: string | null },
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
+    return this.billingService.getUsageSummary(user.id, user.orgId || null, start, end)
+  }
+
   @Get('balance')
   async getBalance(@GetToken() user: any) {
     return this.billingService.getBalance(user.id)
