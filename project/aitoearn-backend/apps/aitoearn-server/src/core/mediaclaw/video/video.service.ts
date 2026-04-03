@@ -1074,7 +1074,7 @@ export class VideoService {
       return;
     }
 
-    await this.promptOptimizerService.analyzeFailure(
+    const analysis = await this.promptOptimizerService.analyzeFailure(
       task._id.toString(),
       step,
       this.readOptimizerOriginalPrompt(task),
@@ -1085,23 +1085,42 @@ export class VideoService {
         metadata: data?.metadata || {},
       },
     );
-    const retryDecision = await this.promptOptimizerService.shouldRetry(
+    const history = await this.promptOptimizerService.getIterationHistory(
       task._id.toString(),
     );
+    const retryDecision = this.resolveOptimizerRetryDecision(
+      history.length + 1,
+    );
+
+    await this.promptOptimizerService.logIteration(task._id.toString(), step, {
+      status: retryDecision.shouldRetry ? "retried" : "failed",
+      originalPrompt: analysis.originalPrompt,
+      optimizedPrompt: analysis.optimizedPrompt,
+      failureAnalysis: analysis.failureAnalysis,
+      qualityScore: analysis.qualityScore,
+      strategyUsed: retryDecision.strategy,
+      metadata: {
+        source: "video-service",
+        trigger: "quality_check_failed",
+        errorMessage: data?.errorMessage || task.errorMessage || "",
+      },
+    });
 
     if (!retryDecision.shouldRetry) {
       return;
     }
 
     const retryResult =
-      await this.promptOptimizerService.retryWithOptimizedPrompt(
+      await this.promptOptimizerService.queueRetryWithOptimizedPrompt(
         task._id.toString(),
+        step,
+        analysis.optimizedPrompt,
         retryDecision.strategy,
       );
 
-    if (!retryResult.retryQueued) {
+    if (!retryResult.queued) {
       this.logger.warn(
-        `Prompt optimizer retry queue skipped for ${task._id.toString()}: optimized retry was not queued`,
+        `Prompt optimizer retry queue skipped for ${task._id.toString()}: ${retryResult.reason || "unknown reason"}`,
       );
     }
   }
@@ -1202,6 +1221,28 @@ export class VideoService {
         composition,
         viralityHook,
       },
+    };
+  }
+
+
+  private resolveOptimizerRetryDecision(iteration: number) {
+    if (iteration < 2) {
+      return {
+        shouldRetry: true,
+        strategy: "retry_optimized" as const,
+      };
+    }
+
+    if (iteration === 2) {
+      return {
+        shouldRetry: true,
+        strategy: "fallback_strategy" as const,
+      };
+    }
+
+    return {
+      shouldRetry: false,
+      strategy: "needs_manual_review" as const,
     };
   }
 

@@ -11,6 +11,7 @@ import {
 } from '@yikart/mongodb'
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
+import type { PipelineJobContext } from '../pipeline/pipeline.types'
 import {
   VIDEO_WORKER_QUEUE,
   VideoWorkerJobData,
@@ -412,13 +413,13 @@ export class PromptOptimizerLoopService {
     return Number(latest?.iteration || 0)
   }
 
-  private readPipelineContext(task: VideoTask) {
+  private readPipelineContext(task: VideoTask): PipelineJobContext | null {
     const pipelineContext = task.metadata?.['pipelineContext']
     if (!pipelineContext || typeof pipelineContext !== 'object') {
       return null
     }
 
-    return pipelineContext as VideoWorkerJobData['context']
+    return pipelineContext as PipelineJobContext
   }
 
   private readOriginalPrompt(task: VideoTask, stage: IterationLogStage) {
@@ -486,7 +487,8 @@ export class PromptOptimizerLoopService {
       return fromInput
     }
 
-    const qualityRecord = this.extractQualityMetrics(errorOrQualityResult) || this.extractTaskQuality(task)
+    const qualityRecord: Record<string, unknown> | null =
+      this.extractQualityMetrics(errorOrQualityResult) || this.extractTaskQuality(task)
     if (!qualityRecord) {
       return null
     }
@@ -595,7 +597,7 @@ export class PromptOptimizerLoopService {
       return null
     }
 
-    return quality as Record<string, unknown>
+    return quality as unknown as Record<string, unknown>
   }
 
   private resolveFailureCategory(
@@ -743,13 +745,13 @@ export class PromptOptimizerLoopService {
   }
 
   private buildRetryContext(
-    context: VideoWorkerJobData['context'],
+    context: PipelineJobContext,
     retryStep: VideoWorkerStep,
     optimizedPrompt: string,
     strategy: PromptOptimizerRetryStrategy,
-  ) {
+  ): PipelineJobContext {
     const nextPrompts = {
-      ...(context?.prompts || {}),
+      ...(context.prompts || {}),
       [retryStep]: optimizedPrompt,
       'quality-check': `retry_strategy:${strategy}`,
     }
@@ -759,7 +761,7 @@ export class PromptOptimizerLoopService {
     }
 
     return {
-      ...(context || {}),
+      ...context,
       prompts: nextPrompts,
       qualityReport: undefined,
     }
@@ -814,22 +816,22 @@ export class PromptOptimizerLoopService {
 
   private toIterationLogResponse(item: Record<string, any>) {
     return {
-      id: item._id?.toString?.() || null,
-      videoTaskId: item.videoTaskId,
-      batchId: item.batchId || null,
-      iteration: Number(item.iteration || 0),
-      stage: item.stage,
-      status: item.status,
-      originalPrompt: item.originalPrompt || '',
-      optimizedPrompt: item.optimizedPrompt || '',
-      failureAnalysis: item.failureAnalysis || null,
-      qualityScore: item.qualityScore || null,
-      costCredits: Number(item.costCredits || 0),
-      durationMs: Number(item.durationMs || 0),
-      strategyUsed: item.strategyUsed || 'default',
-      metadata: item.metadata || {},
-      createdAt: item.createdAt || null,
-      updatedAt: item.updatedAt || null,
+      id: item['_id']?.toString?.() || null,
+      videoTaskId: item['videoTaskId'],
+      batchId: item['batchId'] || null,
+      iteration: Number(item['iteration'] || 0),
+      stage: item['stage'],
+      status: item['status'],
+      originalPrompt: item['originalPrompt'] || '',
+      optimizedPrompt: item['optimizedPrompt'] || '',
+      failureAnalysis: item['failureAnalysis'] || null,
+      qualityScore: item['qualityScore'] || null,
+      costCredits: Number(item['costCredits'] || 0),
+      durationMs: Number(item['durationMs'] || 0),
+      strategyUsed: item['strategyUsed'] || 'default',
+      metadata: item['metadata'] || {},
+      createdAt: item['createdAt'] || null,
+      updatedAt: item['updatedAt'] || null,
     }
   }
 }
