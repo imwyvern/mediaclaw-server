@@ -57,6 +57,14 @@ interface DistributionTimelineEntry {
   details?: Record<string, unknown>
 }
 
+type DistributionLifecycleStatus = 'pending_assignment' | 'assigned' | 'published' | 'tracked'
+
+interface DistributionStatusQuery {
+  contentId?: string
+  page?: number
+  limit?: number
+}
+
 @Injectable()
 export class DistributionService {
   private readonly logger = new Logger(DistributionService.name)
@@ -304,6 +312,112 @@ export class DistributionService {
     }
 
     return this.toDistributionResponse(updated)
+  }
+
+  async assignByRule(orgId: string, contentId: string) {
+    const task = await this.getTaskOrFail(orgId, contentId)
+    const dispatchResult = this.employeeDispatchService
+      ? await this.employeeDispatchService.dispatchToEmployee(task)
+      : {
+          dispatched: false,
+          reason: 'employee_dispatch_not_configured',
+        }
+
+    const refreshed = await this.videoTaskModel.findById(task._id).lean().exec()
+    return {
+      assignment: dispatchResult,
+      ...(refreshed ? this.toDistributionResponse(refreshed) : this.toDistributionResponse(task.toObject?.() || task as Record<string, any>)),
+    }
+  }
+
+  async confirmPublish(orgId: string, contentId: string, publishUrl: string, platform?: string) {
+    if (!publishUrl?.trim()) {
+      throw new BadRequestException('publishUrl is required')
+    }
+
+    const task = await this.getTaskOrFail(orgId, contentId)
+    const timestamp = new Date().toISOString()
+    const normalizedPlatform = platform?.trim() || ''
+    const confirmation = this.employeeDispatchService
+      ? await this.employeeDispatchService.confirmPublished(orgId, contentId)
+      : {
+          confirmed: false,
+          reason: 'employee_dispatch_not_configured',
+        }
+
+    const updated = await this.videoTaskModel.findByIdAndUpdate(
+      task._id,
+      {
+        $set: {
+          'metadata.publishedAt': timestamp,
+          'metadata.distribution.publishStatus': DistributionPublishStatus.PUBLISHED,
+          'metadata.distribution.publishUrl': publishUrl.trim(),
+          'metadata.distribution.platform': normalizedPlatform,
+          'metadata.distribution.lastStatusAt': timestamp,
+        },
+        $push: {
+          'metadata.distribution.history': {
+            $each: [
+              this.createDistributionHistory(DistributionPublishStatus.PUBLISHED, timestamp, {
+                publishUrl: publishUrl.trim(),
+                platform: normalizedPlatform,
+                confirmation,
+              }),
+            ],
+          },
+        },
+      },
+      { new: true },
+    ).lean().exec()
+
+    if (!updated) {
+      throw new NotFoundException('Content not found')
+    }
+
+    return {
+      confirmation,
+      ...this.toDistributionResponse(updated),
+    }
+  }
+
+  async getDistributionStatus(orgId: string, input: DistributionStatusQuery = {}) {
+    if (input.contentId) {
+      const task = await this.getTaskOrFail(orgId, input.contentId)
+      return {
+        items: [this.toDistributionResponse(task.toObject?.() || task as Record<string, any>)],
+        total: 1,
+        page: 1,
+        limit: 1,
+      }
+    }
+
+    const page = Math.max(1, Math.trunc(Number(input.page) || 1))
+    const limit = Math.max(1, Math.min(Math.trunc(Number(input.limit) || 20), 100))
+    const skip = (page - 1) * limit
+    const query = {
+      orgId: this.toObjectId(orgId, 'orgId'),
+      $or: [
+        { 'metadata.distribution': { $exists: true } },
+        { status: { $in: [VideoTaskStatus.COMPLETED, VideoTaskStatus.APPROVED, VideoTaskStatus.PUBLISHED] } },
+      ],
+    }
+
+    const [items, total] = await Promise.all([
+      this.videoTaskModel.find(query)
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.videoTaskModel.countDocuments(query),
+    ])
+
+    return {
+      items: items.map(item => this.toDistributionResponse(item)),
+      total,
+      page,
+      limit,
+    }
   }
 
   async notifyTaskComplete(task: VideoTask) {
@@ -682,17 +796,46 @@ export class DistributionService {
   private toDistributionResponse(task: Record<string, any>) {
     const metadata = task['metadata'] as Record<string, any> | undefined
     const distribution = metadata?.['distribution'] as Record<string, any> | undefined
+    const publishInfo = metadata?.['publishInfo'] as Record<string, any> | undefined
 
     return {
       contentId: task['_id']?.toString(),
       orgId: task['orgId']?.toString() || null,
+      distributionStatus: this.resolveLifecycleStatus(task),
       publishStatus: this.resolvePublishStatus(task),
+      employeeDispatch: distribution?.['employeeDispatch'] || null,
+      publishUrl: distribution?.['publishUrl'] || publishInfo?.['publishUrl'] || null,
+      platform: distribution?.['platform'] || publishInfo?.['platform'] || null,
       targets: distribution?.['targets'] || [],
       feedback: distribution?.['feedback'] || [],
       history: distribution?.['history'] || [],
       lastDistributedAt: distribution?.['lastDistributedAt'] || null,
       lastStatusAt: distribution?.['lastStatusAt'] || null,
     }
+  }
+
+  private resolveLifecycleStatus(task: Record<string, any> | VideoTask): DistributionLifecycleStatus {
+    const distribution = task.metadata?.distribution as Record<string, any> | undefined
+    const feedback = Array.isArray(distribution?.['feedback']) ? distribution?.['feedback'] : []
+
+    if (feedback.length > 0 || distribution?.['publishStatus'] === DistributionPublishStatus.EXPIRED) {
+      return 'tracked'
+    }
+
+    if (this.resolvePublishStatus(task) === DistributionPublishStatus.PUBLISHED) {
+      return 'published'
+    }
+
+    const employeeDispatch = distribution?.['employeeDispatch'] as Record<string, any> | undefined
+    if (
+      employeeDispatch?.['assignmentId']
+      || (Array.isArray(distribution?.['targets']) && distribution?.['targets'].length > 0)
+      || distribution?.['publishStatus'] === DistributionPublishStatus.PUSHED
+    ) {
+      return 'assigned'
+    }
+
+    return 'pending_assignment'
   }
 
   private toObjectId(value: string, field: string) {

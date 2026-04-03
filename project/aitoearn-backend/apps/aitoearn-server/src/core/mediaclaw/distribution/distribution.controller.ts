@@ -1,5 +1,5 @@
 import type { DistributionRulePayload, DistributionTargetInput } from './distribution.service'
-import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
+import { Body, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { DistributionRuleType } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
@@ -12,6 +12,41 @@ export class DistributionController {
     private readonly distributionService: DistributionService,
     private readonly employeeDispatchService: EmployeeDispatchService,
   ) {}
+
+  @Post('assign')
+  async assignByRule(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: { contentId: string },
+  ) {
+    return this.distributionService.assignByRule(user.orgId || user.id || '', body.contentId)
+  }
+
+  @Post('publish-confirm')
+  async publishConfirm(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: { contentId: string, publishUrl: string, platform?: string },
+  ) {
+    return this.distributionService.confirmPublish(
+      user.orgId || user.id || '',
+      body.contentId,
+      body.publishUrl,
+      body.platform,
+    )
+  }
+
+  @Get('status')
+  async getStatus(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Query('contentId') contentId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.distributionService.getDistributionStatus(user.orgId || user.id || '', {
+      contentId,
+      page: page ? Number.parseInt(page, 10) : 1,
+      limit: limit ? Number.parseInt(limit, 10) : 20,
+    })
+  }
 
   @Post()
   async createRule(
