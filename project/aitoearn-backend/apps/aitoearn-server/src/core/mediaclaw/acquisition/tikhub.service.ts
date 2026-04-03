@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 
 const SUPPORTED_TIKHUB_PLATFORMS = ['douyin', 'xhs', 'kuaishou', 'bilibili'] as const
 
@@ -64,6 +64,7 @@ interface PlatformContract {
 
 @Injectable()
 export class TikHubService {
+  private readonly logger = new Logger(TikHubService.name)
   private readonly defaultBaseUrl = 'https://api.tikhub.io'
   private readonly requestTimeoutMs = 5000
   private readonly maxAttempts = 2
@@ -396,7 +397,9 @@ export class TikHubService {
       catch (error) {
         lastError = error instanceof Error ? error : new Error('Unknown TikHub request error')
         if (attempt < this.maxAttempts) {
-          console.warn(`[TikHubService] request retry ${attempt}/${this.maxAttempts - 1} failed: ${lastError.message}`)
+          this.logger.warn(
+            `Request retry ${attempt}/${this.maxAttempts - 1} failed: ${lastError.message}`,
+          )
         }
       }
     }
@@ -1074,7 +1077,7 @@ export class TikHubService {
   }
 
   private warnUnavailable(method: string) {
-    console.warn(`[TikHubService] ${method} unavailable because TIKHUB_API_KEY is not configured.`)
+    this.logger.warn(`${method} unavailable because TIKHUB_API_KEY is not configured.`)
   }
 
   private addDays(days: number): string {

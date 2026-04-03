@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto'
 import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { InjectModel } from '@nestjs/mongoose'
@@ -453,23 +454,16 @@ export class McAuthService {
   }
 
   private generateOtpCode() {
-    return Math.floor(100000 + Math.random() * 900000).toString()
+    return randomInt(100000, 1000000).toString()
   }
 
   private logConsoleSmsOtp(phone: string, code: string, expiresAt: number) {
     const expiresAtIso = new Date(expiresAt).toISOString()
-    const logPayload = {
-      type: 'sms.otp.console',
-      channel: 'mediaclaw',
-      mode: 'console',
-      phone,
-      code,
-      expiresAt: expiresAtIso,
-    }
-
-    console.log(JSON.stringify(logPayload))
-    console.log(`[MEDIACLAW_TEMP_SMS_OTP] phone=${phone} code=${code} expiresAt=${expiresAtIso}`)
-    this.logger.warn(`TEMP SMS OTP for manual testing: phone=${phone} code=${code} expiresAt=${expiresAtIso}`)
+    const maskedPhone = this.maskPhone(phone)
+    const sanitizedCode = `${code.slice(0, 2)}****`
+    this.logger.warn(
+      `Console SMS mode enabled for ${maskedPhone}; otp=${sanitizedCode}; expiresAt=${expiresAtIso}`,
+    )
   }
 
   private async deliverSmsCode(phone: string, code: string, expiresAt: number) {
@@ -496,6 +490,10 @@ export class McAuthService {
     const legacyConsoleAlias = String.fromCharCode(109, 111, 99, 107)
     if (smsMode === 'console' || smsMode === 'manual' || smsMode === legacyConsoleAlias) {
       return true
+    }
+
+    if (process.env['NODE_ENV'] === 'production') {
+      return false
     }
 
     return !process.env['ALI_SMS_ACCESS_KEY_ID']?.trim()
