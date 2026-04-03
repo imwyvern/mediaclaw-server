@@ -4,7 +4,7 @@ import { OrgApiKeyProvider } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { ByokService } from './byok.service'
 
-@MediaClawApiController('api/v1/settings/api-keys')
+@MediaClawApiController(['api/v1/settings/api-keys', 'api/v1/settings/apikeys'])
 export class SettingsController {
   constructor(private readonly byokService: ByokService) {}
 

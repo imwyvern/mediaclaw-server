@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import { OrgApiKeyProvider, Organization } from '@yikart/mongodb'
 import axios from 'axios'
 import { Model, Types } from 'mongoose'
+import { MediaclawConfigService } from '../mediaclaw-config.service'
 import { getRequiredEnv } from '../mediaclaw-env.util'
 
 interface AddApiKeyInput {
@@ -23,6 +24,7 @@ export class ByokService {
   constructor(
     @InjectModel(Organization.name)
     private readonly organizationModel: Model<Organization>,
+    private readonly configService: MediaclawConfigService,
   ) {}
 
   async addKey(orgId: string, input: AddApiKeyInput) {
@@ -120,7 +122,7 @@ export class ByokService {
   async getProviderRuntimeKey(
     orgId: string | null | undefined,
     provider: OrgApiKeyProvider,
-    fallbackEnvName?: string,
+    fallbackEnvName?: string | readonly string[],
   ) {
     if (orgId && Types.ObjectId.isValid(orgId)) {
       try {
@@ -134,7 +136,7 @@ export class ByokService {
       }
     }
 
-    return fallbackEnvName ? process.env[fallbackEnvName]?.trim() || '' : ''
+    return fallbackEnvName ? this.configService.getString(fallbackEnvName, '') : ''
   }
 
   async getDecryptedKey(orgId: string, provider: OrgApiKeyProvider) {
@@ -220,8 +222,14 @@ export class ByokService {
   }
 
   private async validateDeepSeek(apiKey: string): Promise<ValidationResult> {
-    const baseUrl = process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com'
-    const model = process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || 'deepseek-chat'
+    const baseUrl = this.configService.getString(
+      ['MEDIACLAW_DEEPSEEK_BASE_URL', 'DEEPSEEK_BASE_URL'],
+      'https://api.deepseek.com',
+    )
+    const model = this.configService.getString(
+      ['MEDIACLAW_DEEPSEEK_MODEL', 'DEEPSEEK_MODEL'],
+      'deepseek-chat',
+    )
 
     await axios.post(
       `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
@@ -248,8 +256,14 @@ export class ByokService {
   }
 
   private async validateGemini(apiKey: string): Promise<ValidationResult> {
-    const baseUrl = process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta'
-    const model = process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
+    const baseUrl = this.configService.getString(
+      ['MEDIACLAW_GEMINI_BASE_URL', 'GEMINI_BASE_URL'],
+      'https://generativelanguage.googleapis.com/v1beta',
+    )
+    const model = this.configService.getString(
+      ['MEDIACLAW_GEMINI_MODEL', 'GEMINI_MODEL'],
+      'gemini-2.5-flash',
+    )
 
     await axios.post(
       `${baseUrl.replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
@@ -337,10 +351,10 @@ export class ByokService {
 
   private maskKey(apiKey: string) {
     const trimmed = apiKey.trim()
-    if (trimmed.length <= 8) {
-      return `${trimmed.slice(0, 2)}***`
+    if (!trimmed) {
+      return '****'
     }
 
-    return `${trimmed.slice(0, 4)}***${trimmed.slice(-4)}`
+    return `****${trimmed.slice(-4)}`
   }
 }
