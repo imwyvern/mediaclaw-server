@@ -428,7 +428,7 @@ export class CopyStrategyService {
   private extractCopyFeatures(copyHistory: CopyHistory): CopyFeatureSnapshot {
     const title = copyHistory.title?.trim() || ''
     const subtitle = copyHistory.subtitle?.trim() || ''
-    const blueWords = (copyHistory.blueWords || []).map(item => item.trim()).filter(Boolean)
+    const blueWords = (copyHistory.blueWords || []).map((item: string) => item.trim()).filter(Boolean)
     const embeddedBlueWords = title.match(/#[^\s#]+/g) || []
     const uniqueBlueWords = [...new Set([...blueWords, ...embeddedBlueWords])]
     const commentGuide = copyHistory.commentGuide?.trim() || ''

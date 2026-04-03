@@ -242,7 +242,7 @@ export class CopyEngineService {
       draft: llmResult.draft,
       brandName: 'MediaClaw',
       scene: instructions?.trim() || '文案改写',
-      toneKeywords: (copyHistory.blueWords || []).map(item => item.replace(/^#+/, '')).filter(Boolean),
+      toneKeywords: (copyHistory.blueWords || []).map((item: string) => item.replace(/^#+/, '')).filter(Boolean),
       avoidKeywords: [],
       dedupDuplicate: false,
     })
