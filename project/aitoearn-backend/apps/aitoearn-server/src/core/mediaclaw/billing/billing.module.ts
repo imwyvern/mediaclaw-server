@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
+  Invoice,
+  InvoiceSchema,
   PaymentOrder,
   PaymentOrderSchema,
   VideoPack,
@@ -14,6 +16,7 @@ import { BillingService } from './billing.service'
     MongooseModule.forFeature([
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: PaymentOrder.name, schema: PaymentOrderSchema },
+      { name: Invoice.name, schema: InvoiceSchema },
     ]),
   ],
   controllers: [BillingController],

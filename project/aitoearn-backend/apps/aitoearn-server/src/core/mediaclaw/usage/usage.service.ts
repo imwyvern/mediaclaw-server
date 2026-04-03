@@ -516,17 +516,139 @@ export class UsageService {
       },
       packs: visiblePacks.map(pack => ({
         id: pack._id.toString(),
-        packType: pack.packType,
+        packType: pack['packType'],
         status: pack.status,
         totalCredits: pack.totalCredits,
         remainingCredits: pack.remainingCredits,
         usedCredits: Math.max(pack.totalCredits - pack.remainingCredits, 0),
-        purchasedAt: pack.purchasedAt,
-        expiresAt: pack.expiresAt,
+        purchasedAt: pack['purchasedAt'],
+        expiresAt: pack['expiresAt'],
         expired: this.isPackExpired(pack),
         paymentOrderId: pack.paymentOrderId,
       })),
       currentPeriod,
+    }
+  }
+
+  async getPackBalanceSummary(scope: UsageScopeInput) {
+    const monthRange = this.getCurrentMonthRange()
+    const packs = await this.videoPackModel.find(this.buildPackScopeQuery(scope))
+      .sort({ purchasedAt: 1, _id: 1 })
+      .lean()
+      .exec()
+
+    const visiblePacks = packs.filter(pack => pack.status !== PackStatus.REFUNDED)
+    const activePacks = visiblePacks.filter(pack => !this.isPackExpired(pack))
+    const summary = activePacks.reduce((acc, pack) => {
+      acc.totalCredits += this.normalizeNumber(pack.totalCredits)
+      acc.remainingCredits += this.normalizeNumber(pack.remainingCredits)
+      acc.usedCredits += Math.max(
+        this.normalizeNumber(pack.totalCredits) - this.normalizeNumber(pack.remainingCredits),
+        0,
+      )
+      return acc
+    }, {
+      packCount: activePacks.length,
+      totalCredits: 0,
+      remainingCredits: 0,
+      usedCredits: 0,
+      expiredPackCount: visiblePacks.filter(pack => this.isPackExpired(pack)).length,
+    })
+
+    return {
+      scope: this.serializeScope(scope),
+      period: this.serializePeriod(monthRange.start, monthRange.end),
+      summary,
+      packs: visiblePacks.map(pack => ({
+        id: pack._id.toString(),
+        packType: pack['packType'],
+        status: pack.status,
+        totalCredits: this.normalizeNumber(pack.totalCredits),
+        remainingCredits: this.normalizeNumber(pack.remainingCredits),
+        usedCredits: Math.max(
+          this.normalizeNumber(pack.totalCredits) - this.normalizeNumber(pack.remainingCredits),
+          0,
+        ),
+        priceCents: this.normalizeNumber(pack.priceCents),
+        purchasedAt: pack['purchasedAt'],
+        expiresAt: pack['expiresAt'],
+        expired: this.isPackExpired(pack),
+        paymentOrderId: pack.paymentOrderId || '',
+      })),
+    }
+  }
+
+  async getChargeHistory(scope: UsageScopeInput, input: UsageDetailInput = {}) {
+    const page = this.normalizePage(input.page)
+    const limit = this.normalizeLimit(input.limit)
+    const skip = (page - 1) * limit
+    const query = {
+      ...this.buildHistoryScopeQuery(scope),
+      type: {
+        $in: [UsageHistoryType.VIDEO_CHARGE, UsageHistoryType.VIDEO_REFUND],
+      },
+    }
+
+    const [items, total] = await Promise.all([
+      this.usageHistoryModel.find(query)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.usageHistoryModel.countDocuments(query),
+    ])
+
+    const { taskBrandMap, brandNameMap } = await this.loadBrandContext(items)
+    const packIds = [...new Set(
+      items
+        .map(item => item.packId?.toString?.() || null)
+        .filter((value): value is string => Boolean(value && Types.ObjectId.isValid(value))),
+    )]
+    const packMap = new Map<string, Record<string, any>>()
+
+    if (packIds.length > 0) {
+      const packs = await this.videoPackModel.find({
+        _id: { $in: packIds.map(id => new Types.ObjectId(id)) },
+      })
+        .select({ _id: 1, packType: 1, purchasedAt: 1, expiresAt: 1 })
+        .lean()
+        .exec()
+
+      for (const pack of packs) {
+        packMap.set(pack._id.toString(), pack)
+      }
+    }
+
+    return {
+      scope: this.serializeScope(scope),
+      page,
+      limit,
+      total,
+      items: items.map(item => {
+        const brandId = this.resolveHistoryBrandId(item, taskBrandMap)
+        const packId = item.packId?.toString?.() || null
+        const pack = packId ? packMap.get(packId) : null
+        const isRefund = item.type === UsageHistoryType.VIDEO_REFUND
+        const credits = this.normalizeNumber(item.creditsConsumed)
+
+        return {
+          id: item._id.toString(),
+          userId: item.userId?.toString?.() || null,
+          orgId: item.orgId?.toString?.() || null,
+          videoTaskId: item.videoTaskId?.toString?.() || null,
+          type: item.type,
+          creditsConsumed: isRefund ? -credits : credits,
+          packId,
+          packType: pack?.['packType'] || null,
+          brandId,
+          brandName: brandId ? brandNameMap.get(brandId) || null : null,
+          purchasedAt: pack?.['purchasedAt'] || null,
+          expiresAt: pack?.['expiresAt'] || null,
+          metadata: item.metadata || {},
+          createdAt: item.createdAt,
+        }
+      }),
     }
   }
 
@@ -1126,7 +1248,7 @@ export class UsageService {
   }
 
   private resolvePackStatus(pack: VideoPack | Record<string, any>) {
-    if (pack.expiresAt && new Date(pack.expiresAt).getTime() <= Date.now()) {
+    if (pack['expiresAt'] && new Date(pack['expiresAt']).getTime() <= Date.now()) {
       return PackStatus.EXPIRED
     }
 
@@ -1136,11 +1258,11 @@ export class UsageService {
   }
 
   private isPackExpired(pack: Pick<VideoPack, 'expiresAt'> | Record<string, any>) {
-    if (!pack.expiresAt) {
+    if (!pack['expiresAt']) {
       return false
     }
 
-    return new Date(pack.expiresAt).getTime() <= Date.now()
+    return new Date(pack['expiresAt']).getTime() <= Date.now()
   }
 
   private async findExistingVideoCharge(videoTaskId: string) {

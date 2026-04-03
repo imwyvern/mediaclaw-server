@@ -19,6 +19,32 @@ export class UsageApiController {
     })
   }
 
+  @Get('summary')
+  async packSummary(@GetToken() user: any) {
+    return this.usageService.getPackBalanceSummary({
+      userId: user.id,
+      orgId: user.orgId || null,
+    })
+  }
+
+  @Get('history')
+  async history(
+    @GetToken() user: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.usageService.getChargeHistory(
+      {
+        userId: user.id,
+        orgId: user.orgId || null,
+      },
+      {
+        page: page ? Number.parseInt(page, 10) : 1,
+        limit: limit ? Number.parseInt(limit, 10) : 20,
+      },
+    )
+  }
+
   @Get('quota')
   async quota(@GetToken() user: any) {
     return this.usageService.getQuotaStatus(user.orgId || user.id)
