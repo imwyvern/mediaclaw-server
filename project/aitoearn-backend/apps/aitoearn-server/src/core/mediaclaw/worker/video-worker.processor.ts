@@ -6,6 +6,8 @@ import { ContentMgmtService } from '../content-mgmt/content-mgmt.service'
 import { CopyService } from '../copy/copy.service'
 import { DistributionService } from '../distribution/distribution.service'
 import { PipelineService } from '../pipeline/pipeline.service'
+import type { PipelineJobContext } from '../pipeline/pipeline.types'
+import { PromptOptimizerLoopService } from '../prompt-optimizer/prompt-optimizer.service'
 import { VideoService } from '../video/video.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from './worker.constants'
 
@@ -30,6 +32,8 @@ export class VideoWorkerProcessor extends WorkerHost {
     private readonly pipelineService?: PipelineService,
     @Optional()
     private readonly contentMgmtService?: ContentMgmtService,
+    @Optional()
+    private readonly promptOptimizerService?: PromptOptimizerLoopService,
   ) {
     super()
   }
@@ -165,16 +169,27 @@ export class VideoWorkerProcessor extends WorkerHost {
       })
 
       if (attemptsMade >= maxAttempts) {
-        await this.videoService.updateStatus(taskId, VideoTaskStatus.FAILED, {
-          errorMessage: message,
-          step,
-          metadata: {
-            failedStep: step,
-          },
-        })
+        const handledByPromptOptimizer = step === 'quality-check'
+          ? await this.handleQualityCheckFailure(taskId, context, message).catch((optimizerError) => {
+              this.logger.warn(
+                `Prompt optimizer worker handling failed for ${taskId}: ${optimizerError instanceof Error ? optimizerError.message : String(optimizerError)}`,
+              )
+              return false
+            })
+          : false
 
-        if (!context) {
-          await this.pipelineService?.cleanupWorkspace(context)
+        if (!handledByPromptOptimizer) {
+          await this.videoService.updateStatus(taskId, VideoTaskStatus.FAILED, {
+            errorMessage: message,
+            step,
+            metadata: {
+              failedStep: step,
+            },
+          })
+
+          if (!context) {
+            await this.pipelineService?.cleanupWorkspace(context)
+          }
         }
       }
 
@@ -252,5 +267,130 @@ export class VideoWorkerProcessor extends WorkerHost {
     }
 
     return JSON.parse(JSON.stringify(context))
+  }
+
+  private async handleQualityCheckFailure(
+    taskId: string,
+    context: VideoWorkerJobData['context'],
+    errorMessage: string,
+  ) {
+    if (!this.promptOptimizerService || !context) {
+      return false
+    }
+
+    const originalPrompt = this.resolveOriginalPrompt(context)
+    const analysis = await this.promptOptimizerService.analyzeFailure(
+      taskId,
+      'quality_check',
+      originalPrompt,
+      { message: errorMessage },
+    )
+
+    await this.promptOptimizerService.logIteration(taskId, 'quality_check', {
+      status: 'failed',
+      originalPrompt,
+      optimizedPrompt: analysis.optimizedPrompt,
+      failureAnalysis: analysis.failureAnalysis,
+      qualityScore: analysis.qualityScore,
+      strategyUsed: 'default',
+      metadata: {
+        source: 'video-worker',
+        workerStep: 'quality-check',
+        errorMessage,
+      },
+    })
+
+    const retryDecision = await this.promptOptimizerService.shouldRetry(taskId)
+    if (!retryDecision.shouldRetry) {
+      await this.videoService.updateStatus(taskId, VideoTaskStatus.FAILED, {
+        errorMessage,
+        step: 'quality-check',
+        metadata: {
+          failedStep: 'quality-check',
+          promptOptimizerHandled: true,
+          retryStrategy: retryDecision.strategy,
+        },
+      })
+      return true
+    }
+
+    const retryStep: VideoWorkerStep = retryDecision.strategy === 'fallback_strategy'
+      ? 'edit-frames'
+      : 'render-video'
+    const retryContext = this.buildRetryContext(
+      context,
+      retryStep,
+      analysis.optimizedPrompt,
+      retryDecision.strategy,
+    )
+
+    await this.videoService.appendPromptFix(taskId, {
+      originalPrompt,
+      optimizedPrompt: analysis.optimizedPrompt,
+      failureReason: analysis.failReason,
+      retriedAt: new Date(),
+      result: retryDecision.strategy,
+    })
+    await this.videoService.updateTaskMetadata(taskId, {
+      pipelineContext: this.serializeContext(retryContext),
+      failedStep: null,
+      retryStrategy: retryDecision.strategy,
+      retrySource: 'prompt-optimizer-worker',
+    })
+    await this.videoService.updateStatus(taskId, VideoTaskStatus.PENDING, {
+      step: retryStep,
+      errorMessage: '',
+      metadata: {
+        failedStep: null,
+        retryStrategy: retryDecision.strategy,
+        promptOptimizerHandled: true,
+      },
+    })
+    await this.workerQueue.add(
+      retryStep,
+      {
+        taskId,
+        context: retryContext,
+      },
+      {
+        jobId: `${taskId}:${retryStep}:prompt-optimizer:${Date.now()}`,
+      },
+    )
+
+    return true
+  }
+
+  private resolveOriginalPrompt(context: VideoWorkerJobData['context']) {
+    if (!context) {
+      return 'Improve visual quality, pacing, subtitle alignment, and brand consistency while preserving the source intent.'
+    }
+
+    return context.prompts['render-video']
+      || context.prompts['edit-frames']
+      || context.prompts['generate-copy']
+      || 'Improve visual quality, pacing, subtitle alignment, and brand consistency while preserving the source intent.'
+  }
+
+  private buildRetryContext(
+    context: PipelineJobContext,
+    retryStep: VideoWorkerStep,
+    optimizedPrompt: string,
+    strategy: 'retry_optimized' | 'fallback_strategy' | 'needs_manual_review',
+  ): PipelineJobContext {
+    const nextPrompts = {
+      ...(context?.prompts || {}),
+      [retryStep]: optimizedPrompt,
+      'quality-check': `retry_strategy:${strategy}`,
+    }
+
+    if (retryStep === 'edit-frames') {
+      nextPrompts['render-video'] = optimizedPrompt
+    }
+
+    return {
+      ...context,
+      prompts: nextPrompts,
+      qualityReport: undefined,
+    }
   }
 }
