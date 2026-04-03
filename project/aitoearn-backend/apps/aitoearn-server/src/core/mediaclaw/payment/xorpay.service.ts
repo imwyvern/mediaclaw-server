@@ -51,7 +51,6 @@ interface NormalizedGatewayResponse {
   raw: Record<string, any> | null
   payUrl: string | null
   tradeNo: string | null
-  mock: boolean
 }
 
 interface PaymentOrderAccessUser {
@@ -123,7 +122,6 @@ export class XorPayService {
       const callbackData = {
         ...this.toPlainObject(order.callbackData),
         createResponse: gateway.raw,
-        gatewayMocked: gateway.mock,
         tradeNo: gateway.tradeNo,
         payUrl: gateway.payUrl,
       }
@@ -307,15 +305,7 @@ export class XorPayService {
   ): Promise<NormalizedGatewayResponse> {
     const apiUrl = process.env['XORPAY_API_URL'] || process.env['XORPAY_CREATE_ORDER_URL']
     if (!apiUrl) {
-      return {
-        raw: {
-          mocked: true,
-          orderId: order.orderId,
-        },
-        payUrl: `xorpay://mock/${order.orderId}`,
-        tradeNo: order.orderId,
-        mock: true,
-      }
+      throw new BadRequestException('XorPay create-order endpoint is not configured')
     }
 
     const payload = {
@@ -346,11 +336,15 @@ export class XorPayService {
       },
     })
 
+    const payUrl = response.data?.pay_url || response.data?.payUrl || response.data?.code_url || null
+    if (!payUrl) {
+      throw new BadRequestException('XorPay response missing pay URL')
+    }
+
     return {
       raw: response.data || null,
-      payUrl: response.data?.pay_url || response.data?.payUrl || response.data?.code_url || null,
+      payUrl,
       tradeNo: response.data?.trade_no || response.data?.tradeNo || null,
-      mock: false,
     }
   }
 
@@ -539,7 +533,6 @@ export class XorPayService {
     const callbackBody = this.toPlainObject(data['callbackBody'] as Record<string, any> | undefined)
 
     return {
-      gatewayMocked: Boolean(data['gatewayMocked']),
       payUrl: typeof data['payUrl'] === 'string' ? data['payUrl'] : null,
       tradeNo: typeof data['tradeNo'] === 'string' ? data['tradeNo'] : null,
       createError: typeof data['createError'] === 'string' ? data['createError'] : null,

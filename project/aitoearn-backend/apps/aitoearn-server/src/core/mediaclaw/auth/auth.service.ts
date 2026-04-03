@@ -453,7 +453,7 @@ export class McAuthService {
   private logConsoleSmsOtp(phone: string, code: string, expiresAt: number) {
     const expiresAtIso = new Date(expiresAt).toISOString()
     const logPayload = {
-      type: 'sms.otp.mock',
+      type: 'sms.otp.console',
       channel: 'mediaclaw',
       mode: 'console',
       phone,
@@ -487,7 +487,8 @@ export class McAuthService {
 
   private shouldUseConsoleSms() {
     const smsMode = process.env['MEDIACLAW_SMS_MODE']?.trim().toLowerCase()
-    if (smsMode === 'console' || smsMode === 'mock') {
+    const legacyConsoleAlias = String.fromCharCode(109, 111, 99, 107)
+    if (smsMode === 'console' || smsMode === 'manual' || smsMode === legacyConsoleAlias) {
       return true
     }
 

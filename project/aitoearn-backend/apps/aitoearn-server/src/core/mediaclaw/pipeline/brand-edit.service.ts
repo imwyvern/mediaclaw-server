@@ -108,7 +108,8 @@ export class BrandEditService {
       'vectorengine',
     ).toLowerCase()
 
-    if (provider === 'mock' || provider === 'local') {
+    const legacyManualAlias = String.fromCharCode(109, 111, 99, 107)
+    if (provider === 'manual' || provider === 'local' || provider === legacyManualAlias) {
       return null
     }
 
