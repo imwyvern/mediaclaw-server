@@ -21,6 +21,7 @@ export enum NotificationEvent {
   CONTENT_PUBLISHED = 'content.published',
   SUBSCRIPTION_EXPIRING = 'subscription.expiring',
   CREDIT_LOW = 'credit.low',
+  DISCOVERY_VIRAL_ALERT = 'discovery.viral_alert',
 }
 
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'notification_configs' })

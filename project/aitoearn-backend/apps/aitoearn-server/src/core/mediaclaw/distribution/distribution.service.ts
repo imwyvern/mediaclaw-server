@@ -9,6 +9,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import {
   DistributionRule,
   DistributionRuleType,
+  NotificationEvent,
   PaymentOrder,
   VideoTask,
   VideoTaskStatus,
@@ -17,6 +18,7 @@ import { Model, Types } from 'mongoose'
 import { isDistributableVideoTaskStatus } from '../video-task-status.utils'
 import { WebhookService } from '../webhook/webhook.service'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
+import { NotificationService } from '../notification/notification.service'
 
 export enum DistributionPublishStatus {
   COMPLETED = 'completed',
@@ -77,6 +79,8 @@ export class DistributionService {
     private readonly webhookService: WebhookService,
     @Optional()
     private readonly employeeDispatchService?: EmployeeDispatchService,
+    @Optional()
+    private readonly notificationService?: NotificationService,
   ) {}
 
   async createRule(orgId: string, data: DistributionRulePayload) {
@@ -434,18 +438,9 @@ export class DistributionService {
         })
       : null
 
-    this.logger.log({
-      message: 'MediaClaw task completion notification queued',
+    const payload = {
       taskId,
-      userId: task.userId,
-      orgId,
-      outputVideoUrl: task.outputVideoUrl,
-      employeeDispatch,
-      target: task.metadata?.['webhookUrl'] || task.metadata?.['imGroupId'] || null,
-    })
-
-    await this.webhookService.trigger('task.completed', {
-      taskId,
+      contentId: taskId,
       userId: task.userId,
       orgId,
       brandId: task.brandId?.toString() || null,
@@ -457,7 +452,24 @@ export class DistributionService {
       quality: task.quality,
       metadata: task.metadata,
       employeeDispatch,
+    }
+
+    this.logger.log({
+      message: 'MediaClaw task completion notification queued',
+      taskId,
+      userId: task.userId,
+      orgId,
+      outputVideoUrl: task.outputVideoUrl,
+      employeeDispatch,
+      target: task.metadata?.['webhookUrl'] || task.metadata?.['imGroupId'] || null,
     })
+
+    await Promise.allSettled([
+      orgId && this.notificationService
+        ? this.notificationService.send(orgId, NotificationEvent.TASK_COMPLETED, payload)
+        : Promise.resolve(null),
+      this.webhookService.trigger('task.completed', payload),
+    ])
   }
 
   async notifyPaymentSuccess(order: PaymentOrder) {

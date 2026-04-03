@@ -1,10 +1,10 @@
-import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
+import { Body, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { NotificationChannel, NotificationEvent } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { NotificationService } from './notification.service'
 
-@MediaClawApiController('api/v1/notifications')
+@MediaClawApiController(['api/v1/notifications', 'api/v1/notification'])
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
@@ -19,6 +19,19 @@ export class NotificationController {
     },
   ) {
     return this.notificationService.createConfig(user.orgId || user.id, body)
+  }
+
+  @Get('list')
+  async listNotifications(
+    @GetToken() user: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.notificationService.listNotifications(
+      user.orgId || user.id,
+      page ? Number.parseInt(page, 10) : 1,
+      limit ? Number.parseInt(limit, 10) : 20,
+    )
   }
 
   @Get()

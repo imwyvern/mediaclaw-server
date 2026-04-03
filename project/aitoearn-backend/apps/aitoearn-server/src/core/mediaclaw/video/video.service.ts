@@ -3,6 +3,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, Optional } 
 import { InjectModel } from '@nestjs/mongoose'
 import {
   Brand,
+  NotificationEvent,
   Pipeline,
   ProductionBatch,
   ProductionBatchStatus,
@@ -14,6 +15,7 @@ import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import { BillingService } from '../billing/billing.service'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
+import { NotificationService } from '../notification/notification.service'
 import { createStatusTransitionIterationEntry, mapVideoTaskStatusToProductionStage } from '../video-task-lifecycle.util'
 import { UsageService } from '../usage/usage.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData } from '../worker/worker.constants'
@@ -66,6 +68,8 @@ export class VideoService {
     private readonly billingService?: BillingService,
     @Optional()
     private readonly employeeDispatchService?: EmployeeDispatchService,
+    @Optional()
+    private readonly notificationService?: NotificationService,
     @InjectQueue(VIDEO_WORKER_QUEUE)
     @Optional()
     private readonly videoWorkerQueue?: Queue<VideoWorkerJobData>,
@@ -550,6 +554,21 @@ export class VideoService {
 
     if (updated?.batchId) {
       await this.syncBatchStats(updated.batchId.toString())
+    }
+
+    if (status === VideoTaskStatus.FAILED && updated?.orgId && this.notificationService) {
+      await this.notificationService.send(updated.orgId.toString(), NotificationEvent.TASK_FAILED, {
+        taskId: updated._id.toString(),
+        contentId: updated._id.toString(),
+        orgId: updated.orgId.toString(),
+        userId: updated.userId,
+        status: updated.status,
+        errorMessage: updated.errorMessage || data?.errorMessage || '',
+        step: data?.step || this.mapStatusToStep(status),
+        metadata: updated.metadata || {},
+      }).catch((error) => {
+        this.logger.warn(`Task failure notification skipped for ${updated?._id?.toString?.() || taskId}: ${error instanceof Error ? error.message : String(error)}`)
+      })
     }
 
     return updated

@@ -12,6 +12,7 @@ import {
 } from '@yikart/mongodb'
 import { BillingModule } from '../billing/billing.module'
 import { EmployeeDispatchModule } from '../employee-dispatch/employee-dispatch.module'
+import { NotificationModule } from '../notification/notification.module'
 import { UsageModule } from '../usage/usage.module'
 import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { VideoController } from './video.controller'
@@ -28,6 +29,7 @@ import { VideoService } from './video.service'
     BillingModule,
     UsageModule,
     EmployeeDispatchModule,
+    NotificationModule,
     VideoWorkerQueueModule,
   ],
   controllers: [VideoController],

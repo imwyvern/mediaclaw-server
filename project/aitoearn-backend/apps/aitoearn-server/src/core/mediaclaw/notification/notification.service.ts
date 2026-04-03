@@ -5,13 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
+import { NotificationType, UserType } from '@yikart/common'
 import { MailService } from '@yikart/mail'
 import {
+  DiscoveryNotification,
+  Notification,
   NotificationChannel,
   NotificationConfig,
   NotificationEvent,
+  NotificationStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { MediaclawConfigService } from '../mediaclaw-config.service'
 
 interface NotificationConfigInput {
   channel: NotificationChannel
@@ -28,6 +33,36 @@ interface NotificationConfigRecord {
   events?: NotificationEvent[]
   isActive?: boolean
   [key: string]: any
+}
+
+interface NotificationListItem {
+  id: string
+  source: 'task' | 'discovery'
+  event: NotificationEvent
+  notificationType: NotificationType | null
+  title: string
+  content: string
+  status: string
+  relatedId: string
+  createdAt: Date
+  data: Record<string, any>
+}
+
+interface PersistedEventNotification {
+  id: string
+  relatedId: string
+  type: NotificationType
+  title: string
+  content: string
+  status: NotificationStatus
+  createdAt?: Date
+}
+
+interface EventNotificationDraft {
+  type: NotificationType
+  title: string
+  content: string
+  relatedId: string
 }
 
 type NotificationDeliveryResult =
@@ -55,12 +90,17 @@ export class NotificationService {
   constructor(
     @InjectModel(NotificationConfig.name)
     private readonly notificationConfigModel: Model<NotificationConfig>,
+    @InjectModel(Notification.name)
+    private readonly notificationModel: Model<Notification>,
+    @InjectModel(DiscoveryNotification.name)
+    private readonly discoveryNotificationModel: Model<DiscoveryNotification>,
     private readonly mailService: MailService,
+    private readonly configService: MediaclawConfigService,
   ) {}
 
   async createConfig(orgId: string, data: NotificationConfigInput) {
     const created = await this.notificationConfigModel.create({
-      orgId: new Types.ObjectId(orgId),
+      orgId: this.toObjectId(orgId, 'orgId'),
       channel: data.channel,
       events: this.normalizeEvents(data.events),
       config: data.config || {},
@@ -72,10 +112,64 @@ export class NotificationService {
 
   async listConfigs(orgId: string) {
     const configs = await this.notificationConfigModel.find({
-      orgId: new Types.ObjectId(orgId),
+      orgId: this.toObjectId(orgId, 'orgId'),
     }).sort({ createdAt: -1 }).lean().exec()
 
     return configs.map(config => this.toResponse(config))
+  }
+
+  async listNotifications(ownerId: string, pageInput?: number, limitInput?: number) {
+    const ownerObjectId = this.toObjectId(ownerId, 'ownerId')
+    const page = this.normalizePage(pageInput)
+    const limit = this.normalizeLimit(limitInput)
+    const fetchCount = page * limit
+
+    const [taskNotifications, taskTotal, discoveryNotifications, discoveryTotal] = await Promise.all([
+      this.notificationModel.find({
+        userId: ownerObjectId,
+        $or: [
+          { deletedAt: { $exists: false } },
+          { deletedAt: null },
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .limit(fetchCount)
+        .lean()
+        .exec(),
+      this.notificationModel.countDocuments({
+        userId: ownerObjectId,
+        $or: [
+          { deletedAt: { $exists: false } },
+          { deletedAt: null },
+        ],
+      }),
+      this.discoveryNotificationModel.find({
+        orgId: ownerObjectId,
+      })
+        .sort({ notifiedAt: -1, createdAt: -1 })
+        .limit(fetchCount)
+        .lean()
+        .exec(),
+      this.discoveryNotificationModel.countDocuments({
+        orgId: ownerObjectId,
+      }),
+    ])
+
+    const merged = [
+      ...taskNotifications.map(notification => this.toTaskNotificationItem(notification)),
+      ...discoveryNotifications.map(notification => this.toDiscoveryNotificationItem(notification)),
+    ].sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+
+    const skip = (page - 1) * limit
+    return {
+      items: merged.slice(skip, skip + limit).map(item => ({
+        ...item,
+        createdAt: item.createdAt,
+      })),
+      total: taskTotal + discoveryTotal,
+      page,
+      limit,
+    }
   }
 
   async getConfig(orgId: string, id: string) {
@@ -134,8 +228,29 @@ export class NotificationService {
   }
 
   async sendNotification(orgId: string, event: NotificationEvent, payload: Record<string, any>) {
+    let persisted: PersistedEventNotification | null = null
+
+    try {
+      persisted = await this.persistEventNotification(orgId, event, payload)
+    }
+    catch (error) {
+      this.logger.warn(`Notification persistence failed for ${event}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+
+    const orgObjectId = this.toMaybeObjectId(orgId)
+    if (!orgObjectId) {
+      return {
+        orgId,
+        event,
+        persisted,
+        total: 0,
+        delivered: 0,
+        results: [],
+      }
+    }
+
     const configs = await this.notificationConfigModel.find({
-      orgId: new Types.ObjectId(orgId),
+      orgId: orgObjectId,
       isActive: true,
       events: event,
     }).lean().exec()
@@ -147,6 +262,7 @@ export class NotificationService {
     return {
       orgId,
       event,
+      persisted,
       total: results.length,
       delivered: results.filter(result => result.delivered).length,
       results,
@@ -173,6 +289,47 @@ export class NotificationService {
     return {
       success,
       ...result,
+    }
+  }
+
+  async persistEventNotification(orgId: string, event: NotificationEvent, payload: Record<string, any>) {
+    if (event === NotificationEvent.DISCOVERY_VIRAL_ALERT) {
+      return null
+    }
+
+    const ownerObjectId = this.toMaybeObjectId(orgId)
+    if (!ownerObjectId) {
+      return null
+    }
+
+    const draft = this.buildEventNotificationDraft(event, payload, orgId)
+    if (!draft) {
+      return null
+    }
+
+    const created = await this.notificationModel.create({
+      userId: ownerObjectId,
+      userType: UserType.User,
+      title: draft.title,
+      content: draft.content,
+      type: draft.type,
+      status: NotificationStatus.Unread,
+      relatedId: draft.relatedId,
+      data: {
+        event,
+        payload,
+      },
+    })
+
+    const notification = created.toObject()
+    return {
+      id: notification._id.toString(),
+      relatedId: notification.relatedId,
+      type: notification.type,
+      title: notification.title,
+      content: notification.content,
+      status: notification.status,
+      createdAt: notification.createdAt,
     }
   }
 
@@ -319,6 +476,110 @@ export class NotificationService {
     }
   }
 
+  private buildEventNotificationDraft(
+    event: NotificationEvent,
+    payload: Record<string, any>,
+    fallbackRelatedId: string,
+  ): EventNotificationDraft | null {
+    const relatedId = this.pickPayloadString(payload, ['contentId', 'taskId', 'relatedId']) || fallbackRelatedId
+    const status = this.pickPayloadString(payload, ['status'])
+    const platform = this.pickPayloadString(payload, ['platform'])
+    const comment = this.pickPayloadString(payload, ['comment'])
+    const errorMessage = this.pickPayloadString(payload, ['errorMessage'])
+
+    switch (event) {
+      case NotificationEvent.TASK_COMPLETED:
+        return {
+          type: NotificationType.TaskSettled,
+          title: '任务已完成',
+          content: `任务 ${this.describeRelatedId(relatedId)} 已完成，可进入审核或分发。`,
+          relatedId,
+        }
+      case NotificationEvent.TASK_FAILED:
+        return {
+          type: NotificationType.TaskReminder,
+          title: '任务执行失败',
+          content: errorMessage
+            ? `任务 ${this.describeRelatedId(relatedId)} 执行失败：${errorMessage}`
+            : `任务 ${this.describeRelatedId(relatedId)} 执行失败，请检查处理日志。`,
+          relatedId,
+        }
+      case NotificationEvent.CONTENT_PENDING_REVIEW:
+        return {
+          type: NotificationType.TaskSubmitted,
+          title: '内容待审核',
+          content: `内容 ${this.describeRelatedId(relatedId)} 已提交审核${status ? `，当前状态 ${status}` : ''}。`,
+          relatedId,
+        }
+      case NotificationEvent.CONTENT_APPROVED:
+        return {
+          type: NotificationType.TaskReviewApproved,
+          title: '内容审核通过',
+          content: `内容 ${this.describeRelatedId(relatedId)} 已审核通过，可继续发布。`,
+          relatedId,
+        }
+      case NotificationEvent.CONTENT_REJECTED:
+        return {
+          type: NotificationType.TaskReviewRejected,
+          title: '内容审核未通过',
+          content: `内容 ${this.describeRelatedId(relatedId)} 未通过审核${comment ? `：${comment}` : '。'}`,
+          relatedId,
+        }
+      case NotificationEvent.CONTENT_CHANGES_REQUESTED:
+        return {
+          type: NotificationType.TaskReviewRejected,
+          title: '内容需要修改',
+          content: `内容 ${this.describeRelatedId(relatedId)} 被要求修改${comment ? `：${comment}` : '。'}`,
+          relatedId,
+        }
+      case NotificationEvent.CONTENT_PUBLISHED:
+        return {
+          type: NotificationType.TaskSettled,
+          title: '内容已发布',
+          content: `内容 ${this.describeRelatedId(relatedId)} 已发布${platform ? ` 到 ${platform}` : ''}。`,
+          relatedId,
+        }
+      default:
+        return null
+    }
+  }
+
+  private toTaskNotificationItem(notification: Record<string, any>): NotificationListItem {
+    const payload = this.readRecord(notification['data'])?.['payload']
+    return {
+      id: notification['_id']?.toString?.() || notification['id'] || '',
+      source: 'task',
+      event: this.normalizeNotificationEvent(this.readRecord(notification['data'])?.['event']),
+      notificationType: notification['type'] || null,
+      title: notification['title'] || '',
+      content: notification['content'] || '',
+      status: notification['status'] || NotificationStatus.Unread,
+      relatedId: notification['relatedId'] || '',
+      createdAt: this.toDate(notification['createdAt']),
+      data: this.readRecord(payload) || this.readRecord(notification['data']) || {},
+    }
+  }
+
+  private toDiscoveryNotificationItem(notification: Record<string, any>): NotificationListItem {
+    return {
+      id: notification['_id']?.toString?.() || notification['id'] || '',
+      source: 'discovery',
+      event: NotificationEvent.DISCOVERY_VIRAL_ALERT,
+      notificationType: null,
+      title: notification['title'] || '',
+      content: notification['summary'] || '',
+      status: notification['status'] || 'pending',
+      relatedId: notification['_id']?.toString?.() || notification['id'] || '',
+      createdAt: this.toDate(notification['notifiedAt'] || notification['createdAt']),
+      data: {
+        industry: notification['industry'] || '',
+        platform: notification['platform'] || '',
+        itemCount: notification['itemCount'] || 0,
+        topItems: Array.isArray(notification['topItems']) ? notification['topItems'] : [],
+      },
+    }
+  }
+
   private normalizeEvents(events?: NotificationEvent[]) {
     return [...new Set((events || []).filter(Boolean))]
   }
@@ -339,23 +600,34 @@ export class NotificationService {
 
   private buildOwnedQuery(orgId: string, id: string) {
     return {
-      _id: new Types.ObjectId(id),
-      orgId: new Types.ObjectId(orgId),
+      _id: this.toObjectId(id, 'id'),
+      orgId: this.toObjectId(orgId, 'orgId'),
     }
   }
 
   private isSmtpConfigured() {
-    return Boolean(
-      process.env['SMTP_HOST']
-      || process.env['MEDIACLAW_SMTP_HOST']
-      || process.env['SMTP_FROM']
-      || process.env['MEDIACLAW_SMTP_FROM'],
-    )
+    return this.configService.has([
+      'SMTP_HOST',
+      'MEDIACLAW_SMTP_HOST',
+      'SMTP_FROM',
+      'MEDIACLAW_SMTP_FROM',
+    ])
   }
 
   private pickString(source: Record<string, any> | undefined, keys: string[]) {
     for (const key of keys) {
       const value = source?.[key]
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim()
+      }
+    }
+
+    return ''
+  }
+
+  private pickPayloadString(payload: Record<string, any>, keys: string[]) {
+    for (const key of keys) {
+      const value = payload[key]
       if (typeof value === 'string' && value.trim()) {
         return value.trim()
       }
@@ -421,5 +693,55 @@ export class NotificationService {
       createdAt: config.createdAt,
       updatedAt: config.updatedAt,
     }
+  }
+
+  private toObjectId(value: string, field: string) {
+    if (!Types.ObjectId.isValid(value)) {
+      throw new BadRequestException(`${field} is invalid`)
+    }
+
+    return new Types.ObjectId(value)
+  }
+
+  private toMaybeObjectId(value: string | null | undefined) {
+    if (!value || !Types.ObjectId.isValid(value)) {
+      return null
+    }
+
+    return new Types.ObjectId(value)
+  }
+
+  private normalizePage(page?: number) {
+    return Math.max(1, Math.trunc(Number(page) || 1))
+  }
+
+  private normalizeLimit(limit?: number) {
+    return Math.max(1, Math.min(Math.trunc(Number(limit) || 20), 100))
+  }
+
+  private toDate(value: unknown) {
+    if (value instanceof Date) {
+      return value
+    }
+
+    const normalized = typeof value === 'string' || typeof value === 'number'
+      ? new Date(value)
+      : null
+
+    return normalized && !Number.isNaN(normalized.getTime()) ? normalized : new Date(0)
+  }
+
+  private normalizeNotificationEvent(value: unknown) {
+    return Object.values(NotificationEvent).includes(value as NotificationEvent)
+      ? value as NotificationEvent
+      : NotificationEvent.TASK_COMPLETED
+  }
+
+  private describeRelatedId(value: string) {
+    if (!value) {
+      return '未命名对象'
+    }
+
+    return value.length > 12 ? value.slice(-12) : value
   }
 }
