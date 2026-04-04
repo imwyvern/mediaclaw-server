@@ -1,12 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Campaign, CampaignStatus } from '@yikart/mongodb'
+import { Campaign, CampaignStatus, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
 @Injectable()
 export class CampaignService {
   constructor(
     @InjectModel(Campaign.name) private readonly campaignModel: Model<Campaign>,
+    @InjectModel(VideoTask.name) private readonly videoTaskModel: Model<VideoTask>,
   ) {}
 
   async create(orgId: string, data: Partial<Campaign>) {
@@ -36,6 +37,61 @@ export class CampaignService {
     }
 
     return campaign
+  }
+
+  async listVideos(orgId: string, id: string) {
+    const campaign = await this.findById(orgId, id)
+    const matchers: Array<Record<string, unknown>> = [
+      { campaignId: campaign._id },
+    ]
+
+    if (campaign.brandId) {
+      const brandScope: Record<string, unknown> = {
+        brandId: campaign.brandId,
+      }
+
+      if (campaign.startDate || campaign.endDate) {
+        const createdAtRange: Record<string, Date> = {}
+        if (campaign.startDate) {
+          createdAtRange['$gte'] = campaign.startDate
+        }
+        if (campaign.endDate) {
+          createdAtRange['$lte'] = campaign.endDate
+        }
+        brandScope['createdAt'] = createdAtRange
+      }
+
+      matchers.push(brandScope)
+    }
+
+    if (campaign.name) {
+      matchers.push({
+        'metadata.campaign': campaign.name,
+      })
+    }
+
+    const tasks = await this.videoTaskModel.find({
+      orgId: new Types.ObjectId(orgId),
+      'metadata.isDeleted': { $ne: true },
+      $or: matchers,
+    })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+
+    return tasks.map(task => ({
+      id: task._id.toString(),
+      taskId: task._id.toString(),
+      campaignId: campaign._id.toString(),
+      brandId: task.brandId?.toString() || null,
+      pipelineId: task.pipelineId?.toString() || null,
+      status: task.status,
+      taskType: task.taskType,
+      sourceVideoUrl: task.sourceVideoUrl || '',
+      outputVideoUrl: task.outputVideoUrl || '',
+      createdAt: task.createdAt,
+      completedAt: task.completedAt,
+    }))
   }
 
   async update(orgId: string, id: string, data: Partial<Campaign>) {
@@ -120,6 +176,24 @@ export class CampaignService {
       payload['pipelineId'] = this.toObjectId(payload['pipelineId'] as string | null | undefined)
     }
 
+    if ('platforms' in payload) {
+      payload['targetPlatforms'] = this.normalizeStringList(payload['platforms'])
+      delete payload['platforms']
+    }
+
+    if ('totalVideos' in payload) {
+      payload['totalPlanned'] = this.toNumber(payload['totalVideos'])
+      delete payload['totalVideos']
+    }
+
+    if ('objective' in payload && typeof payload['objective'] !== 'string') {
+      delete payload['objective']
+    }
+
+    if ('description' in payload && typeof payload['description'] !== 'string') {
+      delete payload['description']
+    }
+
     return payload
   }
 
@@ -129,5 +203,22 @@ export class CampaignService {
     }
 
     return new Types.ObjectId(value)
+  }
+
+  private normalizeStringList(value: unknown) {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return value
+      .map(item => typeof item === 'string' ? item.trim() : '')
+      .filter(Boolean)
+  }
+
+  private toNumber(value: unknown) {
+    const normalized = Number(value)
+    return Number.isFinite(normalized) && normalized >= 0
+      ? normalized
+      : 0
   }
 }

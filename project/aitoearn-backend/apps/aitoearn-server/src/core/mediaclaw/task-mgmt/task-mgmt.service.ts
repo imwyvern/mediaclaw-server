@@ -31,6 +31,13 @@ interface CreateTaskParams {
   metadata?: Record<string, any>
 }
 
+interface UpdateTaskParams {
+  brandId?: string | null
+  pipelineId?: string | null
+  sourceVideoUrl?: string
+  metadata?: Record<string, unknown>
+}
+
 interface TaskFilters {
   status?: VideoTaskStatus
   brandId?: string
@@ -285,6 +292,117 @@ export class TaskMgmtService {
       total,
       page,
       limit,
+    }
+  }
+
+  async updateTask(orgId: string, taskId: string, updates: UpdateTaskParams) {
+    const task = await this.getTask(orgId, taskId)
+    if (task.metadata?.['isDeleted']) {
+      throw new NotFoundException('Task not found')
+    }
+
+    const editableStatuses = [
+      VideoTaskStatus.DRAFT,
+      VideoTaskStatus.PENDING,
+      VideoTaskStatus.FAILED,
+    ]
+
+    if (!editableStatuses.includes(task.status)) {
+      throw new BadRequestException('Only draft, pending, or failed tasks can be updated')
+    }
+
+    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
+    if (updates.brandId) {
+      await this.ensureBrandBelongsToOrg(updates.brandId, normalizedOrgId)
+    }
+    if (updates.pipelineId) {
+      await this.ensurePipelineBelongsToOrg(updates.pipelineId, normalizedOrgId)
+    }
+
+    const setPayload: Record<string, unknown> = {}
+    if ('brandId' in updates) {
+      setPayload['brandId'] = updates.brandId ? this.toObjectId(updates.brandId, 'brandId') : null
+    }
+    if ('pipelineId' in updates) {
+      setPayload['pipelineId'] = updates.pipelineId ? this.toObjectId(updates.pipelineId, 'pipelineId') : null
+    }
+    if (typeof updates.sourceVideoUrl === 'string') {
+      setPayload['sourceVideoUrl'] = updates.sourceVideoUrl.trim()
+    }
+    if ('metadata' in updates) {
+      setPayload['metadata'] = {
+        ...(task.metadata || {}),
+        ...(updates.metadata || {}),
+      }
+    }
+
+    const updated = await this.videoTaskModel.findOneAndUpdate(
+      this.buildTaskOwnershipQuery(orgId, taskId),
+      { $set: setPayload },
+      { new: true },
+    ).exec()
+
+    if (!updated) {
+      throw new NotFoundException('Task not found')
+    }
+
+    if (updated.batchId) {
+      await this.syncBatchStats(updated.batchId.toString())
+    }
+
+    return updated
+  }
+
+  async deleteTask(orgId: string, taskId: string) {
+    const task = await this.getTask(orgId, taskId)
+    if (task.metadata?.['isDeleted']) {
+      return {
+        id: taskId,
+        deleted: true,
+        deletedAt: task.metadata?.['deletedAt'] || null,
+      }
+    }
+
+    if (task.status === VideoTaskStatus.PENDING) {
+      await this.cancelTask(orgId, taskId)
+    }
+    else {
+      const terminalStatuses = [
+        VideoTaskStatus.DRAFT,
+        VideoTaskStatus.COMPLETED,
+        VideoTaskStatus.PENDING_REVIEW,
+        VideoTaskStatus.APPROVED,
+        VideoTaskStatus.REJECTED,
+        VideoTaskStatus.PUBLISHED,
+        VideoTaskStatus.FAILED,
+        VideoTaskStatus.CANCELLED,
+      ]
+
+      if (!terminalStatuses.includes(task.status)) {
+        throw new BadRequestException('Only pending or finished tasks can be deleted')
+      }
+    }
+
+    const deletedAt = new Date().toISOString()
+    const updated = await this.videoTaskModel.findOneAndUpdate(
+      this.buildTaskOwnershipQuery(orgId, taskId),
+      {
+        $set: {
+          'metadata.isDeleted': true,
+          'metadata.deletedAt': deletedAt,
+        },
+      },
+      { new: true },
+    ).exec()
+
+    if (updated?.batchId) {
+      await this.syncBatchStats(updated.batchId.toString())
+    }
+
+    return {
+      id: taskId,
+      deleted: true,
+      deletedAt,
     }
   }
 
@@ -660,6 +778,7 @@ export class TaskMgmtService {
   private buildTaskQuery(orgId: string, filters: TaskFilters) {
     const query: Record<string, any> = {
       orgId: this.toObjectId(orgId, 'orgId'),
+      'metadata.isDeleted': { $ne: true },
     }
 
     if (filters.status) {
@@ -775,6 +894,7 @@ export class TaskMgmtService {
     return {
       _id: this.toDocumentId(taskId),
       orgId: this.toObjectId(orgId, 'orgId'),
+      'metadata.isDeleted': { $ne: true },
     }
   }
 

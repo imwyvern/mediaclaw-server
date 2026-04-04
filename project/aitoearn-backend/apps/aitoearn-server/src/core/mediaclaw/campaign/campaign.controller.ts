@@ -5,16 +5,16 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { CampaignService } from './campaign.service'
 
-@MediaClawApiController('api/v1/campaign')
+@MediaClawApiController(['api/v1/campaign', 'api/v1/campaigns'])
 export class CampaignController {
   constructor(private readonly campaignService: CampaignService) {}
 
-  @Post()
+  @Post(['', 'create'])
   async create(@GetToken() user: MediaClawAuthUser, @Body() body: Partial<Campaign>) {
     return this.campaignService.create(user.orgId || user.id, body)
   }
 
-  @Get()
+  @Get(['', 'list'])
   async list(
     @GetToken() user: MediaClawAuthUser,
     @Query('status') status?: CampaignStatus,
@@ -27,9 +27,23 @@ export class CampaignController {
     return this.campaignService.findById(user.orgId || user.id, id)
   }
 
+  @Get(':id/videos')
+  async listVideos(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
+    return this.campaignService.listVideos(user.orgId || user.id, id)
+  }
+
   @Patch(':id')
   async update(@GetToken() user: MediaClawAuthUser, @Param('id') id: string, @Body() body: Partial<Campaign>) {
     return this.campaignService.update(user.orgId || user.id, id, body)
+  }
+
+  @Post(':id/status')
+  async updateStatus(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body('status') status: CampaignStatus,
+  ) {
+    return this.campaignService.update(user.orgId || user.id, id, { status })
   }
 
   @Delete(':id')

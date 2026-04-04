@@ -5,6 +5,14 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { NotificationService } from './notification.service'
 
+type NotificationConfigPayload = {
+  channel: NotificationChannel
+  name?: string
+  events?: NotificationEvent[]
+  config?: Record<string, unknown>
+  isActive?: boolean
+}
+
 @MediaClawApiController(['api/v1/notifications', 'api/v1/notification'])
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
@@ -12,12 +20,7 @@ export class NotificationController {
   @Post()
   async create(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      channel: NotificationChannel
-      events?: NotificationEvent[]
-      config?: Record<string, any>
-      isActive?: boolean
-    },
+    @Body() body: NotificationConfigPayload,
   ) {
     return this.notificationService.createConfig(user.orgId || user.id, body)
   }
@@ -49,12 +52,7 @@ export class NotificationController {
   async update(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: {
-      channel?: NotificationChannel
-      events?: NotificationEvent[]
-      config?: Record<string, any>
-      isActive?: boolean
-    },
+    @Body() body: Partial<NotificationConfigPayload>,
   ) {
     return this.notificationService.updateConfig(user.orgId || user.id, id, body)
   }

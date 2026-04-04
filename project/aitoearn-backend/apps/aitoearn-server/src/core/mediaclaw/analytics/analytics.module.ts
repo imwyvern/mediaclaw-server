@@ -8,6 +8,7 @@ import {
 } from '@yikart/mongodb'
 
 import { AcquisitionModule } from '../acquisition/acquisition.module'
+import { ReportModule } from '../report/report.module'
 import { AnalyticsCollectorService } from './analytics-collector.service'
 import { AnalyticsController } from './analytics.controller'
 import { AnalyticsService } from './analytics.service'
@@ -15,6 +16,7 @@ import { AnalyticsService } from './analytics.service'
 @Module({
   imports: [
     AcquisitionModule,
+    ReportModule,
     MongooseModule.forFeature([
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: VideoAnalytics.name, schema: VideoAnalyticsSchema },

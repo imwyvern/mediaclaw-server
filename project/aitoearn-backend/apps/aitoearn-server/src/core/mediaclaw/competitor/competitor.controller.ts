@@ -36,7 +36,7 @@ export class CompetitorController {
     return this.competitorService.listCompetitors(user.orgId || user.id)
   }
 
-  @Get('industry-hot')
+  @Get(['industry-hot', 'trending'])
   async getIndustryHot(
     @Query('industry') industry: string,
     @Query('platform') platform?: string,

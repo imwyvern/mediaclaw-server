@@ -67,6 +67,12 @@ export class Campaign extends WithTimestampSchema {
   @Prop({ required: true, type: String })
   name: string
 
+  @Prop({ type: String, default: '' })
+  objective: string
+
+  @Prop({ type: String, default: '' })
+  description: string
+
   @Prop({ type: MongooseSchema.Types.ObjectId, default: null })
   brandId: MongooseSchema.Types.ObjectId | null
 

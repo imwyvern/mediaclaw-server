@@ -111,7 +111,7 @@ export class Notification extends WithTimestampSchema {
     required: false,
     description: '任意数据，用于存储与通知相关的额外信息',
   })
-  data?: any
+  data?: unknown
 
   @Prop({
     type: Date,

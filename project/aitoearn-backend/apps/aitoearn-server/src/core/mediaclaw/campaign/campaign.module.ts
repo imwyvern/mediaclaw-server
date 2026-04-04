@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
-import { Campaign, CampaignSchema } from '@yikart/mongodb'
+import { Campaign, CampaignSchema, VideoTask, VideoTaskSchema } from '@yikart/mongodb'
 import { CampaignController } from './campaign.controller'
 import { CampaignService } from './campaign.service'
 
@@ -8,6 +8,7 @@ import { CampaignService } from './campaign.service'
   imports: [
     MongooseModule.forFeature([
       { name: Campaign.name, schema: CampaignSchema },
+      { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
   ],
   controllers: [CampaignController],

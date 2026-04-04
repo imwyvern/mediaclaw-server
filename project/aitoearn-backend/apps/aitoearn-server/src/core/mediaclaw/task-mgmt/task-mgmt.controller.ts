@@ -1,7 +1,9 @@
 import {
   Body,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common'
@@ -72,6 +74,25 @@ export class TaskMgmtController {
   @Get(':id')
   async getTask(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.taskMgmtService.getTask(user.orgId || user.id, id)
+  }
+
+  @Patch(':id')
+  async updateTask(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: {
+      brandId?: string | null
+      pipelineId?: string | null
+      sourceVideoUrl?: string
+      metadata?: Record<string, unknown>
+    },
+  ) {
+    return this.taskMgmtService.updateTask(user.orgId || user.id, id, body)
+  }
+
+  @Delete(':id')
+  async deleteTask(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
+    return this.taskMgmtService.deleteTask(user.orgId || user.id, id)
   }
 
   @Post(':id/cancel')

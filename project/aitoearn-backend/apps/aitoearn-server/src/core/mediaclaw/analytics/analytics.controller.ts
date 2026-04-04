@@ -1,12 +1,17 @@
 import { Body, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { ReportType } from '@yikart/mongodb'
 
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { ReportService } from '../report/report.service'
 import { AnalyticsService } from './analytics.service'
 
 @MediaClawApiController('api/v1/analytics')
 export class AnalyticsController {
-  constructor(private readonly analyticsService: AnalyticsService) {}
+  constructor(
+    private readonly analyticsService: AnalyticsService,
+    private readonly reportService: ReportService,
+  ) {}
 
   @Get('overview')
   async getOverview(
@@ -54,6 +59,14 @@ export class AnalyticsController {
     @Param('videoId') videoId: string,
   ) {
     return this.analyticsService.getVideoHistory(user.orgId || user.id || '', videoId)
+  }
+
+  @Get('content/:id')
+  async getContentAnalytics(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+  ) {
+    return this.analyticsService.getVideoStats(user.orgId || user.id || '', id)
   }
 
   @Get('benchmark')
@@ -111,6 +124,48 @@ export class AnalyticsController {
       Number.parseInt(limit, 10),
       metric,
       period ? Number.parseInt(period, 10) : 30,
+    )
+  }
+
+  @Get('seo')
+  async getSeo(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Query('windowDays') windowDays?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.analyticsService.getSeoInsights(
+      user.orgId || user.id || '',
+      windowDays ? Number.parseInt(windowDays, 10) : 30,
+      limit ? Number.parseInt(limit, 10) : 10,
+    )
+  }
+
+  @Post('report')
+  async generateReport(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body()
+    body: {
+      type?: ReportType
+      period?: {
+        start?: string
+        end?: string
+      }
+      startDate?: string
+      endDate?: string
+    },
+  ) {
+    const periodEnd = body.period?.end || body.endDate || new Date().toISOString()
+    const periodStart = body.period?.start
+      || body.startDate
+      || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+    return this.reportService.generateReport(
+      user.orgId || user.id || '',
+      body.type || ReportType.WEEKLY,
+      {
+        start: periodStart,
+        end: periodEnd,
+      },
     )
   }
 }

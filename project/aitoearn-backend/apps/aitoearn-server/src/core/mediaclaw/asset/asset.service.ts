@@ -16,7 +16,7 @@ interface AssetUploadInput {
   fileName?: string
   fileSize?: number
   mimeType?: string
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
   uploadedBy?: string
 }
 
@@ -51,7 +51,7 @@ export class AssetService {
       { isActive: false },
     ).exec()
 
-    return this.brandAssetVersionModel.create({
+    const created = await this.brandAssetVersionModel.create({
       brandId: normalizedBrandId,
       assetType: type,
       version,
@@ -64,6 +64,9 @@ export class AssetService {
       metadata: file.metadata || {},
       deletedAt: null,
     })
+
+    await this.syncBrandAssetPointer(normalizedBrandId, type, created.fileUrl)
+    return created
   }
 
   async listVersions(orgId: string, brandId: string, type: BrandAssetType) {
@@ -112,11 +115,14 @@ export class AssetService {
       { isActive: false },
     ).exec()
 
-    return this.brandAssetVersionModel.findByIdAndUpdate(
+    const updated = await this.brandAssetVersionModel.findByIdAndUpdate(
       asset._id,
       { isActive: true },
       { new: true },
     ).exec()
+
+    await this.syncBrandAssetPointer(asset.brandId, asset.assetType, updated?.fileUrl)
+    return updated
   }
 
   async getActiveAsset(orgId: string, brandId: string, type: BrandAssetType) {
@@ -181,6 +187,10 @@ export class AssetService {
         await this.brandAssetVersionModel.findByIdAndUpdate(fallback._id, {
           isActive: true,
         }).exec()
+        await this.syncBrandAssetPointer(fallback.brandId, fallback.assetType, fallback.fileUrl)
+      }
+      else {
+        await this.syncBrandAssetPointer(asset.brandId, asset.assetType, '')
       }
     }
 
@@ -209,9 +219,7 @@ export class AssetService {
   }
 
   private async ensureBrandExists(orgId: string, brandId: unknown) {
-    const normalizedBrandId = typeof brandId === 'string'
-      ? this.toObjectId(brandId, 'brandId')
-      : this.toObjectId(String(brandId), 'brandId')
+    const normalizedBrandId = this.normalizeObjectId(brandId, 'brandId')
 
     const exists = await this.brandModel.exists({
       _id: normalizedBrandId,
@@ -237,6 +245,39 @@ export class AssetService {
     if (!Object.values(BrandAssetType).includes(type)) {
       throw new BadRequestException('Invalid asset type')
     }
+  }
+
+  private async syncBrandAssetPointer(
+    brandId: unknown,
+    type: BrandAssetType,
+    fileUrl: string | undefined,
+  ) {
+    if (type !== BrandAssetType.LOGO) {
+      return
+    }
+
+    await this.brandModel.findByIdAndUpdate(this.normalizeObjectId(brandId, 'brandId'), {
+      $set: {
+        'assets.logoUrl': fileUrl || '',
+      },
+    }).exec()
+  }
+
+  private normalizeObjectId(value: unknown, field: string) {
+    if (value instanceof Types.ObjectId) {
+      return value
+    }
+
+    if (typeof value === 'string') {
+      return this.toObjectId(value, field)
+    }
+
+    if (value && typeof value === 'object' && 'toString' in value) {
+      const normalized = value.toString()
+      return this.toObjectId(normalized, field)
+    }
+
+    throw new BadRequestException(`${field} is invalid`)
   }
 
   private toObjectId(value: string, field: string) {

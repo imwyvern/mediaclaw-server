@@ -35,7 +35,7 @@ export class VideoController {
     return this.videoService.createTask(user.orgId || user.id, user.id, body)
   }
 
-  @Post('batches')
+  @Post(['batch', 'batches'])
   async createBatch(@GetToken() user: MediaClawAuthUser, @Body() body: {
     brandId?: string
     batchName: string
@@ -51,7 +51,7 @@ export class VideoController {
     return this.videoService.createBatch(user.orgId || user.id, user.id, body)
   }
 
-  @Get('batches/:id')
+  @Get(['batch/:id', 'batches/:id'])
   async getBatchStatus(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.videoService.getBatchStatus(user.orgId || user.id, id)
   }

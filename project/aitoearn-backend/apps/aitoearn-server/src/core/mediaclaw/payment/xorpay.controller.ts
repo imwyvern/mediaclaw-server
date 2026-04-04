@@ -70,7 +70,7 @@ export class XorPayController {
     })
   }
 
-  @Post('callback')
+  @Post(['callback', 'notify'])
   @Public()
   async callback(
     @Body() body: Record<string, any>,

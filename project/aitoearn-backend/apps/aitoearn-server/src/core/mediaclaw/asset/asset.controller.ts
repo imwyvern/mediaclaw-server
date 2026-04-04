@@ -16,11 +16,11 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { AssetService } from './asset.service'
 
-@MediaClawApiController('api/v1/assets')
+@MediaClawApiController(['api/v1/assets', 'api/v1/asset'])
 export class AssetController {
   constructor(private readonly assetService: AssetService) {}
 
-  @Post()
+  @Post(['', 'upload'])
   @UseInterceptors(FileInterceptor('file'))
   async uploadAsset(
     @GetToken() user: MediaClawAuthUser,

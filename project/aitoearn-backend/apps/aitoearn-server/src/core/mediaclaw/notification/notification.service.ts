@@ -20,6 +20,7 @@ import { MediaclawConfigService } from '../mediaclaw-config.service'
 
 interface NotificationConfigInput {
   channel: NotificationChannel
+  name?: string
   events?: NotificationEvent[]
   config?: Record<string, unknown>
   isActive?: boolean
@@ -29,6 +30,7 @@ interface NotificationConfigRecord {
   _id: { toString: () => string }
   orgId: { toString: () => string }
   channel: NotificationChannel
+  name?: string
   config?: Record<string, unknown>
   events?: NotificationEvent[]
   isActive?: boolean
@@ -102,6 +104,7 @@ export class NotificationService {
     const created = await this.notificationConfigModel.create({
       orgId: this.toObjectId(orgId, 'orgId'),
       channel: data.channel,
+      name: this.normalizeConfigName(data.name, data.channel),
       events: this.normalizeEvents(data.events),
       config: data.config || {},
       isActive: data.isActive ?? true,
@@ -182,10 +185,17 @@ export class NotificationService {
   }
 
   async updateConfig(orgId: string, id: string, data: Partial<NotificationConfigInput>) {
-    const payload: Record<string, any> = {}
+    const payload: Record<string, unknown> = {}
 
     if ('channel' in data && data.channel) {
       payload['channel'] = data.channel
+    }
+
+    if ('name' in data) {
+      payload['name'] = this.normalizeConfigName(
+        data.name,
+        data.channel || undefined,
+      )
     }
 
     if ('events' in data) {
@@ -223,11 +233,11 @@ export class NotificationService {
     }
   }
 
-  async send(orgId: string, event: NotificationEvent, payload: Record<string, any>) {
+  async send(orgId: string, event: NotificationEvent, payload: Record<string, unknown>) {
     return this.sendNotification(orgId, event, payload)
   }
 
-  async sendNotification(orgId: string, event: NotificationEvent, payload: Record<string, any>) {
+  async sendNotification(orgId: string, event: NotificationEvent, payload: Record<string, unknown>) {
     let persisted: PersistedEventNotification | null = null
 
     try {
@@ -292,7 +302,7 @@ export class NotificationService {
     }
   }
 
-  async persistEventNotification(orgId: string, event: NotificationEvent, payload: Record<string, any>) {
+  async persistEventNotification(orgId: string, event: NotificationEvent, payload: Record<string, unknown>) {
     if (event === NotificationEvent.DISCOVERY_VIRAL_ALERT) {
       return null
     }
@@ -336,7 +346,7 @@ export class NotificationService {
   private async deliver(
     config: NotificationConfigRecord,
     event: NotificationEvent,
-    payload: Record<string, any>,
+    payload: Record<string, unknown>,
     isTest: boolean,
   ): Promise<NotificationDeliveryResult> {
     try {
@@ -368,7 +378,7 @@ export class NotificationService {
   private async sendWebhook(
     config: NotificationConfigRecord,
     event: NotificationEvent,
-    payload: Record<string, any>,
+    payload: Record<string, unknown>,
     isTest: boolean,
   ): Promise<NotificationDeliveryResult> {
     const configData = this.readRecord(config['config']) || {}
@@ -414,7 +424,7 @@ export class NotificationService {
   private async sendEmail(
     config: NotificationConfigRecord,
     event: NotificationEvent,
-    payload: Record<string, any>,
+    payload: Record<string, unknown>,
     isTest: boolean,
   ): Promise<NotificationDeliveryResult> {
     if (!this.isSmtpConfigured()) {
@@ -478,7 +488,7 @@ export class NotificationService {
 
   private buildEventNotificationDraft(
     event: NotificationEvent,
-    payload: Record<string, any>,
+    payload: Record<string, unknown>,
     fallbackRelatedId: string,
   ): EventNotificationDraft | null {
     const relatedId = this.pickPayloadString(payload, ['contentId', 'taskId', 'relatedId']) || fallbackRelatedId
@@ -544,37 +554,39 @@ export class NotificationService {
     }
   }
 
-  private toTaskNotificationItem(notification: Record<string, any>): NotificationListItem {
+  private toTaskNotificationItem(notification: Record<string, unknown>): NotificationListItem {
     const payload = this.readRecord(notification['data'])?.['payload']
+    const id = this.toStringValue(notification['_id'], this.toStringValue(notification['id']))
     return {
-      id: notification['_id']?.toString?.() || notification['id'] || '',
+      id,
       source: 'task',
       event: this.normalizeNotificationEvent(this.readRecord(notification['data'])?.['event']),
-      notificationType: notification['type'] || null,
-      title: notification['title'] || '',
-      content: notification['content'] || '',
-      status: notification['status'] || NotificationStatus.Unread,
-      relatedId: notification['relatedId'] || '',
+      notificationType: this.normalizeNotificationType(notification['type']),
+      title: this.toStringValue(notification['title']),
+      content: this.toStringValue(notification['content']),
+      status: this.toStringValue(notification['status'], NotificationStatus.Unread),
+      relatedId: this.toStringValue(notification['relatedId']),
       createdAt: this.toDate(notification['createdAt']),
       data: this.readRecord(payload) || this.readRecord(notification['data']) || {},
     }
   }
 
-  private toDiscoveryNotificationItem(notification: Record<string, any>): NotificationListItem {
+  private toDiscoveryNotificationItem(notification: Record<string, unknown>): NotificationListItem {
+    const id = this.toStringValue(notification['_id'], this.toStringValue(notification['id']))
     return {
-      id: notification['_id']?.toString?.() || notification['id'] || '',
+      id,
       source: 'discovery',
       event: NotificationEvent.DISCOVERY_VIRAL_ALERT,
       notificationType: null,
-      title: notification['title'] || '',
-      content: notification['summary'] || '',
-      status: notification['status'] || 'pending',
-      relatedId: notification['_id']?.toString?.() || notification['id'] || '',
+      title: this.toStringValue(notification['title']),
+      content: this.toStringValue(notification['summary']),
+      status: this.toStringValue(notification['status'], 'pending'),
+      relatedId: id,
       createdAt: this.toDate(notification['notifiedAt'] || notification['createdAt']),
       data: {
-        industry: notification['industry'] || '',
-        platform: notification['platform'] || '',
-        itemCount: notification['itemCount'] || 0,
+        industry: this.toStringValue(notification['industry']),
+        platform: this.toStringValue(notification['platform']),
+        itemCount: this.toNumberValue(notification['itemCount']),
         topItems: Array.isArray(notification['topItems']) ? notification['topItems'] : [],
       },
     }
@@ -614,7 +626,7 @@ export class NotificationService {
     ])
   }
 
-  private pickString(source: Record<string, any> | undefined, keys: string[]) {
+  private pickString(source: Record<string, unknown> | undefined, keys: string[]) {
     for (const key of keys) {
       const value = source?.[key]
       if (typeof value === 'string' && value.trim()) {
@@ -625,7 +637,7 @@ export class NotificationService {
     return ''
   }
 
-  private pickPayloadString(payload: Record<string, any>, keys: string[]) {
+  private pickPayloadString(payload: Record<string, unknown>, keys: string[]) {
     for (const key of keys) {
       const value = payload[key]
       if (typeof value === 'string' && value.trim()) {
@@ -638,11 +650,11 @@ export class NotificationService {
 
   private readRecord(value: unknown) {
     return value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, any>
+      ? value as Record<string, unknown>
       : null
   }
 
-  private interpolate(template: string, context: Record<string, any>) {
+  private interpolate(template: string, context: Record<string, unknown>) {
     return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, rawPath: string) => {
       const value = this.readContextValue(context, rawPath)
       if (value === null || value === undefined) {
@@ -657,10 +669,10 @@ export class NotificationService {
     })
   }
 
-  private readContextValue(context: Record<string, any>, path: string) {
-    return path.split('.').reduce<any>((current, segment) => {
+  private readContextValue(context: Record<string, unknown>, path: string) {
+    return path.split('.').reduce<unknown>((current, segment) => {
       if (current && typeof current === 'object') {
-        return current[segment]
+        return (current as Record<string, unknown>)[segment]
       }
       return undefined
     }, context)
@@ -677,8 +689,9 @@ export class NotificationService {
     _id: { toString: () => string }
     orgId: { toString: () => string }
     channel: NotificationChannel
+    name?: string
     events: NotificationEvent[]
-    config?: Record<string, any>
+    config?: Record<string, unknown>
     isActive: boolean
     createdAt?: Date
     updatedAt?: Date
@@ -687,6 +700,7 @@ export class NotificationService {
       id: config._id.toString(),
       orgId: config.orgId.toString(),
       channel: config.channel,
+      name: this.normalizeConfigName(config.name, config.channel),
       events: config.events,
       config: config.config || {},
       isActive: config.isActive,
@@ -731,10 +745,55 @@ export class NotificationService {
     return normalized && !Number.isNaN(normalized.getTime()) ? normalized : new Date(0)
   }
 
+  private toStringValue(value: unknown, fallback = '') {
+    if (typeof value === 'string') {
+      const normalized = value.trim()
+      return normalized || fallback
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+      return String(value)
+    }
+
+    if (value && typeof value === 'object' && typeof (value as { toString?: () => string }).toString === 'function') {
+      const normalized = (value as { toString: () => string }).toString().trim()
+      return normalized && normalized !== '[object Object]' ? normalized : fallback
+    }
+
+    return fallback
+  }
+
+  private toNumberValue(value: unknown, fallback = 0) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value
+    }
+
+    if (typeof value === 'string' && value.trim()) {
+      const normalized = Number(value)
+      return Number.isFinite(normalized) ? normalized : fallback
+    }
+
+    return fallback
+  }
+
+  private normalizeNotificationType(value: unknown) {
+    return Object.values(NotificationType).includes(value as NotificationType)
+      ? value as NotificationType
+      : null
+  }
+
   private normalizeNotificationEvent(value: unknown) {
     return Object.values(NotificationEvent).includes(value as NotificationEvent)
       ? value as NotificationEvent
       : NotificationEvent.TASK_COMPLETED
+  }
+
+  private normalizeConfigName(name: string | undefined, channel?: NotificationChannel) {
+    if (typeof name === 'string' && name.trim()) {
+      return name.trim()
+    }
+
+    return channel ? channel.toUpperCase() : 'SYSTEM'
   }
 
   private describeRelatedId(value: string) {

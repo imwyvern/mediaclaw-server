@@ -358,6 +358,74 @@ export class AnalyticsService {
     return this.analyticsCollectorService.getVideoLatestMetrics(task['_id'].toString())
   }
 
+  async getSeoInsights(orgId: string, windowDays = 30, limit = 10) {
+    const normalizedWindowDays = Math.max(1, Math.min(Number(windowDays) || 30, 365))
+    const normalizedLimit = Math.max(1, Math.min(Number(limit) || 10, 50))
+    const since = this.daysAgo(normalizedWindowDays)
+
+    const tasks = await this.videoTaskModel.find({
+      ...this.buildOrgMatch(orgId),
+      createdAt: { $gte: since },
+      'metadata.isDeleted': { $ne: true },
+    })
+      .select({
+        copy: 1,
+        metadata: 1,
+        createdAt: 1,
+        completedAt: 1,
+        publishedAt: 1,
+      })
+      .lean()
+      .exec()
+
+    const hashtagCounts = new Map<string, number>()
+    const keywordCounts = new Map<string, number>()
+    let totalHashtags = 0
+    let tasksWithSeoSignals = 0
+
+    for (const task of tasks) {
+      const hashtags = this.normalizeStringList(task['copy']?.['hashtags'])
+      const keywords = this.normalizeStringList([
+        ...(this.normalizeStringList(task['copy']?.['blueWords'])),
+        ...(this.normalizeStringList(task['metadata']?.['keywords'])),
+      ])
+
+      if (hashtags.length > 0 || keywords.length > 0) {
+        tasksWithSeoSignals += 1
+      }
+
+      totalHashtags += hashtags.length
+      this.countTerms(hashtagCounts, hashtags.map(tag => tag.startsWith('#') ? tag : `#${tag}`))
+      this.countTerms(keywordCounts, keywords)
+    }
+
+    const topHashtags = this.toTopTerms(hashtagCounts, normalizedLimit, 'hashtag')
+    const topKeywords = this.toTopTerms(keywordCounts, normalizedLimit, 'keyword')
+    const latestUpdatedAt = tasks.reduce<string | null>((latest, task) => {
+      const candidate = task['publishedAt'] || task['completedAt'] || task['createdAt']
+      if (!candidate) {
+        return latest
+      }
+
+      const candidateTime = new Date(candidate).getTime()
+      const latestTime = latest ? new Date(latest).getTime() : 0
+      return !latest || candidateTime > latestTime
+        ? new Date(candidate).toISOString()
+        : latest
+    }, null)
+
+    return {
+      source: 'task_copy',
+      windowDays: normalizedWindowDays,
+      videosAnalyzed: tasks.length,
+      videosWithSeoSignals: tasksWithSeoSignals,
+      avgHashtagsPerVideo: tasks.length > 0 ? this.round(totalHashtags / tasks.length) : 0,
+      latestUpdatedAt,
+      topHashtags,
+      topKeywords,
+    }
+  }
+
   private async getTaskOverviewSummary(orgId: string, windowDays: number) {
     const [overview, performance] = await Promise.all([
       this.videoTaskModel.aggregate<Record<string, any>>([
@@ -1173,6 +1241,54 @@ export class AnalyticsService {
 
   private readString(value: unknown) {
     return typeof value === 'string' ? value : ''
+  }
+
+  private normalizeStringList(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value
+        .map(item => this.readString(item).trim())
+        .filter(Boolean)
+    }
+
+    if (typeof value === 'string') {
+      return value
+        .split(/[\n,，]/)
+        .map(item => item.trim())
+        .filter(Boolean)
+    }
+
+    return []
+  }
+
+  private countTerms(counter: Map<string, number>, values: string[]) {
+    for (const value of values) {
+      const normalized = value.trim()
+      if (!normalized) {
+        continue
+      }
+
+      counter.set(normalized, (counter.get(normalized) || 0) + 1)
+    }
+  }
+
+  private toTopTerms(
+    counter: Map<string, number>,
+    limit: number,
+    key: 'hashtag' | 'keyword',
+  ) {
+    return [...counter.entries()]
+      .sort((left, right) => {
+        if (right[1] !== left[1]) {
+          return right[1] - left[1]
+        }
+
+        return left[0].localeCompare(right[0], 'zh-CN')
+      })
+      .slice(0, limit)
+      .map(([value, count]) => ({
+        [key]: value,
+        count,
+      }))
   }
 
   private toMetric(value: unknown) {

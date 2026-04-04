@@ -11,7 +11,7 @@ import { AccountType } from '@yikart/common'
 import { Model, RootFilterQuery } from 'mongoose'
 import { PublishRecordSource, PublishStatus, PublishType } from '../enums'
 import { PublishDayInfo, PublishInfo, PublishRecord } from '../schemas'
-import { BaseRepository } from './base.repository'
+import { BaseRepository, LeanDoc } from './base.repository'
 
 @Injectable()
 export class PublishRecordRepository extends BaseRepository<PublishRecord> {
@@ -31,9 +31,9 @@ export class PublishRecordRepository extends BaseRepository<PublishRecord> {
    * @param data
    * @returns
    */
-  override async create(data: Partial<PublishRecord>) {
+  override async create(data: Partial<PublishRecord>): Promise<LeanDoc<PublishRecord>> {
     const res = await this.publishRecordModel.create(data)
-    return res
+    return res.toObject() as LeanDoc<PublishRecord>
   }
 
   /**
@@ -489,7 +489,16 @@ export class PublishRecordRepository extends BaseRepository<PublishRecord> {
     return list
   }
 
-  async getPublishTasks(query: any): Promise<PublishRecord[]> {
+  async getPublishTasks(query: {
+    userId: string
+    flowId?: string
+    accountId?: string
+    accountType?: AccountType
+    status?: PublishStatus
+    type?: PublishType
+    time?: [Date?, Date?, ...unknown[]]
+    uid?: string
+  }): Promise<PublishRecord[]> {
     const filters: RootFilterQuery<PublishRecord> = {
       userId: query.userId,
       source: { $ne: PublishRecordSource.TASK_LINK },

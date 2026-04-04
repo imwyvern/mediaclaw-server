@@ -23,6 +23,9 @@ class BrandAssets {
 
   @Prop({ type: [String], default: [] })
   prohibitedWords: string[]
+
+  @Prop({ type: [String], default: [] })
+  referenceImages: string[]
 }
 
 @Schema({ _id: false })

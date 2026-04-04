@@ -8,7 +8,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { AccountType, TableDto } from '@yikart/common'
 import { PublishRecord, PublishRecordRepository, PublishStatus, PublishType } from '@yikart/mongodb'
-import { UpdateQuery } from 'mongoose'
+import { RootFilterQuery, UpdateQuery } from 'mongoose'
 import { MaterialService } from '../content/material.service'
 import {
   GetPublishRecordDetailDto,
@@ -116,7 +116,7 @@ export class PublishRecordService {
    * @returns 更新结果
    */
   async updatePublishRecord(
-    filter: any,
+    filter: RootFilterQuery<PublishRecord>,
     data: Partial<PublishRecord>,
   ) {
     const res = await this.publishRecordRepository.updatePublishRecord(filter, data)
@@ -333,9 +333,16 @@ export class PublishRecordService {
    * @param data 附加数据（作品链接、扩展数据）
    * @returns 更新结果
    */
-  async completeById(data: PublishRecord, dataId: string, newData?: { workLink: string, dataOption?: Record<string, any> }) {
-    this.onPublishCompleted(data)
-    return this.publishRecordRepository.complete(data.id, dataId, newData)
+  async completeById(
+    data: PublishRecord | string,
+    dataId: string,
+    newData?: { workLink: string, dataOption?: Record<string, any> },
+  ) {
+    if (typeof data !== 'string') {
+      this.onPublishCompleted(data)
+    }
+
+    return this.publishRecordRepository.complete(typeof data === 'string' ? data : data.id, dataId, newData)
   }
 
   /**

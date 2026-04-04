@@ -1,20 +1,20 @@
-import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
+import { BadRequestException, Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { Brand } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { BrandService } from './brand.service'
 
-@MediaClawApiController('api/v1/brand')
+@MediaClawApiController(['api/v1/brand', 'api/v1/brands'])
 export class BrandController {
   constructor(private readonly brandService: BrandService) {}
 
-  @Post()
+  @Post(['', 'create'])
   async create(@GetToken() user: MediaClawAuthUser, @Body() body: Partial<Brand>) {
     return this.brandService.create(user.orgId || user.id, body)
   }
 
-  @Get()
+  @Get(['', 'list'])
   async list(@GetToken() user: MediaClawAuthUser) {
     return this.brandService.findByOrg(user.orgId || user.id)
   }
@@ -24,9 +24,34 @@ export class BrandController {
     return this.brandService.findById(user.orgId || user.id, id)
   }
 
+  @Patch()
+  async updatePrimaryBrand(
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: Partial<Brand> & { id?: string, brandId?: string },
+  ) {
+    const brandId = body.id || body.brandId
+    if (!brandId) {
+      throw new BadRequestException('brandId is required')
+    }
+
+    return this.brandService.update(user.orgId || user.id, brandId, body)
+  }
+
   @Patch(':id')
   async update(@GetToken() user: MediaClawAuthUser, @Param('id') id: string, @Body() body: Partial<Brand>) {
     return this.brandService.update(user.orgId || user.id, id, body)
+  }
+
+  @Post('assets')
+  async createAssets(
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: { brandId?: string, logoUrl?: string, referenceImages?: string[] },
+  ) {
+    if (!body.brandId) {
+      throw new BadRequestException('brandId is required')
+    }
+
+    return this.brandService.updateAssets(user.orgId || user.id, body.brandId, body)
   }
 
   @Patch(':id/assets')

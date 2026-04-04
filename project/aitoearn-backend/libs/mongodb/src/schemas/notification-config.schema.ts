@@ -35,11 +35,14 @@ export class NotificationConfig extends WithTimestampSchema {
   @Prop({ required: true, type: String, enum: NotificationChannel, index: true })
   channel: NotificationChannel
 
+  @Prop({ type: String, trim: true })
+  name?: string
+
   @Prop({ type: [String], enum: NotificationEvent, default: [] })
   events: NotificationEvent[]
 
   @Prop({ type: MongooseSchema.Types.Mixed, default: {} })
-  config: Record<string, any>
+  config: Record<string, unknown>
 
   @Prop({ type: Boolean, default: true, index: true })
   isActive: boolean
