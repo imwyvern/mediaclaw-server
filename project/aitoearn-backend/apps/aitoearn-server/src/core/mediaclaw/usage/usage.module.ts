@@ -18,6 +18,7 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { MediaClawApiKeyModule } from '../apikey/apikey.module'
 import { NotificationModule } from '../notification/notification.module'
 import { ConversationUsageService } from './conversation-usage.service'
 import { UsageApiController } from './usage-api.controller'
@@ -39,6 +40,7 @@ import { UsageService } from './usage.service'
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: Brand.name, schema: BrandSchema },
     ]),
+    MediaClawApiKeyModule,
     NotificationModule,
   ],
   controllers: [UsageController, UsageApiController],
