@@ -45,6 +45,8 @@ interface WechatUserInfoResponse {
   errmsg?: string
 }
 
+type SmsMode = 'console' | 'live' | 'test'
+
 @Injectable()
 export class McAuthService {
   private readonly logger = new Logger(McAuthService.name)
@@ -72,14 +74,15 @@ export class McAuthService {
       throw new BadRequestException('Please wait before requesting another code')
     }
 
-    const code = this.generateOtpCode()
+    const smsMode = this.resolveSmsMode()
+    const code = smsMode === 'test' ? this.getTestOtpCode() : this.generateOtpCode()
     const expiresAt = Date.now() + 5 * 60 * 1000
     this.otpStore.set(phone, {
       code,
       expiresAt,
     })
 
-    await this.deliverSmsCode(phone, code, expiresAt)
+    await this.deliverSmsCode(phone, code, expiresAt, smsMode)
 
     if (this.shouldUseConsoleSms()) {
       return { success: true, message: 'Code sent', code }
@@ -457,6 +460,10 @@ export class McAuthService {
     return randomInt(100000, 1000000).toString()
   }
 
+  private getTestOtpCode() {
+    return '123456'
+  }
+
   private logConsoleSmsOtp(phone: string, code: string, expiresAt: number) {
     const expiresAtIso = new Date(expiresAt).toISOString()
     const maskedPhone = this.maskPhone(phone)
@@ -466,8 +473,21 @@ export class McAuthService {
     )
   }
 
-  private async deliverSmsCode(phone: string, code: string, expiresAt: number) {
-    if (this.shouldUseConsoleSms()) {
+  private logTestSmsOtp(phone: string, expiresAt: number) {
+    const expiresAtIso = new Date(expiresAt).toISOString()
+    const maskedPhone = this.maskPhone(phone)
+    this.logger.warn(
+      `Test SMS mode enabled for ${maskedPhone}; fixedOtp=12****; expiresAt=${expiresAtIso}`,
+    )
+  }
+
+  private async deliverSmsCode(phone: string, code: string, expiresAt: number, smsMode: SmsMode) {
+    if (smsMode === 'test') {
+      this.logTestSmsOtp(phone, expiresAt)
+      return
+    }
+
+    if (smsMode === 'console') {
       this.logConsoleSmsOtp(phone, code, expiresAt)
       return
     }
@@ -485,20 +505,31 @@ export class McAuthService {
     this.logger.log(`SMS verification code delivered for ${this.maskPhone(phone)}`)
   }
 
-  private shouldUseConsoleSms() {
+  private resolveSmsMode(): SmsMode {
     const smsMode = process.env['MEDIACLAW_SMS_MODE']?.trim().toLowerCase()
     const legacyConsoleAlias = String.fromCharCode(109, 111, 99, 107)
+
+    if (smsMode === 'test') {
+      return 'test'
+    }
+
     if (smsMode === 'console' || smsMode === 'manual' || smsMode === legacyConsoleAlias) {
-      return true
+      return 'console'
     }
 
     if (process.env['NODE_ENV'] === 'production') {
-      return false
+      return 'live'
     }
 
-    return !process.env['ALI_SMS_ACCESS_KEY_ID']?.trim()
+    const missingSmsConfig = !process.env['ALI_SMS_ACCESS_KEY_ID']?.trim()
       || !process.env['ALI_SMS_ACCESS_KEY_SECRET']?.trim()
       || !process.env['ALI_SMS_SIGN_NAME']?.trim()
       || !process.env['ALI_SMS_TEMPLATE_CODE']?.trim()
+
+    return missingSmsConfig ? 'console' : 'live'
+  }
+
+  private shouldUseConsoleSms() {
+    return this.resolveSmsMode() === 'console'
   }
 }
