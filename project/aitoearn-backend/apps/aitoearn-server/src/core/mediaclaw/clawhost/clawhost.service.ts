@@ -149,6 +149,11 @@ export class ClawHostService {
     }
   }
 
+  async getInstance(orgId: string, instanceId: string) {
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
+    return this.toResponse(instance)
+  }
+
   async installSkill(orgId: string, instanceId: string, skillId: string, version: string) {
     if (!skillId?.trim() || !version?.trim()) {
       throw new BadRequestException('skillId and version are required')
@@ -170,6 +175,34 @@ export class ClawHostService {
     return {
       instanceId: instance.instanceId,
       skill: nextSkills.find(item => item.skillId === skillId) || null,
+      installedSkills: nextSkills.length,
+    }
+  }
+
+  async uninstallSkill(orgId: string, instanceId: string, skillId: string) {
+    if (!skillId?.trim()) {
+      throw new BadRequestException('skillId is required')
+    }
+
+    const instance = await this.clawHostInstanceModel.findOne({
+      instanceId,
+      orgId: orgId.trim(),
+    }).exec()
+    if (!instance) {
+      throw new NotFoundException('ClawHost instance not found')
+    }
+
+    const nextSkills = (instance.skills || []).filter(item => item.skillId !== skillId.trim())
+    if (nextSkills.length === (instance.skills || []).length) {
+      throw new NotFoundException('ClawHost skill not found')
+    }
+
+    instance.set('skills', nextSkills)
+    await instance.save()
+
+    return {
+      instanceId: instance.instanceId,
+      removedSkillId: skillId.trim(),
       installedSkills: nextSkills.length,
     }
   }

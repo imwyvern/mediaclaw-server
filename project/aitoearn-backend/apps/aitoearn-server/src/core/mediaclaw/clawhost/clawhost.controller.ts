@@ -1,5 +1,6 @@
 import {
   Body,
+  Delete,
   Get,
   Param,
   Post,
@@ -62,6 +63,22 @@ export class ClawHostController {
     return this.clawHostService.getInstanceHealth(user.orgId || user.id, instanceId)
   }
 
+  @Get('instances/:id')
+  async getInstance(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.getInstance(user.orgId || user.id, instanceId)
+  }
+
+  @Get('instances/:id/status')
+  async getInstanceStatus(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.getInstanceHealth(user.orgId || user.id, instanceId)
+  }
+
   @Post('instances/:id/skills')
   async installSkill(
     @GetToken() user: { orgId?: string, id: string },
@@ -74,6 +91,15 @@ export class ClawHostController {
       body.skillId,
       body.version,
     )
+  }
+
+  @Delete('instances/:id/skills/:skillId')
+  async uninstallSkill(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+    @Param('skillId') skillId: string,
+  ) {
+    return this.clawHostService.uninstallSkill(user.orgId || user.id, instanceId, skillId)
   }
 
   @Put('skills/:skillId/upgrade')
