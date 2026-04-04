@@ -32,7 +32,7 @@ services:
       interval: 20s
       timeout: 5s
       retries: 5
-      start_period: 40s
+      start_period: 180s
     mem_limit: ${API_MEM_LIMIT:-768m}
     cpus: ${API_CPUS:-1.50}
     networks:
@@ -73,7 +73,7 @@ services:
       interval: 20s
       timeout: 5s
       retries: 5
-      start_period: 40s
+      start_period: 180s
     mem_limit: ${WORKER_MEM_LIMIT:-768m}
     cpus: ${WORKER_CPUS:-1.50}
     networks:

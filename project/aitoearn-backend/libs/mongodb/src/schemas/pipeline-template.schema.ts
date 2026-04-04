@@ -106,4 +106,5 @@ export class PipelineTemplate extends WithTimestampSchema {
 export const PipelineTemplateSchema = SchemaFactory.createForClass(PipelineTemplate)
 PipelineTemplateSchema.index({ type: 1, isPublic: 1, usageCount: -1 })
 PipelineTemplateSchema.index({ templateId: 1 }, { unique: true, sparse: true })
-PipelineTemplateSchema.index({ status: 1, categories: 1, styles: 1 })
+PipelineTemplateSchema.index({ status: 1, categories: 1 })
+PipelineTemplateSchema.index({ status: 1, styles: 1 })

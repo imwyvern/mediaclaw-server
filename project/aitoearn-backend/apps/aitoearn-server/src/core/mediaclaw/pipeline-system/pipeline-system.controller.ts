@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Get,
   Param,
@@ -7,6 +8,7 @@ import {
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { PipelineType } from '@yikart/mongodb'
+import { Types } from 'mongoose'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { PipelineSystemService } from './pipeline-system.service'
@@ -54,12 +56,12 @@ export class PipelineSystemController {
     })
   }
 
-  @Get(':id([0-9a-fA-F]{24})')
+  @Get(':id')
   async getTemplate(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
-    return this.pipelineSystemService.getTemplate(id, user.id)
+    return this.pipelineSystemService.getTemplate(this.ensureObjectId(id, 'id'), user.id)
   }
 
-  @Post(':id([0-9a-fA-F]{24})/apply')
+  @Post(':id/apply')
   async applyTemplate(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
@@ -79,7 +81,7 @@ export class PipelineSystemController {
     },
   ) {
     return this.pipelineSystemService.applyTemplate(
-      id,
+      this.ensureObjectId(id, 'id'),
       user.id,
       user.orgId || user.id,
       body.brandId,
@@ -87,7 +89,7 @@ export class PipelineSystemController {
     )
   }
 
-  @Post(':id([0-9a-fA-F]{24})/learn')
+  @Post(':id/learn')
   async learnPreference(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
@@ -100,15 +102,23 @@ export class PipelineSystemController {
       notes?: string
     },
   ) {
-    return this.pipelineSystemService.learnPreference(user.orgId || user.id, id, body)
+    return this.pipelineSystemService.learnPreference(
+      user.orgId || user.id,
+      this.ensureObjectId(id, 'id'),
+      body,
+    )
   }
 
-  @Post(':id([0-9a-fA-F]{24})/warm-up')
+  @Post(':id/warm-up')
   async warmUp(
     @Param('id') id: string,
     @GetToken() user: MediaClawAuthUser,
   ) {
-    return this.pipelineSystemService.warmUp(user.orgId || user.id, id, user.id)
+    return this.pipelineSystemService.warmUp(
+      user.orgId || user.id,
+      this.ensureObjectId(id, 'id'),
+      user.id,
+    )
   }
 
   private parseBooleanQuery(value?: string) {
@@ -124,5 +134,13 @@ export class PipelineSystemController {
     }
 
     return undefined
+  }
+
+  private ensureObjectId(value: string, field: string) {
+    if (!Types.ObjectId.isValid(value)) {
+      throw new BadRequestException(`${field} is invalid`)
+    }
+
+    return value
   }
 }

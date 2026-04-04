@@ -171,6 +171,7 @@ export class PipelineMatchService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    await this.ensureTemplateIndexes()
     await this.ensureSeedTemplates()
   }
 
@@ -408,6 +409,44 @@ export class PipelineMatchService implements OnModuleInit {
     }
 
     this.logger.log(`Pipeline template seeds ensured: ${TEMPLATE_SEEDS.length}`)
+  }
+
+  private async ensureTemplateIndexes() {
+    await this.dropLegacyParallelArrayIndex()
+    await this.ensureTemplateIndex({ status: 1, categories: 1 }, 'status_1_categories_1')
+    await this.ensureTemplateIndex({ status: 1, styles: 1 }, 'status_1_styles_1')
+  }
+
+  private async dropLegacyParallelArrayIndex() {
+    const legacyIndexName = 'status_1_categories_1_styles_1'
+
+    try {
+      const indexes = await this.pipelineTemplateModel.collection.indexes()
+      if (!indexes.some(index => index.name === legacyIndexName)) {
+        return
+      }
+
+      await this.pipelineTemplateModel.collection.dropIndex(legacyIndexName)
+      this.logger.warn(`Dropped incompatible legacy index: ${legacyIndexName}`)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('index not found')) {
+        return
+      }
+
+      throw error
+    }
+  }
+
+  private async ensureTemplateIndex(indexSpec: Record<string, 1 | -1>, expectedName: string) {
+    const indexes = await this.pipelineTemplateModel.collection.indexes()
+    if (indexes.some(index => index.name === expectedName)) {
+      return
+    }
+
+    await this.pipelineTemplateModel.collection.createIndex(indexSpec)
+    this.logger.log(`Ensured pipeline template index: ${expectedName}`)
   }
 
   private normalizeMatchRequest(
