@@ -4,6 +4,7 @@ import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { Brand, CopyHistory, OrgApiKeyProvider, Organization, UsageHistoryType } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { ModelResolverService } from '../model-resolver/model-resolver.service'
 import { ByokService } from '../settings/byok.service'
 import { UsageService } from '../usage/usage.service'
 
@@ -26,7 +27,7 @@ export interface GeneratedTextResult {
   provider: CopyProvider
 }
 
-type CopyProvider = 'deepseek' | 'gemini' | 'heuristic'
+type CopyProvider = 'deepseek' | 'gemini' | 'openai' | 'heuristic'
 
 interface CopyHistoryPayload extends GeneratedCopy {
   orgId?: string | null
@@ -101,6 +102,20 @@ interface GeminiResponse {
   }
 }
 
+interface OpenAiResponse {
+  choices?: Array<{
+    message?: {
+      content?: string
+    }
+  }>
+  model?: string
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  }
+}
+
 interface CopyStrategyPromptHints {
   promptGuidance?: string
   recommendedTones?: string[]
@@ -119,6 +134,7 @@ export class CopyEngineService {
     @InjectModel(Organization.name) private readonly organizationModel: Model<Organization>,
     @Optional() private readonly usageService?: UsageService,
     @Optional() private readonly byokService?: ByokService,
+    @Optional() private readonly modelResolverService?: ModelResolverService,
   ) {}
 
   async generateCopy(
@@ -406,14 +422,16 @@ export class CopyEngineService {
     prompt: string,
     metadata: Record<string, any>,
   ): Promise<CopyLlmResult> {
-    const provider = await this.resolveProvider(metadata)
+    const runtime = await this.resolveProviderConfig(metadata)
 
     try {
-      switch (provider) {
+      switch (runtime.provider) {
         case 'deepseek':
-          return await this.generateWithDeepSeek(prompt, metadata)
+          return await this.generateWithDeepSeek(prompt, metadata, runtime.model)
         case 'gemini':
-          return await this.generateWithGemini(prompt, metadata)
+          return await this.generateWithGemini(prompt, metadata, runtime.model)
+        case 'openai':
+          return await this.generateWithOpenAi(prompt, metadata, runtime.model)
         default:
           return this.createEmptyLlmResult('heuristic')
       }
@@ -434,14 +452,16 @@ export class CopyEngineService {
       fallbackText?: string
     } = {},
   ): Promise<CopyTextLlmResult> {
-    const provider = await this.resolveProvider(metadata)
+    const runtime = await this.resolveProviderConfig(metadata)
 
     try {
-      switch (provider) {
+      switch (runtime.provider) {
         case 'deepseek':
-          return await this.generateTextWithDeepSeek(prompt, metadata, options)
+          return await this.generateTextWithDeepSeek(prompt, metadata, options, runtime.model)
         case 'gemini':
-          return await this.generateTextWithGemini(prompt, metadata, options)
+          return await this.generateTextWithGemini(prompt, metadata, options, runtime.model)
+        case 'openai':
+          return await this.generateTextWithOpenAi(prompt, metadata, options, runtime.model)
         default:
           return this.createEmptyTextLlmResult('heuristic', options.fallbackText)
       }
@@ -453,28 +473,87 @@ export class CopyEngineService {
     }
   }
 
-  private async resolveProvider(metadata: Record<string, any>): Promise<CopyProvider> {
+  private async resolveProviderConfig(metadata: Record<string, any>) {
+    const orgId = this.readMetadataObjectId(metadata, 'orgId')
+    const pipelineId = this.readMetadataObjectId(metadata, 'pipelineId')
+    if (this.modelResolverService && orgId) {
+      const resolved = await this.modelResolverService.resolveCapability(orgId, 'copy', pipelineId)
+      const provider = this.mapProviderEnum(resolved.provider)
+      if (provider !== 'heuristic') {
+        const apiKey = await this.resolveApiKey(metadata, resolved.provider, this.fallbackEnvNames(resolved.provider))
+        if (apiKey) {
+          return {
+            provider,
+            model: resolved.runtimeModel,
+          }
+        }
+      }
+    }
+
     const configuredProvider = process.env['MEDIACLAW_COPY_PROVIDER']?.trim().toLowerCase()
-    const deepseekKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
-    const geminiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
+    const deepseekKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.DEEPSEEK,
+      ['MEDIACLAW_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'],
+    )
+    const geminiKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.GEMINI,
+      ['MEDIACLAW_GEMINI_API_KEY', 'GEMINI_API_KEY'],
+    )
+    const openAiKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.OPENAI,
+      ['MEDIACLAW_OPENAI_API_KEY', 'OPENAI_API_KEY'],
+    )
     if (configuredProvider === 'deepseek' && deepseekKey) {
-      return 'deepseek'
+      return {
+        provider: 'deepseek' as const,
+        model: process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || process.env['DEEPSEEK_MODEL']?.trim() || 'deepseek-chat',
+      }
     }
     if (configuredProvider === 'gemini' && geminiKey) {
-      return 'gemini'
+      return {
+        provider: 'gemini' as const,
+        model: process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || process.env['GEMINI_MODEL']?.trim() || 'gemini-2.5-flash',
+      }
+    }
+    if (configuredProvider === 'openai' && openAiKey) {
+      return {
+        provider: 'openai' as const,
+        model: process.env['MEDIACLAW_OPENAI_MODEL']?.trim() || process.env['OPENAI_MODEL']?.trim() || 'gpt-4o',
+      }
     }
     if (configuredProvider === 'heuristic') {
-      return 'heuristic'
+      return {
+        provider: 'heuristic' as const,
+        model: '',
+      }
     }
 
     if (deepseekKey) {
-      return 'deepseek'
+      return {
+        provider: 'deepseek' as const,
+        model: process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || process.env['DEEPSEEK_MODEL']?.trim() || 'deepseek-chat',
+      }
     }
     if (geminiKey) {
-      return 'gemini'
+      return {
+        provider: 'gemini' as const,
+        model: process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || process.env['GEMINI_MODEL']?.trim() || 'gemini-2.5-flash',
+      }
+    }
+    if (openAiKey) {
+      return {
+        provider: 'openai' as const,
+        model: process.env['MEDIACLAW_OPENAI_MODEL']?.trim() || process.env['OPENAI_MODEL']?.trim() || 'gpt-4o',
+      }
     }
 
-    return 'heuristic'
+    return {
+      provider: 'heuristic' as const,
+      model: '',
+    }
   }
   private buildPrompt(input: {
     brandName: string
@@ -585,14 +664,25 @@ export class CopyEngineService {
     ].filter(Boolean).join('\n')
   }
 
-  private async generateWithDeepSeek(prompt: string, metadata: Record<string, any>): Promise<CopyLlmResult> {
-    const apiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
+  private async generateWithDeepSeek(
+    prompt: string,
+    metadata: Record<string, any>,
+    modelOverride?: string,
+  ): Promise<CopyLlmResult> {
+    const apiKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.DEEPSEEK,
+      ['MEDIACLAW_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'],
+    )
     if (!apiKey) {
       return this.createEmptyLlmResult('heuristic')
     }
 
     const baseUrl = process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com'
-    const model = process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || 'deepseek-chat'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim()
+      || process.env['DEEPSEEK_MODEL']?.trim()
+      || 'deepseek-chat'
     const response = await this.requestJson<DeepSeekResponse>(
       `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
       {
@@ -630,14 +720,25 @@ export class CopyEngineService {
     }
   }
 
-  private async generateWithGemini(prompt: string, metadata: Record<string, any>): Promise<CopyLlmResult> {
-    const apiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
+  private async generateWithGemini(
+    prompt: string,
+    metadata: Record<string, any>,
+    modelOverride?: string,
+  ): Promise<CopyLlmResult> {
+    const apiKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.GEMINI,
+      ['MEDIACLAW_GEMINI_API_KEY', 'GEMINI_API_KEY'],
+    )
     if (!apiKey) {
       return this.createEmptyLlmResult('heuristic')
     }
 
     const baseUrl = process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta'
-    const model = process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_GEMINI_MODEL']?.trim()
+      || process.env['GEMINI_MODEL']?.trim()
+      || 'gemini-2.5-flash'
     const response = await this.requestJson<GeminiResponse>(
       `${baseUrl.replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
       {
@@ -677,6 +778,62 @@ export class CopyEngineService {
     }
   }
 
+  private async generateWithOpenAi(
+    prompt: string,
+    metadata: Record<string, any>,
+    modelOverride?: string,
+  ): Promise<CopyLlmResult> {
+    const apiKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.OPENAI,
+      ['MEDIACLAW_OPENAI_API_KEY', 'OPENAI_API_KEY'],
+    )
+    if (!apiKey) {
+      return this.createEmptyLlmResult('heuristic')
+    }
+
+    const baseUrl = process.env['MEDIACLAW_OPENAI_BASE_URL']?.trim() || process.env['OPENAI_BASE_URL']?.trim() || 'https://api.openai.com/v1'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_OPENAI_MODEL']?.trim()
+      || process.env['OPENAI_MODEL']?.trim()
+      || 'gpt-4o'
+    const response = await this.requestJson<OpenAiResponse>(
+      `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: 'Return valid JSON only.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.8,
+          response_format: { type: 'json_object' },
+        }),
+        timeoutMs: 60_000,
+      },
+    )
+
+    const content = response.choices?.[0]?.message?.content || ''
+
+    return {
+      draft: content ? this.parseDraft(content) : null,
+      tokenUsage: this.buildTokenUsage({
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        totalTokens: response.usage?.total_tokens,
+        model: response.model || model,
+        prompt,
+        completion: content,
+      }),
+      provider: 'openai',
+    }
+  }
+
   private async generateTextWithDeepSeek(
     prompt: string,
     metadata: Record<string, any>,
@@ -685,14 +842,22 @@ export class CopyEngineService {
       temperature?: number
       fallbackText?: string
     } = {},
+    modelOverride?: string,
   ): Promise<CopyTextLlmResult> {
-    const apiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.DEEPSEEK, 'MEDIACLAW_DEEPSEEK_API_KEY')
+    const apiKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.DEEPSEEK,
+      ['MEDIACLAW_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'],
+    )
     if (!apiKey) {
       return this.createEmptyTextLlmResult('heuristic', options.fallbackText)
     }
 
     const baseUrl = process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com'
-    const model = process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || 'deepseek-chat'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim()
+      || process.env['DEEPSEEK_MODEL']?.trim()
+      || 'deepseek-chat'
     const response = await this.requestJson<DeepSeekResponse>(
       `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
       {
@@ -737,14 +902,22 @@ export class CopyEngineService {
       temperature?: number
       fallbackText?: string
     } = {},
+    modelOverride?: string,
   ): Promise<CopyTextLlmResult> {
-    const apiKey = await this.resolveApiKey(metadata, OrgApiKeyProvider.GEMINI, 'MEDIACLAW_GEMINI_API_KEY')
+    const apiKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.GEMINI,
+      ['MEDIACLAW_GEMINI_API_KEY', 'GEMINI_API_KEY'],
+    )
     if (!apiKey) {
       return this.createEmptyTextLlmResult('heuristic', options.fallbackText)
     }
 
     const baseUrl = process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta'
-    const model = process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_GEMINI_MODEL']?.trim()
+      || process.env['GEMINI_MODEL']?.trim()
+      || 'gemini-2.5-flash'
     const response = await this.requestJson<GeminiResponse>(
       `${baseUrl.replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
       {
@@ -788,10 +961,70 @@ export class CopyEngineService {
     }
   }
 
+  private async generateTextWithOpenAi(
+    prompt: string,
+    metadata: Record<string, any>,
+    options: {
+      systemPrompt?: string
+      temperature?: number
+      fallbackText?: string
+    } = {},
+    modelOverride?: string,
+  ): Promise<CopyTextLlmResult> {
+    const apiKey = await this.resolveApiKey(
+      metadata,
+      OrgApiKeyProvider.OPENAI,
+      ['MEDIACLAW_OPENAI_API_KEY', 'OPENAI_API_KEY'],
+    )
+    if (!apiKey) {
+      return this.createEmptyTextLlmResult('heuristic', options.fallbackText)
+    }
+
+    const baseUrl = process.env['MEDIACLAW_OPENAI_BASE_URL']?.trim() || process.env['OPENAI_BASE_URL']?.trim() || 'https://api.openai.com/v1'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_OPENAI_MODEL']?.trim()
+      || process.env['OPENAI_MODEL']?.trim()
+      || 'gpt-4o'
+    const response = await this.requestJson<OpenAiResponse>(
+      `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: options.systemPrompt?.trim() || 'Return plain text only.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: typeof options.temperature === 'number' ? options.temperature : 0.7,
+        }),
+        timeoutMs: 60_000,
+      },
+    )
+
+    const text = (response.choices?.[0]?.message?.content || '').trim()
+
+    return {
+      text: text || options.fallbackText?.trim() || '',
+      tokenUsage: this.buildTokenUsage({
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        totalTokens: response.usage?.total_tokens,
+        model: response.model || model,
+        prompt,
+        completion: text,
+      }),
+      provider: 'openai',
+    }
+  }
+
   private async resolveApiKey(
     metadata: Record<string, any>,
     provider: OrgApiKeyProvider,
-    fallbackEnvName: string,
+    fallbackEnvName: string | readonly string[],
   ) {
     const orgId = this.readMetadataObjectId(metadata, 'orgId')
     if (this.byokService) {
@@ -801,7 +1034,47 @@ export class CopyEngineService {
       }
     }
 
-    return process.env[fallbackEnvName]?.trim() || ''
+    const envNames = Array.isArray(fallbackEnvName) ? fallbackEnvName : [fallbackEnvName]
+    for (const envName of envNames) {
+      const value = process.env[envName]?.trim()
+      if (value) {
+        return value
+      }
+    }
+
+    return ''
+  }
+
+  private fallbackEnvNames(provider: OrgApiKeyProvider) {
+    switch (provider) {
+      case OrgApiKeyProvider.DEEPSEEK:
+        return ['MEDIACLAW_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'] as const
+      case OrgApiKeyProvider.GEMINI:
+        return ['MEDIACLAW_GEMINI_API_KEY', 'GEMINI_API_KEY'] as const
+      case OrgApiKeyProvider.OPENAI:
+        return ['MEDIACLAW_OPENAI_API_KEY', 'OPENAI_API_KEY'] as const
+      case OrgApiKeyProvider.VCE:
+        return ['VCE_GEMINI_API_KEY', 'MEDIACLAW_VCE_API_KEY'] as const
+      case OrgApiKeyProvider.KLING:
+        return ['KLING_API_KEY', 'MEDIACLAW_KLING_API_KEY'] as const
+      case OrgApiKeyProvider.TIKHUB:
+        return ['TIKHUB_API_KEY', 'MEDIACLAW_TIKHUB_API_KEY'] as const
+      default:
+        return [] as const
+    }
+  }
+
+  private mapProviderEnum(provider: OrgApiKeyProvider): CopyProvider {
+    switch (provider) {
+      case OrgApiKeyProvider.DEEPSEEK:
+        return 'deepseek'
+      case OrgApiKeyProvider.GEMINI:
+        return 'gemini'
+      case OrgApiKeyProvider.OPENAI:
+        return 'openai'
+      default:
+        return 'heuristic'
+    }
   }
   private normalizeGeneratedCopy(input: {
     draft: GeneratedCopyDraft | null

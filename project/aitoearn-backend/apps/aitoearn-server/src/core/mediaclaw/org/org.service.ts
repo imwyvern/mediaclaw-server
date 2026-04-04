@@ -5,14 +5,17 @@ import {
   normalizeUserRole,
   Organization,
   OrganizationEnterpriseProfile,
+  OrganizationModelPreferenceKey,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { ModelResolverService } from '../model-resolver/model-resolver.service'
 
 @Injectable()
 export class OrgService {
   constructor(
     @InjectModel(Organization.name) private readonly orgModel: Model<Organization>,
     @InjectModel(MediaClawUser.name) private readonly mediaClawUserModel: Model<MediaClawUser>,
+    private readonly modelResolverService: ModelResolverService,
   ) {}
 
   async createForCurrentOrg(orgId: string, data: Partial<Organization>) {
@@ -82,6 +85,32 @@ export class OrgService {
         updatedAt: member.updatedAt || null,
       }
     })
+  }
+
+  async getModelPreferences(orgId: string) {
+    return this.modelResolverService.getOrganizationModelSettings(orgId)
+  }
+
+  async updateModelPreferences(
+    orgId: string,
+    preferences: Partial<Record<OrganizationModelPreferenceKey, string | null | undefined>>,
+  ) {
+    const normalized = await this.modelResolverService.validateOrganizationPreferences(orgId, preferences)
+    const updated = await this.orgModel.findByIdAndUpdate(
+      this.toObjectId(orgId),
+      {
+        $set: {
+          modelPreferences: normalized,
+        },
+      },
+      { new: true },
+    ).exec()
+
+    if (!updated) {
+      throw new NotFoundException('Organization not found')
+    }
+
+    return this.modelResolverService.getOrganizationModelSettings(orgId)
   }
 
   private pickEditableFields(data: Partial<Organization>) {

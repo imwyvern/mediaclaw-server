@@ -149,5 +149,5 @@ export class PublishErrorData {
   message: string
 
   @Prop({ required: false, type: mongoose.Schema.Types.Mixed })
-  originalData?: any
+  originalData?: Record<string, unknown>
 }

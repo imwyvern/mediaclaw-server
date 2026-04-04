@@ -13,6 +13,108 @@ import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
 import { PublishErrorData } from './publishing-task-meta.schema'
 import { WithTimestampSchema } from './timestamp.schema'
 
+interface PublishRecordBilibiliOption {
+  tid?: number
+  copyright?: 1 | 2
+  no_reprint?: number
+  source?: string
+  topic_id?: number
+  [key: string]: unknown
+}
+
+interface PublishRecordDouyinOption {
+  downloadType?: string | number
+  privateStatus?: string | number
+  shareId?: string
+}
+
+interface PublishRecordFacebookOption {
+  page_id?: string
+  content_category?: string
+  content_tags?: string[]
+  custom_labels?: string[]
+  direct_share_status?: number
+  embeddable?: boolean
+}
+
+interface PublishRecordGoogleBusinessOption {
+  topicType?: 'STANDARD' | 'EVENT' | 'OFFER'
+  callToAction?: {
+    actionType?: string
+    url?: string
+  }
+  offer?: {
+    couponCode?: string
+    redeemOnlineUrl?: string
+    termsConditions?: string
+  }
+  event?: {
+    title?: string
+    startDate?: string
+    startTime?: string
+    endDate?: string
+    endTime?: string
+  }
+}
+
+interface PublishRecordInstagramOption {
+  content_category?: string
+  alt_text?: string
+  caption?: string
+  collaborators?: string[]
+  cover_url?: string
+  image_url?: string
+  location_id?: string
+  product_tags?: Array<Record<string, unknown>>
+  user_tags?: Array<Record<string, unknown>>
+}
+
+interface PublishRecordPinterestOption {
+  boardId?: string
+}
+
+interface PublishRecordThreadsOption {
+  reply_control?: string
+  allowlisted_country_codes?: string[]
+  alt_text?: string
+  auto_publish_text?: boolean
+  topic_tags?: string
+  location_id?: string
+}
+
+interface PublishRecordTiktokOption {
+  privacy_level?: string
+  disable_duet?: boolean
+  disable_stitch?: boolean
+  disable_comment?: boolean
+  brand_organic_toggle?: boolean
+  brand_content_toggle?: boolean
+}
+
+interface PublishRecordWxGzhOption extends Record<string, unknown> {}
+
+interface PublishRecordYoutubeOption {
+  license?: string
+  categoryId?: string
+  privacyStatus?: string
+  notifySubscribers?: boolean
+  embeddable?: boolean
+  selfDeclaredMadeForKids?: boolean
+}
+
+export interface PublishRecordOption {
+  bilibili?: PublishRecordBilibiliOption
+  douyin?: PublishRecordDouyinOption
+  facebook?: PublishRecordFacebookOption
+  googleBusiness?: PublishRecordGoogleBusinessOption
+  instagram?: PublishRecordInstagramOption
+  pinterest?: PublishRecordPinterestOption
+  threads?: PublishRecordThreadsOption
+  tiktok?: PublishRecordTiktokOption
+  wxGzh?: PublishRecordWxGzhOption
+  youtube?: PublishRecordYoutubeOption
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'publishRecord' })
 export class PublishRecord extends WithTimestampSchema {
   id: string
@@ -157,7 +259,7 @@ export class PublishRecord extends WithTimestampSchema {
     required: false,
     type: mongoose.Schema.Types.Mixed,
   })
-  option?: any
+  option?: PublishRecordOption
 
   @Prop({
     required: false,

@@ -12,6 +12,7 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { ModelResolverModule } from '../model-resolver/model-resolver.module'
 import { SettingsModule } from '../settings/settings.module'
 import { CopyEngineService } from './copy-engine.service'
 import { CopyStrategyService } from './copy-strategy.service'
@@ -28,6 +29,7 @@ import { StyleRewriteService } from './style-rewrite.service'
       { name: Organization.name, schema: OrganizationSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
+    ModelResolverModule,
     SettingsModule,
   ],
   controllers: [CopyController],

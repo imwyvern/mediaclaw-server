@@ -41,6 +41,25 @@ export interface OrganizationApiKeyEntry {
 }
 
 export type OrganizationApiKeyMap = Partial<Record<OrgApiKeyProvider, OrganizationApiKeyEntry>>
+export type OrganizationModelPreferenceKey = 'chat' | 'copy' | 'frameEdit' | 'videoGen' | 'analysis'
+
+@Schema({ _id: false })
+export class OrganizationModelPreferences {
+  @Prop({ type: String, default: 'deepseek-v3' })
+  chat: string
+
+  @Prop({ type: String, default: 'deepseek-v3' })
+  copy: string
+
+  @Prop({ type: String, default: 'gemini-2.5-flash-image' })
+  frameEdit: string
+
+  @Prop({ type: String, default: 'kling-v3-omni' })
+  videoGen: string
+
+  @Prop({ type: String, default: 'deepseek-v3' })
+  analysis: string
+}
 
 @Schema({ _id: false })
 class OrganizationVideoCredits {
@@ -125,6 +144,15 @@ export class Organization extends WithTimestampSchema {
   @Prop({ type: Number, default: 0 })
   monthlyUsed: number
 
+  @Prop({ type: Number, default: 0 })
+  monthlyTokenQuota: number
+
+  @Prop({ type: Number, default: 0 })
+  currentMonthTokens: number
+
+  @Prop({ type: Number, default: 1 })
+  tokenQuotaResetDay: number
+
   @Prop({ type: Date, default: null })
   subscriptionExpiresAt: Date | null
 
@@ -145,6 +173,9 @@ export class Organization extends WithTimestampSchema {
 
   @Prop({ type: Object, default: {} })
   apiKeys: OrganizationApiKeyMap
+
+  @Prop({ type: OrganizationModelPreferences, default: () => ({}) })
+  modelPreferences: OrganizationModelPreferences
 
   @Prop({ type: Object, default: {} })
   settings: Record<string, any>

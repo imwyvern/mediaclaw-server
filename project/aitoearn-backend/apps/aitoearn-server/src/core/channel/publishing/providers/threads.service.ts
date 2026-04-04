@@ -106,8 +106,7 @@ export class ThreadsPublishService extends PublishService {
         text: publishTask.desc || '',
       }
       if (locationId) {
-        createContainerReq.location_id
-          = publishTask.option.threads.location_id
+        createContainerReq.location_id = locationId
       }
       if (publishTask.topics && publishTask.topics.length > 0) {
         createContainerReq.topic_tag = publishTask.topics[0]

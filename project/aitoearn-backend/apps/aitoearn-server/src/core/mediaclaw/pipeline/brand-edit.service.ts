@@ -39,12 +39,13 @@ export class BrandEditService {
   ) {}
 
   async applyBranding(context: PipelineJobContext): Promise<BrandEditRunResult> {
-    const runtime = await this.resolveRuntimeConfig(context.orgId)
+    const resolvedModel = context.models.frameEdit
+    const runtime = await this.resolveRuntimeConfig(context.orgId, resolvedModel.runtimeModel)
     if (!runtime) {
       return {
         artifacts: await this.copySourceFrames(context),
         result: {
-          provider: 'vce_gemini',
+          provider: resolvedModel.id,
           status: 'skipped',
           reason: 'no_api_key',
         },
@@ -76,12 +77,12 @@ export class BrandEditService {
       artifacts,
       result: fallbackReason
         ? {
-            provider: 'vce_gemini',
+            provider: resolvedModel.id,
             status: 'skipped',
             reason: fallbackReason,
           }
         : {
-            provider: 'vce_gemini',
+            provider: resolvedModel.id,
             status: 'completed',
           },
     }
@@ -102,7 +103,10 @@ export class BrandEditService {
     return artifacts
   }
 
-  private async resolveRuntimeConfig(orgId?: string | null): Promise<BrandEditRuntimeConfig | null> {
+  private async resolveRuntimeConfig(
+    orgId?: string | null,
+    runtimeModelOverride?: string,
+  ): Promise<BrandEditRuntimeConfig | null> {
     const provider = this.configService.getString(
       ['MEDIACLAW_BRAND_EDIT_PROVIDER'],
       'vectorengine',
@@ -129,7 +133,7 @@ export class BrandEditService {
         ['VCE_GEMINI_EDIT_PATH', 'MEDIACLAW_VCE_EDIT_PATH'],
         '/v1/images/edits',
       ),
-      model: this.configService.getString(
+      model: runtimeModelOverride || this.configService.getString(
         ['VCE_GEMINI_IMAGE_MODEL', 'MEDIACLAW_VCE_MODEL'],
         'gemini-2.5-flash-image',
       ),

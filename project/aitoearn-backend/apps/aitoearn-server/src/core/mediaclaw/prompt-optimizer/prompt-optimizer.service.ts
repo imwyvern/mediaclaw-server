@@ -13,6 +13,7 @@ import {
 } from '@yikart/mongodb'
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
+import { ModelResolverService } from '../model-resolver/model-resolver.service'
 import type { PipelineJobContext } from '../pipeline/pipeline.types'
 import { ByokService } from '../settings/byok.service'
 import {
@@ -87,6 +88,8 @@ export class PromptOptimizerLoopService {
     private readonly workerQueue?: Queue<VideoWorkerJobData>,
     @Optional()
     private readonly byokService?: ByokService,
+    @Optional()
+    private readonly modelResolverService?: ModelResolverService,
   ) {}
 
   async analyzeFailure(
@@ -241,10 +244,14 @@ export class PromptOptimizerLoopService {
 
     try {
       if (provider.name === 'deepseek') {
-        return await this.requestDeepSeekOptimization(provider.apiKey, llmPrompt)
+        return await this.requestDeepSeekOptimization(provider.apiKey, llmPrompt, provider.model)
       }
 
-      return await this.requestGeminiOptimization(provider.apiKey, llmPrompt)
+      if (provider.name === 'openai') {
+        return await this.requestOpenAiOptimization(provider.apiKey, llmPrompt, provider.model)
+      }
+
+      return await this.requestGeminiOptimization(provider.apiKey, llmPrompt, provider.model)
     }
     catch (error) {
       const message = error instanceof Error ? error.message : 'unknown_prompt_optimizer_llm_error'
@@ -919,6 +926,25 @@ export class PromptOptimizerLoopService {
   }
 
   private async resolveOptimizationProvider(orgId?: string | null) {
+    if (this.modelResolverService && orgId) {
+      const resolved = await this.modelResolverService.resolveCapability(orgId, 'analysis')
+      const name = this.mapProvider(resolved.provider)
+      if (name !== 'heuristic') {
+        const apiKey = await this.resolveApiKey(
+          orgId,
+          resolved.provider,
+          this.fallbackEnvNames(resolved.provider),
+        )
+        if (apiKey) {
+          return {
+            name,
+            apiKey,
+            model: resolved.runtimeModel,
+          }
+        }
+      }
+    }
+
     const preferredProvider = process.env['MEDIACLAW_PROMPT_OPTIMIZER_PROVIDER']?.trim().toLowerCase()
     const deepseekKey = await this.resolveApiKey(
       orgId,
@@ -930,18 +956,53 @@ export class PromptOptimizerLoopService {
       OrgApiKeyProvider.GEMINI,
       ['MEDIACLAW_GEMINI_API_KEY', 'GEMINI_API_KEY'],
     )
+    const openAiKey = await this.resolveApiKey(
+      orgId,
+      OrgApiKeyProvider.OPENAI,
+      ['MEDIACLAW_OPENAI_API_KEY', 'OPENAI_API_KEY'],
+    )
 
     if (preferredProvider === 'deepseek' && deepseekKey) {
-      return { name: 'deepseek' as const, apiKey: deepseekKey }
+      return {
+        name: 'deepseek' as const,
+        apiKey: deepseekKey,
+        model: process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || process.env['DEEPSEEK_MODEL']?.trim() || 'deepseek-chat',
+      }
     }
     if (preferredProvider === 'gemini' && geminiKey) {
-      return { name: 'gemini' as const, apiKey: geminiKey }
+      return {
+        name: 'gemini' as const,
+        apiKey: geminiKey,
+        model: process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || process.env['GEMINI_MODEL']?.trim() || 'gemini-2.5-flash',
+      }
+    }
+    if (preferredProvider === 'openai' && openAiKey) {
+      return {
+        name: 'openai' as const,
+        apiKey: openAiKey,
+        model: process.env['MEDIACLAW_OPENAI_MODEL']?.trim() || process.env['OPENAI_MODEL']?.trim() || 'gpt-4o',
+      }
     }
     if (deepseekKey) {
-      return { name: 'deepseek' as const, apiKey: deepseekKey }
+      return {
+        name: 'deepseek' as const,
+        apiKey: deepseekKey,
+        model: process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || process.env['DEEPSEEK_MODEL']?.trim() || 'deepseek-chat',
+      }
     }
     if (geminiKey) {
-      return { name: 'gemini' as const, apiKey: geminiKey }
+      return {
+        name: 'gemini' as const,
+        apiKey: geminiKey,
+        model: process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || process.env['GEMINI_MODEL']?.trim() || 'gemini-2.5-flash',
+      }
+    }
+    if (openAiKey) {
+      return {
+        name: 'openai' as const,
+        apiKey: openAiKey,
+        model: process.env['MEDIACLAW_OPENAI_MODEL']?.trim() || process.env['OPENAI_MODEL']?.trim() || 'gpt-4o',
+      }
     }
 
     return null
@@ -1002,9 +1063,12 @@ export class PromptOptimizerLoopService {
     ].join('\n')
   }
 
-  private async requestDeepSeekOptimization(apiKey: string, prompt: string) {
+  private async requestDeepSeekOptimization(apiKey: string, prompt: string, modelOverride?: string) {
     const baseUrl = process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com'
-    const model = process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || 'deepseek-chat'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim()
+      || process.env['DEEPSEEK_MODEL']?.trim()
+      || 'deepseek-chat'
     const response = await axios.post(
       `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
       {
@@ -1029,9 +1093,12 @@ export class PromptOptimizerLoopService {
     return this.extractOptimizedPrompt(content)
   }
 
-  private async requestGeminiOptimization(apiKey: string, prompt: string) {
+  private async requestGeminiOptimization(apiKey: string, prompt: string, modelOverride?: string) {
     const baseUrl = process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta'
-    const model = process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_GEMINI_MODEL']?.trim()
+      || process.env['GEMINI_MODEL']?.trim()
+      || 'gemini-2.5-flash'
     const response = await axios.post(
       `${baseUrl.replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
       {
@@ -1056,6 +1123,68 @@ export class PromptOptimizerLoopService {
 
     const content = response.data?.candidates?.[0]?.content?.parts?.[0]?.text
     return this.extractOptimizedPrompt(content)
+  }
+
+  private async requestOpenAiOptimization(apiKey: string, prompt: string, modelOverride?: string) {
+    const baseUrl = process.env['MEDIACLAW_OPENAI_BASE_URL']?.trim() || process.env['OPENAI_BASE_URL']?.trim() || 'https://api.openai.com/v1'
+    const model = modelOverride?.trim()
+      || process.env['MEDIACLAW_OPENAI_MODEL']?.trim()
+      || process.env['OPENAI_MODEL']?.trim()
+      || 'gpt-4o'
+    const response = await axios.post(
+      `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
+      {
+        model,
+        messages: [
+          { role: 'system', content: 'Return valid JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60_000,
+      },
+    )
+
+    const content = response.data?.choices?.[0]?.message?.content
+    return this.extractOptimizedPrompt(content)
+  }
+
+  private fallbackEnvNames(provider: OrgApiKeyProvider) {
+    switch (provider) {
+      case OrgApiKeyProvider.DEEPSEEK:
+        return ['MEDIACLAW_DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEY'] as const
+      case OrgApiKeyProvider.GEMINI:
+        return ['MEDIACLAW_GEMINI_API_KEY', 'GEMINI_API_KEY'] as const
+      case OrgApiKeyProvider.OPENAI:
+        return ['MEDIACLAW_OPENAI_API_KEY', 'OPENAI_API_KEY'] as const
+      case OrgApiKeyProvider.KLING:
+        return ['KLING_API_KEY', 'MEDIACLAW_KLING_API_KEY'] as const
+      case OrgApiKeyProvider.TIKHUB:
+        return ['TIKHUB_API_KEY', 'MEDIACLAW_TIKHUB_API_KEY'] as const
+      case OrgApiKeyProvider.VCE:
+        return ['VCE_GEMINI_API_KEY', 'MEDIACLAW_VCE_API_KEY'] as const
+      default:
+        return [] as const
+    }
+  }
+
+  private mapProvider(provider: OrgApiKeyProvider) {
+    switch (provider) {
+      case OrgApiKeyProvider.DEEPSEEK:
+        return 'deepseek' as const
+      case OrgApiKeyProvider.GEMINI:
+        return 'gemini' as const
+      case OrgApiKeyProvider.OPENAI:
+        return 'openai' as const
+      default:
+        return 'heuristic' as const
+    }
   }
 
   private extractOptimizedPrompt(value: unknown) {

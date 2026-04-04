@@ -6,6 +6,7 @@ import {
   Organization,
   OrganizationSchema,
 } from '@yikart/mongodb'
+import { ModelResolverModule } from '../model-resolver/model-resolver.module'
 import { OrgController } from './org.controller'
 import { OrgService } from './org.service'
 
@@ -15,6 +16,7 @@ import { OrgService } from './org.service'
       { name: Organization.name, schema: OrganizationSchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
     ]),
+    ModelResolverModule,
   ],
   controllers: [OrgController],
   providers: [OrgService],

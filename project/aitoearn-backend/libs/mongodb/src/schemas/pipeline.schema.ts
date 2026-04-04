@@ -72,6 +72,18 @@ class PipelineDispatchRules {
   strategy: string;
 }
 
+@Schema({ _id: false })
+export class PipelineModelOverrides {
+  @Prop({ type: String, default: '' })
+  copy?: string;
+
+  @Prop({ type: String, default: '' })
+  frameEdit?: string;
+
+  @Prop({ type: String, default: '' })
+  videoGen?: string;
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: "pipelines" })
 export class Pipeline extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -111,6 +123,9 @@ export class Pipeline extends WithTimestampSchema {
 
   @Prop({ type: PipelineDispatchRules, default: () => ({}) })
   distributionRules: PipelineDispatchRules;
+
+  @Prop({ type: PipelineModelOverrides, default: () => ({}) })
+  modelOverrides: PipelineModelOverrides;
 
   @Prop({ type: Number, default: 0 })
   totalVideosProduced: number;

@@ -47,7 +47,8 @@ export class VideoGenService {
   ) {}
 
   async generateSegments(context: PipelineJobContext): Promise<VideoGenRunResult> {
-    const runtime = await this.resolveRuntimeConfig(context.orgId)
+    const resolvedModel = context.models.videoGen
+    const runtime = await this.resolveRuntimeConfig(context.orgId, resolvedModel.runtimeModel)
     const segmentDurationSeconds = this.resolveSegmentDuration(context)
     const segmentPaths: string[] = []
 
@@ -61,7 +62,7 @@ export class VideoGenService {
     return {
       segmentPaths,
       result: {
-        provider: 'kling_v3',
+        provider: resolvedModel.id,
         status: 'completed',
       },
     }
@@ -159,7 +160,10 @@ export class VideoGenService {
     return finalOutputPath
   }
 
-  private async resolveRuntimeConfig(orgId?: string | null): Promise<VideoGenRuntimeConfig> {
+  private async resolveRuntimeConfig(
+    orgId?: string | null,
+    runtimeModelOverride?: string,
+  ): Promise<VideoGenRuntimeConfig> {
     const provider = this.configService.getString(
       ['MEDIACLAW_VIDEO_GEN_PROVIDER'],
       'kling',
@@ -188,7 +192,7 @@ export class VideoGenService {
         ['KLING_STATUS_PATH', 'MEDIACLAW_KLING_STATUS_PATH'],
         '/kling/v1/videos/omni-video/{taskId}',
       ),
-      model: this.configService.getString(
+      model: runtimeModelOverride || this.configService.getString(
         ['KLING_MODEL', 'MEDIACLAW_KLING_MODEL'],
         'kling-v3-omni',
       ),

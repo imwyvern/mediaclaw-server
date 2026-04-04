@@ -63,9 +63,15 @@ export class DouyinPubService extends PublishService {
 
   async immediatePublish(publishTask: PublishRecord): Promise<PublishingTaskResult> {
     const { desc, title, option, topics, videoUrl, imgUrlList } = publishTask
+    const downloadType = Number(option?.douyin?.downloadType) === DouyinDownloadType.Disallow
+      ? DouyinDownloadType.Disallow
+      : DouyinDownloadType.Allow
+    const privateStatus = Number(option?.douyin?.privateStatus)
     const options = {
-      downloadType: option?.douyin?.downloadType || DouyinDownloadType.Allow,
-      privateStatus: option?.douyin?.privateStatus || DouyinPrivateStatus.All,
+      downloadType,
+      privateStatus: privateStatus === DouyinPrivateStatus.Self || privateStatus === DouyinPrivateStatus.Friend
+        ? privateStatus
+        : DouyinPrivateStatus.All,
     }
 
     const { permalink } = await this.doPublish({

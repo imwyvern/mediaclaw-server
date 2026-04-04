@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import { Brand, BrandSchema, Pipeline, PipelineSchema, VideoTask, VideoTaskSchema } from '@yikart/mongodb'
 import { MediaclawConfigModule } from '../mediaclaw-config.module'
+import { ModelResolverModule } from '../model-resolver/model-resolver.module'
 import { BrandEditService } from './brand-edit.service'
 import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { DedupService } from './dedup.service'
@@ -20,6 +21,7 @@ import { VideoGenService } from './video-gen.service'
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
     MediaclawConfigModule,
+    ModelResolverModule,
   ],
   controllers: [PipelineController],
   providers: [

@@ -5,6 +5,7 @@ import { copyFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Model, Types } from 'mongoose'
 import type { GeneratedCopy } from '../copy/copy.service'
+import { ModelResolverService } from '../model-resolver/model-resolver.service'
 import { BrandEditService } from './brand-edit.service'
 import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { DedupService } from './dedup.service'
@@ -13,6 +14,7 @@ import {
   PipelineBrandProfile,
   PipelineJobContext,
   PipelineQualityReport,
+  PipelineResolvedModels,
   PipelineSubtitleVariant,
 } from './pipeline.types'
 import { QualityCheckService } from './quality-check.service'
@@ -34,6 +36,7 @@ export class PipelineService {
     private readonly subtitleService: SubtitleService,
     private readonly dedupService: DedupService,
     private readonly qualityCheckService: QualityCheckService,
+    private readonly modelResolverService: ModelResolverService,
   ) {}
 
   async create(orgId: string, brandId: string, data: Partial<Pipeline>) {
@@ -83,6 +86,24 @@ export class PipelineService {
     ).exec()
   }
 
+  async updateModelOverrides(orgId: string, id: string, overrides: Partial<Pipeline['modelOverrides']>) {
+    await this.findOwnedPipeline(orgId, id)
+    const normalized = await this.modelResolverService.validatePipelineOverrides(orgId, overrides)
+    return this.pipelineModel.findOneAndUpdate(
+      this.buildOwnedQuery(orgId, id),
+      {
+        $set: {
+          modelOverrides: {
+            copy: normalized.copy || '',
+            frameEdit: normalized.frameEdit || '',
+            videoGen: normalized.videoGen || '',
+          },
+        },
+      },
+      { new: true },
+    ).exec()
+  }
+
   async incrementVideoCount(id: string, field: 'totalVideosProduced' | 'totalVideosPublished') {
     return this.pipelineModel.findByIdAndUpdate(
       id,
@@ -99,6 +120,7 @@ export class PipelineService {
     const sourceMetadata = await this.frameExtractService.probeVideoMetadata(sourceVideoPath)
     const brand = await this.loadBrandProfile(task.brandId?.toString() || null)
     const pipeline = await this.loadPipelineDocument(task.pipelineId?.toString() || null)
+    const models = await this.resolveModels(task.orgId?.toString() || null, pipeline?._id?.toString?.() || null)
     const targetDurationSeconds = this.resolveTargetDuration(task.metadata, brand.preferredDuration, pipeline?.preferences?.preferredDuration)
     const aspectRatio = this.resolveAspectRatio(task.metadata, brand.aspectRatio, pipeline?.preferences?.aspectRatio)
     const resolution = this.readString(task.metadata, 'resolution')
@@ -130,6 +152,7 @@ export class PipelineService {
       ),
       preserveSourceAudio: sourceMetadata.hasAudio && this.readBoolean(task.metadata, 'reuseSourceAudio', true),
       prompts: {},
+      models,
     }
   }
 
@@ -263,6 +286,65 @@ export class PipelineService {
       aspectRatio: '9:16',
       subtitleStyle: {},
       referenceVideoUrl: '',
+    }
+  }
+
+  private async resolveModels(orgId: string | null, pipelineId: string | null): Promise<PipelineResolvedModels> {
+    if (!orgId || !Types.ObjectId.isValid(orgId)) {
+      return {
+        copy: this.createFallbackModel('copy', 'deepseek-v3', 'deepseek', 'deepseek-chat'),
+        frameEdit: this.createFallbackModel('frameEdit', 'gemini-2.5-flash-image', 'vce', 'gemini-2.5-flash-image'),
+        videoGen: this.createFallbackModel('videoGen', 'kling-v3-omni', 'kling', 'kling-v3-omni'),
+      }
+    }
+
+    const [copy, frameEdit, videoGen] = await Promise.all([
+      this.modelResolverService.resolveCapability(orgId, 'copy', pipelineId),
+      this.modelResolverService.resolveCapability(orgId, 'frameEdit', pipelineId),
+      this.modelResolverService.resolveCapability(orgId, 'videoGen', pipelineId),
+    ])
+
+    return {
+      copy: {
+        capability: 'copy',
+        id: copy.id,
+        label: copy.label,
+        provider: copy.provider,
+        runtimeModel: copy.runtimeModel,
+        source: copy.source,
+      },
+      frameEdit: {
+        capability: 'frameEdit',
+        id: frameEdit.id,
+        label: frameEdit.label,
+        provider: frameEdit.provider,
+        runtimeModel: frameEdit.runtimeModel,
+        source: frameEdit.source,
+      },
+      videoGen: {
+        capability: 'videoGen',
+        id: videoGen.id,
+        label: videoGen.label,
+        provider: videoGen.provider,
+        runtimeModel: videoGen.runtimeModel,
+        source: videoGen.source,
+      },
+    }
+  }
+
+  private createFallbackModel(
+    capability: 'copy' | 'frameEdit' | 'videoGen',
+    id: string,
+    provider: string,
+    runtimeModel: string,
+  ) {
+    return {
+      capability,
+      id,
+      label: id,
+      provider,
+      runtimeModel,
+      source: 'default' as const,
     }
   }
 

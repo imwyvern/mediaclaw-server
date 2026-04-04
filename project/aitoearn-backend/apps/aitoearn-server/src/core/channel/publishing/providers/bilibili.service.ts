@@ -84,6 +84,19 @@ export class BilibiliPubService extends PublishService {
 
     const thumbnail = await this.uploadThumbnail(accountId, publishTask.coverUrl)
     const videoUpToken = await this.uploadVideo(accountId, publishTask.videoUrl)
+    const bilibiliOption = publishTask.option?.bilibili || {}
+    const copyright = bilibiliOption.copyright === 2 ? 2 : 1
+    const noReprint = bilibiliOption.no_reprint === 1
+      ? 1
+      : bilibiliOption.no_reprint === 0
+        ? 0
+        : undefined
+    const source = typeof bilibiliOption.source === 'string'
+      ? bilibiliOption.source
+      : undefined
+    const topicId = typeof bilibiliOption.topic_id === 'number'
+      ? bilibiliOption.topic_id
+      : undefined
     const postId = await this.bilibiliService.archiveAddByUtoken(
       accountId,
       videoUpToken,
@@ -91,7 +104,11 @@ export class BilibiliPubService extends PublishService {
         title: publishTask.title || '',
         cover: thumbnail,
         desc: publishTask.desc,
-        ...publishTask.option!.bilibili!,
+        tid: typeof bilibiliOption.tid === 'number' ? bilibiliOption.tid : 160,
+        copyright,
+        no_reprint: noReprint,
+        source,
+        topic_id: topicId,
         tag: publishTask.topics?.join(','),
       },
     )

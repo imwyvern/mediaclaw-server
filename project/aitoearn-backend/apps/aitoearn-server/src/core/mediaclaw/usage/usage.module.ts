@@ -5,6 +5,8 @@ import {
   ApiUsageSchema,
   Brand,
   BrandSchema,
+  ConversationUsage,
+  ConversationUsageSchema,
   Organization,
   OrganizationSchema,
   Subscription,
@@ -16,6 +18,8 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { NotificationModule } from '../notification/notification.module'
+import { ConversationUsageService } from './conversation-usage.service'
 import { UsageApiController } from './usage-api.controller'
 import { UsageController } from './usage.controller'
 import { UsageReconciliationService } from './reconciliation.service'
@@ -29,14 +33,21 @@ import { UsageService } from './usage.service'
       { name: ApiUsage.name, schema: ApiUsageSchema },
       { name: Organization.name, schema: OrganizationSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
+      { name: ConversationUsage.name, schema: ConversationUsageSchema },
       { name: UsageHistory.name, schema: UsageHistorySchema },
       { name: VideoPack.name, schema: VideoPackSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
       { name: Brand.name, schema: BrandSchema },
     ]),
+    NotificationModule,
   ],
   controllers: [UsageController, UsageApiController],
-  providers: [UsageService, UsageTrackingInterceptor, UsageReconciliationService],
-  exports: [UsageService, UsageTrackingInterceptor],
+  providers: [
+    UsageService,
+    ConversationUsageService,
+    UsageTrackingInterceptor,
+    UsageReconciliationService,
+  ],
+  exports: [UsageService, ConversationUsageService, UsageTrackingInterceptor],
 })
 export class UsageModule {}

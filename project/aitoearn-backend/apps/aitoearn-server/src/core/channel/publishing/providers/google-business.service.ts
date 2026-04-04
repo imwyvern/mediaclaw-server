@@ -180,11 +180,14 @@ export class GoogleBusinessPubService extends PublishService {
    */
   private buildLocalPost(publishTask: PublishRecord): GoogleLocalPost {
     const option = publishTask.option?.googleBusiness || {}
+    const topicType = option.topicType === 'EVENT' || option.topicType === 'OFFER'
+      ? option.topicType
+      : 'STANDARD'
 
     const localPost: GoogleLocalPost = {
       languageCode: 'zh-CN',
       summary: this.generatePostMessage(publishTask),
-      topicType: option.topicType || 'STANDARD',
+      topicType,
     }
 
     // 图片
@@ -196,7 +199,7 @@ export class GoogleBusinessPubService extends PublishService {
     }
 
     // 行动号召
-    if (option.callToAction?.actionType) {
+    if (option.callToAction?.actionType && option.callToAction.url) {
       localPost.callToAction = {
         actionType: option.callToAction.actionType,
         url: option.callToAction.url,
@@ -204,7 +207,7 @@ export class GoogleBusinessPubService extends PublishService {
     }
 
     // 优惠信息
-    if (option.topicType === 'OFFER' && option.offer) {
+    if (topicType === 'OFFER' && option.offer) {
       localPost.offer = {
         couponCode: option.offer.couponCode,
         redeemOnlineUrl: option.offer.redeemOnlineUrl,
@@ -213,7 +216,7 @@ export class GoogleBusinessPubService extends PublishService {
     }
 
     // 活动信息
-    if (option.topicType === 'EVENT' && option.event) {
+    if (topicType === 'EVENT' && option.event?.title && option.event.startDate && option.event.endDate) {
       localPost.event = {
         title: option.event.title,
         schedule: {

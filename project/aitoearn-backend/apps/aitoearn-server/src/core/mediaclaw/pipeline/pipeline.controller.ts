@@ -5,7 +5,7 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { PipelineService } from './pipeline.service'
 
-@MediaClawApiController('api/v1/pipeline')
+@MediaClawApiController(['api/v1/pipeline', 'api/v1/pipelines'])
 export class PipelineController {
   constructor(private readonly pipelineService: PipelineService) {}
 
@@ -43,6 +43,15 @@ export class PipelineController {
     @Body() body: Partial<Pipeline['preferences']>,
   ) {
     return this.pipelineService.updatePreferences(user.orgId || user.id, id, body)
+  }
+
+  @Patch(':id/model-overrides')
+  async updateModelOverrides(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: Partial<Pipeline['modelOverrides']>,
+  ) {
+    return this.pipelineService.updateModelOverrides(user.orgId || user.id, id, body)
   }
 
   @Delete(':id')

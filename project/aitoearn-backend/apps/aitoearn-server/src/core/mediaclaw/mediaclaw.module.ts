@@ -80,6 +80,7 @@ import { DistributionModule } from "./distribution/distribution.module";
 import { EmployeeDispatchModule } from "./employee-dispatch/employee-dispatch.module";
 import { HealthModule } from "./health/health.module";
 import { MarketplaceModule } from "./marketplace/marketplace.module";
+import { ModelResolverModule } from "./model-resolver/model-resolver.module";
 import { NotificationModule } from "./notification/notification.module";
 import { OrgModule } from "./org/org.module";
 import { PaymentModule } from "./payment/payment.module";
@@ -163,6 +164,7 @@ const workerModuleImports =
     MediaClawAssetModule,
     PipelineSystemModule,
     MarketplaceModule,
+    ModelResolverModule,
     NotificationModule,
     PlatformAccountModule,
     PromptOptimizerModule,

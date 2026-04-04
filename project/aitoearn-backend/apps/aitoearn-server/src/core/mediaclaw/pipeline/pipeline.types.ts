@@ -89,6 +89,21 @@ export interface PipelineStepExecutionResult {
   reason?: string
 }
 
+export interface PipelineResolvedModel {
+  capability: 'copy' | 'frameEdit' | 'videoGen'
+  id: string
+  label: string
+  provider: string
+  runtimeModel: string
+  source: 'default' | 'organization' | 'pipeline'
+}
+
+export interface PipelineResolvedModels {
+  copy: PipelineResolvedModel
+  frameEdit: PipelineResolvedModel
+  videoGen: PipelineResolvedModel
+}
+
 export interface PipelineJobContext {
   taskId: string
   orgId?: string | null
@@ -105,6 +120,7 @@ export interface PipelineJobContext {
   dedupStrategy: PipelineDedupStrategy
   preserveSourceAudio: boolean
   prompts: Record<string, string>
+  models: PipelineResolvedModels
   composedVideoPath?: string
   subtitledVideoPath?: string
   finalVideoPath?: string

@@ -21,6 +21,10 @@ import {
   ContentGenerationTaskSchema,
 } from "./content-generation-task.schema";
 import { Competitor, CompetitorSchema } from "./competitor.schema";
+import {
+  ConversationUsage,
+  ConversationUsageSchema,
+} from "./conversation-usage.schema";
 import { ContentHash, ContentHashSchema } from "./content-hash.schema";
 import { CopyHistory, CopyHistorySchema } from "./copy-history.schema";
 import {
@@ -141,6 +145,7 @@ export * from "./brand.schema";
 export * from "./campaign.schema";
 export * from "./clawhost-instance.schema";
 export * from "./competitor.schema";
+export * from "./conversation-usage.schema";
 export * from "./content-hash.schema";
 export * from "./content-generation-task.schema";
 export * from "./copy-history.schema";
@@ -208,6 +213,7 @@ export const schemas = [
   { name: Campaign.name, schema: CampaignSchema },
   { name: ClawHostInstance.name, schema: ClawHostInstanceSchema },
   { name: Competitor.name, schema: CompetitorSchema },
+  { name: ConversationUsage.name, schema: ConversationUsageSchema },
   { name: ContentHash.name, schema: ContentHashSchema },
   { name: ContentGenerationTask.name, schema: ContentGenerationTaskSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },

@@ -549,6 +549,27 @@ export class NotificationService {
           content: `内容 ${this.describeRelatedId(relatedId)} 已发布${platform ? ` 到 ${platform}` : ''}。`,
           relatedId,
         }
+      case NotificationEvent.TOKEN_QUOTA_WARNING: {
+        const usageRate = this.pickPayloadString(payload, ['usageRate'])
+        const usedTokens = this.pickPayloadString(payload, ['usedTokens'])
+        const totalTokens = this.pickPayloadString(payload, ['totalTokens'])
+        return {
+          type: NotificationType.TaskReminder,
+          title: '对话 Token 即将用完',
+          content: `本月对话 Token 已使用 ${usageRate || '80'}%，当前 ${usedTokens || '--'} / ${totalTokens || '--'}。建议评估是否升级套餐或切换到 BYOK。`,
+          relatedId,
+        }
+      }
+      case NotificationEvent.TOKEN_QUOTA_EXCEEDED: {
+        const usedTokens = this.pickPayloadString(payload, ['usedTokens'])
+        const totalTokens = this.pickPayloadString(payload, ['totalTokens'])
+        return {
+          type: NotificationType.TaskReminder,
+          title: '本月对话 Token 已超额',
+          content: `本月对话 Token 已达到或超过配额，当前 ${usedTokens || '--'} / ${totalTokens || '--'}。系统不会阻断使用，但建议尽快升级或改为 BYOK。`,
+          relatedId,
+        }
+      }
       default:
         return null
     }
@@ -642,6 +663,9 @@ export class NotificationService {
       const value = payload[key]
       if (typeof value === 'string' && value.trim()) {
         return value.trim()
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value)
       }
     }
 

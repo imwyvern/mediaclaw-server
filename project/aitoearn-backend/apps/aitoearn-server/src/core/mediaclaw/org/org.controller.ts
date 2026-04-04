@@ -8,7 +8,12 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
-import { Organization, OrganizationEnterpriseProfile, UserRole } from '@yikart/mongodb'
+import {
+  Organization,
+  OrganizationEnterpriseProfile,
+  OrganizationModelPreferenceKey,
+  UserRole,
+} from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
 import { OrgService } from './org.service'
@@ -27,6 +32,11 @@ export class OrgController {
   @Get('members')
   async listMembers(@GetToken() user: { orgId?: string, id?: string }) {
     return this.orgService.listMembers(this.resolveOrgId(user))
+  }
+
+  @Get('model-preferences')
+  async getModelPreferences(@GetToken() user: { orgId?: string, id?: string }) {
+    return this.orgService.getModelPreferences(this.resolveOrgId(user))
   }
 
   @Post()
@@ -52,6 +62,14 @@ export class OrgController {
     @Body() body: Partial<Organization> & { enterpriseProfile?: Partial<OrganizationEnterpriseProfile> },
   ) {
     return this.orgService.update(this.resolveOrgId(user), body)
+  }
+
+  @Patch('model-preferences')
+  async updateModelPreferences(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: Partial<Record<OrganizationModelPreferenceKey, string | null | undefined>>,
+  ) {
+    return this.orgService.updateModelPreferences(this.resolveOrgId(user), body)
   }
 
   @Patch(':id')

@@ -21,6 +21,8 @@ export enum NotificationEvent {
   CONTENT_PUBLISHED = 'content.published',
   SUBSCRIPTION_EXPIRING = 'subscription.expiring',
   CREDIT_LOW = 'credit.low',
+  TOKEN_QUOTA_WARNING = 'token.quota_warning',
+  TOKEN_QUOTA_EXCEEDED = 'token.quota_exceeded',
   DISCOVERY_VIRAL_ALERT = 'discovery.viral_alert',
 }
 
