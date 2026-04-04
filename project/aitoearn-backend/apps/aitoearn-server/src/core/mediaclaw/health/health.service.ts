@@ -1,6 +1,7 @@
 import { InjectQueue } from '@nestjs/bullmq'
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { Queue } from 'bullmq'
+import { ClawHostService } from '../clawhost/clawhost.service'
 import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData, VideoWorkerStep } from '../worker/worker.constants'
 
 interface HeartbeatInput {
@@ -52,6 +53,7 @@ export class HealthService {
   constructor(
     @InjectQueue(VIDEO_WORKER_QUEUE)
     private readonly videoWorkerQueue: Queue<VideoWorkerJobData>,
+    private readonly clawHostService: ClawHostService,
   ) {}
 
   async heartbeat(user: HeartbeatUser | undefined, input: HeartbeatInput) {
@@ -75,11 +77,20 @@ export class HealthService {
       authType: user?.authType || null,
     })
 
+    await this.clawHostService.recordHeartbeat({
+      orgId: user?.orgId || null,
+      apiKeyId: user?.apiKeyId || null,
+      agentId,
+      clientVersion,
+      capabilities,
+    })
+
     return {
       status: 'ok',
       agentId,
       acknowledgedAt,
       lastHeartbeatAt: acknowledgedAt,
+      latestSkillVersion: 'latest',
       pendingTasks: await this.getPendingTasks(capabilities),
       configUpdates: this.drainConfigUpdates(agentId),
     }

@@ -1,6 +1,11 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
-import { Organization, OrganizationSchema } from '@yikart/mongodb'
+import {
+  MediaClawUser,
+  MediaClawUserSchema,
+  Organization,
+  OrganizationSchema,
+} from '@yikart/mongodb'
 import { OrgController } from './org.controller'
 import { OrgService } from './org.service'
 
@@ -8,6 +13,7 @@ import { OrgService } from './org.service'
   imports: [
     MongooseModule.forFeature([
       { name: Organization.name, schema: OrganizationSchema },
+      { name: MediaClawUser.name, schema: MediaClawUserSchema },
     ]),
   ],
   controllers: [OrgController],

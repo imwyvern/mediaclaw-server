@@ -22,6 +22,7 @@ export class MediaClawApiKeyController {
       orgId: user.orgId || null,
       permissions: body.permissions || [],
       expiresAt: body.expiresAt || null,
+      role: user.role || null,
     })
   }
 

@@ -9,7 +9,7 @@ export class AuditInterceptor implements NestInterceptor {
 
   constructor(private readonly auditService: AuditService) {}
 
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') {
       return next.handle()
     }
@@ -72,9 +72,9 @@ export class AuditInterceptor implements NestInterceptor {
     return segments[0] || 'unknown'
   }
 
-  private sanitizeRecord(value: Record<string, any>) {
+  private sanitizeRecord(value: Record<string, unknown>) {
     const redactedKeys = new Set(['password', 'token', 'secret', 'authorization', 'apiKey', 'x-api-key'])
-    const sanitized: Record<string, any> = {}
+    const sanitized: Record<string, unknown> = {}
 
     for (const [key, rawValue] of Object.entries(value)) {
       sanitized[key] = redactedKeys.has(key)
@@ -98,7 +98,7 @@ export class AuditInterceptor implements NestInterceptor {
     }
 
     if (value && typeof value === 'object') {
-      return this.sanitizeRecord(value as Record<string, any>)
+      return this.sanitizeRecord(value as Record<string, unknown>)
     }
 
     return value

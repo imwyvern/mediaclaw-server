@@ -1,12 +1,18 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Organization, OrganizationEnterpriseProfile } from '@yikart/mongodb'
+import {
+  MediaClawUser,
+  normalizeUserRole,
+  Organization,
+  OrganizationEnterpriseProfile,
+} from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
 @Injectable()
 export class OrgService {
   constructor(
     @InjectModel(Organization.name) private readonly orgModel: Model<Organization>,
+    @InjectModel(MediaClawUser.name) private readonly mediaClawUserModel: Model<MediaClawUser>,
   ) {}
 
   async createForCurrentOrg(orgId: string, data: Partial<Organization>) {
@@ -42,6 +48,40 @@ export class OrgService {
 
   async findAll() {
     return this.orgModel.find({ status: { $ne: 'suspended' } }).exec()
+  }
+
+  async listMembers(orgId: string) {
+    const normalizedOrgId = this.toObjectId(orgId)
+    const members = await this.mediaClawUserModel.find({
+      isActive: true,
+      'orgMemberships.orgId': normalizedOrgId,
+    })
+      .sort({ role: 1, createdAt: 1 })
+      .lean()
+      .exec()
+
+    return members.map((member) => {
+      const membership = (member.orgMemberships || []).find(
+        item => item.orgId?.toString() === normalizedOrgId.toString(),
+      )
+      const role = normalizeUserRole(membership?.role || member.role)
+
+      return {
+        id: member._id?.toString?.() || '',
+        orgId: normalizedOrgId.toString(),
+        phone: member.phone || '',
+        email: member.email || '',
+        name: member.name || member.phone || '未命名成员',
+        avatarUrl: member.avatarUrl || '',
+        wechatId: member.wechatOpenId || '',
+        userType: member.userType || '',
+        role,
+        joinedAt: membership?.joinedAt || null,
+        lastLoginAt: member.lastLoginAt || null,
+        createdAt: member.createdAt || null,
+        updatedAt: member.updatedAt || null,
+      }
+    })
   }
 
   private pickEditableFields(data: Partial<Organization>) {

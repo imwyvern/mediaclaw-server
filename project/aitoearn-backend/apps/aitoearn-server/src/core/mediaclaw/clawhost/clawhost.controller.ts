@@ -36,6 +36,11 @@ export class ClawHostController {
       user.orgId || user.id,
       body.config,
       body.clientName,
+      {
+        deploymentMode: body.deploymentMode,
+        requestedImChannel: body.requestedImChannel,
+        issuedByUserId: user.id,
+      },
     )
   }
 
@@ -100,6 +105,18 @@ export class ClawHostController {
     @Param('skillId') skillId: string,
   ) {
     return this.clawHostService.uninstallSkill(user.orgId || user.id, instanceId, skillId)
+  }
+
+  @Post('instances/:id/connection-code')
+  async issueConnectionCode(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.issueConnectionCode(
+      user.orgId || user.id,
+      instanceId,
+      user.id,
+    )
   }
 
   @Put('skills/:skillId/upgrade')

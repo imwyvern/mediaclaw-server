@@ -178,7 +178,7 @@ export class EnterpriseAuthService {
 
     const token = randomBytes(24).toString('hex')
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
-    await this.enterpriseInviteModel.create({
+    const invite = await this.enterpriseInviteModel.create({
       orgId: organization._id,
       phone,
       role: normalizedRole,
@@ -190,11 +190,14 @@ export class EnterpriseAuthService {
     })
 
     return {
+      id: invite._id.toString(),
       token,
       orgId: organization._id.toString(),
       orgName: organization.name,
       phone,
       role: normalizedRole,
+      status: EnterpriseInviteStatus.PENDING,
+      invitedAt: invite.invitedAt,
       expiresAt: expiresAt.toISOString(),
       inviteSent: true,
     }
@@ -317,6 +320,50 @@ export class EnterpriseAuthService {
         isActive: user.orgId?.toString() === org._id.toString(),
       }
     })
+  }
+
+  async listPendingInvites(orgId: string) {
+    const organization = await this.organizationModel.findById(
+      this.toObjectId(orgId, 'orgId'),
+    ).lean().exec()
+    if (!organization) {
+      throw new NotFoundException('Organization not found')
+    }
+
+    const now = new Date()
+    await this.enterpriseInviteModel.updateMany(
+      {
+        orgId: organization._id,
+        status: EnterpriseInviteStatus.PENDING,
+        expiresAt: { $lte: now },
+      },
+      {
+        $set: {
+          status: EnterpriseInviteStatus.EXPIRED,
+        },
+      },
+    ).exec()
+
+    const invites = await this.enterpriseInviteModel.find({
+      orgId: organization._id,
+      status: EnterpriseInviteStatus.PENDING,
+      expiresAt: { $gt: now },
+    })
+      .sort({ invitedAt: -1, createdAt: -1 })
+      .lean()
+      .exec()
+
+    return invites.map(invite => ({
+      id: invite._id.toString(),
+      orgId: organization._id.toString(),
+      orgName: organization.name,
+      phone: invite.phone,
+      role: normalizeUserRole(invite.role),
+      status: invite.status,
+      invitedAt: invite.invitedAt,
+      expiresAt: invite.expiresAt,
+      acceptedAt: invite.acceptedAt,
+    }))
   }
 
   private async findOrCreateUserByPhone(

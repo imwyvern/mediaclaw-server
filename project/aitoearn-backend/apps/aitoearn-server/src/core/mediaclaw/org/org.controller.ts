@@ -24,6 +24,11 @@ export class OrgController {
     return this.orgService.findById(this.resolveOrgId(user))
   }
 
+  @Get('members')
+  async listMembers(@GetToken() user: { orgId?: string, id?: string }) {
+    return this.orgService.listMembers(this.resolveOrgId(user))
+  }
+
   @Post()
   async create(
     @GetToken() user: { orgId?: string, id?: string },

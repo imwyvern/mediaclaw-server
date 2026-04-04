@@ -7,6 +7,7 @@ import {
   BrandAssetVersion,
   BrandAssetVersionSchema,
 } from '@yikart/mongodb'
+import { ClawHostModule } from '../clawhost/clawhost.module'
 import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthController } from './health.controller'
@@ -17,6 +18,7 @@ import { QueueDashboardService } from './queue-dashboard.service'
 @Module({
   imports: [
     TerminusModule,
+    ClawHostModule,
     VideoWorkerQueueModule,
     MongooseModule.forFeature([
       { name: AuditLog.name, schema: AuditLogSchema },

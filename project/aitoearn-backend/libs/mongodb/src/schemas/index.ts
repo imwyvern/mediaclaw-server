@@ -10,6 +10,7 @@ import {
   BrandAssetVersion,
   BrandAssetVersionSchema,
 } from "./brand-asset-version.schema";
+import { Brand, BrandSchema } from "./brand.schema";
 import { Campaign, CampaignSchema } from "./campaign.schema";
 import {
   ClawHostInstance,
@@ -55,6 +56,7 @@ import {
   InteractionRecord,
   InteractionRecordSchema,
 } from "./interaction-record.schema";
+import { Invoice, InvoiceSchema } from "./invoice.schema";
 import { IterationLog, IterationLogSchema } from "./iteration-log.schema";
 import {
   MaterialAdaptation,
@@ -70,10 +72,19 @@ import {
 import { MediaGroup, MediaGroupSchema } from "./media-group.schema";
 import { Media, MediaSchema } from "./media.schema";
 import {
+  MediaClawUser,
+  MediaClawUserSchema,
+} from "./mediaclaw-user.schema";
+import {
   NotificationConfig,
   NotificationConfigSchema,
 } from "./notification-config.schema";
 import { Notification, NotificationSchema } from "./notification.schema";
+import {
+  OAuth2Credential,
+  OAuth2CredentialSchema,
+} from "./oauth2-credential.schema";
+import { Organization, OrganizationSchema } from "./organization.schema";
 import { PaymentOrder, PaymentOrderSchema } from "./payment-order.schema";
 import { Pipeline, PipelineSchema } from "./pipeline.schema";
 import {
@@ -104,6 +115,7 @@ import {
   ReplyCommentRecord,
   ReplyCommentRecordSchema,
 } from "./reply-comment-record.schema";
+import { Subscription, SubscriptionSchema } from "./subscription.schema";
 import { UsageHistory, UsageHistorySchema } from "./usage-history.schema";
 import {
   UserNotificationControl,
@@ -112,6 +124,8 @@ import {
 import { User, UserSchema } from "./user.schema";
 import { ViralContent, ViralContentSchema } from "./viral-content.schema";
 import { VideoAnalytics, VideoAnalyticsSchema } from "./video-analytics.schema";
+import { VideoPack, VideoPackSchema } from "./video-pack.schema";
+import { VideoTask, VideoTaskSchema } from "./video-task.schema";
 import { Webhook, WebhookSchema } from "./webhook.schema";
 
 export * from "./account-group.schema";
@@ -190,6 +204,7 @@ export const schemas = [
   { name: ApiUsage.name, schema: ApiUsageSchema },
   { name: Blog.name, schema: BlogSchema },
   { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },
+  { name: Brand.name, schema: BrandSchema },
   { name: Campaign.name, schema: CampaignSchema },
   { name: ClawHostInstance.name, schema: ClawHostInstanceSchema },
   { name: Competitor.name, schema: CompetitorSchema },
@@ -200,6 +215,7 @@ export const schemas = [
   { name: DiscoveryNotification.name, schema: DiscoveryNotificationSchema },
   { name: DistributionRule.name, schema: DistributionRuleSchema },
   { name: EmployeeAssignment.name, schema: EmployeeAssignmentSchema },
+  { name: Invoice.name, schema: InvoiceSchema },
   { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
   { name: NotificationConfig.name, schema: NotificationConfigSchema },
   { name: Notification.name, schema: NotificationSchema },
@@ -210,6 +226,7 @@ export const schemas = [
   { name: AccountGroup.name, schema: AccountGroupSchema },
   { name: MediaGroup.name, schema: MediaGroupSchema },
   { name: Media.name, schema: MediaSchema },
+  { name: MediaClawUser.name, schema: MediaClawUserSchema },
   { name: Material.name, schema: MaterialSchema },
   { name: MaterialAdaptation.name, schema: MaterialAdaptationSchema },
   { name: MaterialGroup.name, schema: MaterialGroupSchema },
@@ -219,10 +236,15 @@ export const schemas = [
   { name: PublishInfo.name, schema: PublishInfoSchema },
   { name: PublishRecord.name, schema: PublishRecordSchema },
   { name: ProductionBatch.name, schema: ProductionBatchSchema },
+  { name: OAuth2Credential.name, schema: OAuth2CredentialSchema },
+  { name: Organization.name, schema: OrganizationSchema },
+  { name: Subscription.name, schema: SubscriptionSchema },
   { name: UserNotificationControl.name, schema: UserNotificationControlSchema },
   { name: UsageHistory.name, schema: UsageHistorySchema },
   { name: Asset.name, schema: AssetSchema },
   { name: VideoAnalytics.name, schema: VideoAnalyticsSchema },
+  { name: VideoPack.name, schema: VideoPackSchema },
+  { name: VideoTask.name, schema: VideoTaskSchema },
   { name: Webhook.name, schema: WebhookSchema },
   { name: QrCodeArtImage.name, schema: QrCodeArtImageSchema },
   { name: Report.name, schema: ReportSchema },

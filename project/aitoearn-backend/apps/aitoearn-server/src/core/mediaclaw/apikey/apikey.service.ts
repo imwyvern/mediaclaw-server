@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { ApiKey } from '@yikart/mongodb'
+import { ApiKey, normalizeUserRole, UserRole } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
 interface CreateApiKeyInput {
@@ -9,6 +9,7 @@ interface CreateApiKeyInput {
   orgId?: string | null
   permissions?: string[]
   expiresAt?: string | null
+  role?: string | null
 }
 
 @Injectable()
@@ -26,6 +27,7 @@ export class MediaClawApiKeyService {
     const rawKey = `mc_live_${secret}`
     const hashedKey = this.hashKey(rawKey)
     const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null
+    const role = normalizeUserRole(input.role, UserRole.EMPLOYEE)
 
     if (expiresAt && Number.isNaN(expiresAt.getTime())) {
       throw new BadRequestException('Invalid expiresAt value')
@@ -38,6 +40,7 @@ export class MediaClawApiKeyService {
       prefix: `mc_live_${secret.slice(0, 8)}`,
       name: input.name.trim(),
       permissions: input.permissions || [],
+      role,
       lastUsedAt: null,
       expiresAt,
       isActive: true,
@@ -50,6 +53,7 @@ export class MediaClawApiKeyService {
       prefix: apiKey.prefix,
       name: apiKey.name,
       permissions: apiKey.permissions,
+      role: apiKey.role,
       expiresAt: apiKey.expiresAt,
       isActive: apiKey.isActive,
       createdAt: apiKey.createdAt,
@@ -109,9 +113,16 @@ export class MediaClawApiKeyService {
       id: record.userId,
       orgId: record.orgId?.toString() || null,
       permissions: record.permissions,
+      role: normalizeUserRole(record.role, UserRole.EMPLOYEE),
       apiKeyId: record._id.toString(),
       authType: 'api_key',
     }
+  }
+
+  async revokeInternal(id: string) {
+    await this.apiKeyModel.findByIdAndUpdate(id, {
+      $set: { isActive: false },
+    }).exec()
   }
 
   private hashKey(rawKey: string) {

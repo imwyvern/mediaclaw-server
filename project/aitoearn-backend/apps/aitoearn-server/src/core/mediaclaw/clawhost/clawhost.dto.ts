@@ -1,6 +1,7 @@
-import { ClawHostInstanceStatus } from '@yikart/mongodb'
+import { ClawHostDeploymentMode, ClawHostInstanceStatus } from '@yikart/mongodb'
 import { Type } from 'class-transformer'
 import {
+  IsArray,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -35,10 +36,69 @@ export class CreateClawHostInstanceDto {
   @IsNotEmpty()
   clientName: string
 
+  @IsOptional()
+  @IsEnum(ClawHostDeploymentMode)
+  deploymentMode?: ClawHostDeploymentMode
+
+  @IsOptional()
+  @IsString()
+  requestedImChannel?: string
+
   @IsObject()
   @ValidateNested()
   @Type(() => ClawHostInstanceConfigDto)
   config: ClawHostInstanceConfigDto
+}
+
+export class ProvisionClawHostInstanceDto {
+  @IsString()
+  @IsNotEmpty()
+  orgId: string
+
+  @IsString()
+  @IsNotEmpty()
+  clientName: string
+
+  @IsOptional()
+  @IsEnum(ClawHostDeploymentMode)
+  deploymentMode?: ClawHostDeploymentMode
+
+  @IsOptional()
+  @IsString()
+  requestedImChannel?: string
+
+  @IsOptional()
+  @IsString()
+  accessUrl?: string
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ClawHostInstanceConfigDto)
+  config?: ClawHostInstanceConfigDto
+}
+
+export class ConnectClawHostInstanceDto {
+  @IsString()
+  @IsNotEmpty()
+  code: string
+
+  @IsString()
+  @IsNotEmpty()
+  instanceId: string
+
+  @IsOptional()
+  @IsString()
+  agentId?: string
+
+  @IsOptional()
+  @IsString()
+  clientVersion?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  capabilities?: string[]
 }
 
 export class InstallClawHostSkillDto {

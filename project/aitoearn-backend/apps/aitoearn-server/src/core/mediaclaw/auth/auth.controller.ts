@@ -99,6 +99,13 @@ export class McAuthController {
     )
   }
 
+  @Roles(UserRole.ENTERPRISE_ADMIN)
+  @UseGuards(PermissionGuard)
+  @Get('enterprise/invites')
+  async listPendingInvites(@GetToken() user: { orgId?: string }) {
+    return this.enterpriseAuthService.listPendingInvites(user.orgId || '')
+  }
+
   @Public()
   @Post('enterprise/accept-invite')
   async acceptInvite(

@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Schema as MongooseSchema } from 'mongoose'
 import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
+import { USER_ROLE_STORAGE_VALUES, UserRole } from './mediaclaw-user.schema'
 import { WithTimestampSchema } from './timestamp.schema'
 
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'apiKey' })
@@ -24,6 +25,9 @@ export class ApiKey extends WithTimestampSchema {
 
   @Prop({ type: [String], default: [] })
   permissions: string[]
+
+  @Prop({ type: String, enum: USER_ROLE_STORAGE_VALUES, default: UserRole.EMPLOYEE })
+  role: UserRole
 
   @Prop({ type: Date, required: false, default: null })
   lastUsedAt: Date | null

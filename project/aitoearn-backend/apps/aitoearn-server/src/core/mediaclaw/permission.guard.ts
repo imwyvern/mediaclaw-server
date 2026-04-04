@@ -5,6 +5,7 @@ import {
   Injectable,
   SetMetadata,
 } from '@nestjs/common'
+import { IS_INTERNAL_KEY, IS_PUBLIC_KEY } from '@yikart/aitoearn-auth'
 import { Reflector } from '@nestjs/core'
 import { normalizeUserRole, userRoleSatisfies } from '@yikart/mongodb'
 
@@ -22,6 +23,18 @@ export class PermissionGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
+    const isBypassed = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]) || this.reflector.getAllAndOverride<boolean>(IS_INTERNAL_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ])
+
+    if (isBypassed) {
+      return true
+    }
+
     const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
       context.getHandler(),
       context.getClass(),

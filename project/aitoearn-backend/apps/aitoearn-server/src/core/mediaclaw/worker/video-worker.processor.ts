@@ -1,6 +1,6 @@
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq'
 import { Injectable, Logger, Optional } from '@nestjs/common'
-import { VideoTaskStatus } from '@yikart/mongodb'
+import { VideoTask, VideoTaskStatus } from '@yikart/mongodb'
 import { Job, Queue } from 'bullmq'
 import { ContentMgmtService } from '../content-mgmt/content-mgmt.service'
 import { CopyService } from '../copy/copy.service'
@@ -16,6 +16,10 @@ const NEXT_STEP_MAP: Partial<Record<VideoWorkerStep, VideoWorkerStep>> = {
   'edit-frames': 'render-video',
   'render-video': 'generate-copy',
   'generate-copy': 'quality-check',
+}
+
+type LegacyVideoTaskReader = {
+  getTask: (id: string) => Promise<VideoTask>
 }
 
 @Injectable()
@@ -50,9 +54,7 @@ export class VideoWorkerProcessor extends WorkerHost {
     })
 
     try {
-      const task = typeof this.videoService.getTaskForWorker === 'function'
-        ? await this.videoService.getTaskForWorker(taskId)
-        : await (this.videoService as unknown as { getTask: (id: string) => Promise<any> }).getTask(taskId)
+      const task = await this.loadWorkerTask(taskId)
 
       switch (step) {
         case 'analyze-source':
@@ -139,7 +141,7 @@ export class VideoWorkerProcessor extends WorkerHost {
           const reviewAwareTask = this.contentMgmtService
             ? await this.contentMgmtService.initializeWorkflowForTask(taskId)
             : completedTask
-          await this.distributionService.notifyTaskComplete(reviewAwareTask as any)
+          await this.distributionService.notifyTaskComplete(reviewAwareTask as VideoTask)
           this.logger.log(`Video task completed: ${taskId}`)
         }
 
@@ -187,7 +189,7 @@ export class VideoWorkerProcessor extends WorkerHost {
             },
           })
 
-          if (!context) {
+          if (context) {
             await this.pipelineService?.cleanupWorkspace(context)
           }
         }
@@ -216,6 +218,14 @@ export class VideoWorkerProcessor extends WorkerHost {
     }
 
     return this.pipelineService
+  }
+
+  private async loadWorkerTask(taskId: string) {
+    if (typeof this.videoService.getTaskForWorker === 'function') {
+      return this.videoService.getTaskForWorker(taskId)
+    }
+
+    return (this.videoService as unknown as LegacyVideoTaskReader).getTask(taskId)
   }
 
   private buildStepOutput(step: VideoWorkerStep, context: VideoWorkerJobData['context']) {

@@ -137,6 +137,7 @@ export class AitoearnAuthGuard implements CanActivate {
     return {
       id: record.userId,
       orgId: record.orgId?.toString() || null,
+      role: record.role || null,
       permissions: record.permissions || [],
       apiKeyId: record.id || record._id?.toString(),
       authType: 'api_key',

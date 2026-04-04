@@ -1057,7 +1057,7 @@ export class AnalyticsService {
   }
 
   private buildMetricExpression(paths: string[]) {
-    return paths.reduceRight<any>(
+    return paths.reduceRight<Record<string, unknown> | number>(
       (fallback, path) => ({
         $ifNull: [
           {

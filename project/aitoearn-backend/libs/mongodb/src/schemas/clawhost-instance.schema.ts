@@ -13,6 +13,11 @@ export enum ClawHostInstanceStatus {
   UPGRADING = 'upgrading',
 }
 
+export enum ClawHostDeploymentMode {
+  MANAGED = 'managed',
+  BYOC = 'byoc',
+}
+
 @Schema({ _id: false })
 export class ClawHostInstanceConfig {
   @Prop({ type: String, required: true })
@@ -71,6 +76,14 @@ export class ClawHostInstance extends WithTimestampSchema {
   })
   status: ClawHostInstanceStatus
 
+  @Prop({
+    type: String,
+    enum: Object.values(ClawHostDeploymentMode),
+    default: ClawHostDeploymentMode.BYOC,
+    index: true,
+  })
+  deploymentMode: ClawHostDeploymentMode
+
   @Prop({ type: ClawHostInstanceConfig, default: () => ({}) })
   config: ClawHostInstanceConfig
 
@@ -85,9 +98,53 @@ export class ClawHostInstance extends WithTimestampSchema {
 
   @Prop({ type: String, default: '' })
   k8sPodName: string
+
+  @Prop({ type: String, default: '' })
+  requestedImChannel: string
+
+  @Prop({ type: String, default: '' })
+  accessUrl: string
+
+  @Prop({ type: String, default: '' })
+  installCommand: string
+
+  @Prop({ type: String, default: '' })
+  connectionCodePreview: string
+
+  @Prop({ type: String, default: '' })
+  connectionCodeHash: string
+
+  @Prop({ type: Date, default: null })
+  connectionCodeIssuedAt: Date | null
+
+  @Prop({ type: Date, default: null })
+  connectionCodeExpiresAt: Date | null
+
+  @Prop({ type: String, default: '' })
+  boundApiKeyId: string
+
+  @Prop({ type: String, default: '' })
+  boundApiKeyPrefix: string
+
+  @Prop({ type: Date, default: null })
+  boundAt: Date | null
+
+  @Prop({ type: Date, default: null, index: true })
+  lastHeartbeatAt: Date | null
+
+  @Prop({ type: String, default: '' })
+  lastClientVersion: string
+
+  @Prop({ type: String, default: '' })
+  lastAgentId: string
+
+  @Prop({ type: [String], default: [] })
+  heartbeatCapabilities: string[]
 }
 
 export const ClawHostInstanceSchema = SchemaFactory.createForClass(ClawHostInstance)
 
 ClawHostInstanceSchema.index({ orgId: 1, status: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ clientName: 1, createdAt: -1 })
+ClawHostInstanceSchema.index({ orgId: 1, deploymentMode: 1, createdAt: -1 })
+ClawHostInstanceSchema.index({ boundApiKeyId: 1 }, { sparse: true })
