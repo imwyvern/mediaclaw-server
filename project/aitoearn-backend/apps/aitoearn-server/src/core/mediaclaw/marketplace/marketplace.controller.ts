@@ -2,6 +2,7 @@ import { Body, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MarketplaceCurrency, UserRole } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { PermissionGuard, Roles } from '../permission.guard'
 import { MarketplaceService } from './marketplace.service'
 
@@ -11,7 +12,7 @@ export class MarketplaceController {
 
   @Post('publish')
   async publish(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: {
       pipelineTemplateId: string
       title?: string
@@ -32,7 +33,7 @@ export class MarketplaceController {
 
   @Post('purchase')
   async purchase(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: { templateId: string },
   ) {
     return this.marketplaceService.purchaseTemplate(user.orgId || user.id, body.templateId)
@@ -40,7 +41,7 @@ export class MarketplaceController {
 
   @Post('rate')
   async rate(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: {
       templateId: string
       rating: number
@@ -59,7 +60,7 @@ export class MarketplaceController {
   @UseGuards(PermissionGuard)
   @Post('feature')
   async feature(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: { templateId: string },
   ) {
     return this.marketplaceService.featureTemplate(body.templateId)
@@ -67,7 +68,7 @@ export class MarketplaceController {
 
   @Get()
   async list(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('search') search?: string,
     @Query('tag') tag?: string,
     @Query('isFeatured') isFeatured?: string,
@@ -97,7 +98,7 @@ export class MarketplaceController {
   }
 
   @Get(':id')
-  async detail(@GetToken() user: any, @Param('id') id: string) {
+  async detail(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.marketplaceService.getTemplate(id, user.orgId || user.id)
   }
 }

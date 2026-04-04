@@ -12,8 +12,8 @@ interface HeartbeatInput {
 interface HeartbeatUser {
   id?: string
   orgId?: string | null
-  apiKeyId?: string
-  authType?: string
+  apiKeyId?: string | null
+  authType?: string | null
 }
 
 interface AgentHeartbeatState {

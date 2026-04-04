@@ -1,6 +1,7 @@
 import { BadRequestException, Get, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { UsageService } from './usage.service'
 
 @MediaClawApiController('api/v1/usage')
@@ -9,7 +10,7 @@ export class UsageApiController {
 
   @Get()
   async summary(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
@@ -20,7 +21,7 @@ export class UsageApiController {
   }
 
   @Get('summary')
-  async packSummary(@GetToken() user: any) {
+  async packSummary(@GetToken() user: MediaClawAuthUser) {
     return this.usageService.getPackBalanceSummary({
       userId: user.id,
       orgId: user.orgId || null,
@@ -29,7 +30,7 @@ export class UsageApiController {
 
   @Get('history')
   async history(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
@@ -46,13 +47,13 @@ export class UsageApiController {
   }
 
   @Get('quota')
-  async quota(@GetToken() user: any) {
+  async quota(@GetToken() user: MediaClawAuthUser) {
     return this.usageService.getQuotaStatus(user.orgId || user.id)
   }
 
   @Get('rate-limit')
   async rateLimit(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('apiKey') apiKey?: string,
   ) {
     const resolvedApiKey = apiKey || user.apiKeyId || ''

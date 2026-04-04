@@ -2,6 +2,7 @@ import { Body, Get, Post } from '@nestjs/common'
 import { HealthCheck } from '@nestjs/terminus'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthService } from './health.service'
 
@@ -25,7 +26,7 @@ export class HealthController {
 
   @Post('heartbeat')
   async heartbeat(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: {
       clientVersion?: string
       agentId?: string

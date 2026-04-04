@@ -11,6 +11,30 @@ interface RegisterWebhookOptions {
   isActive?: boolean
 }
 
+interface WebhookRecord {
+  _id: unknown
+  orgId: unknown
+  name: string
+  url: string
+  secret: string
+  events?: string[]
+  isActive?: boolean
+  lastTriggeredAt?: Date | null
+  failCount?: number
+  createdAt?: Date
+  updatedAt?: Date
+}
+
+type WebhookPayload = Record<string, unknown>
+
+interface WebhookUpdateInput {
+  name?: string
+  url?: string
+  events?: string[]
+  isActive?: boolean
+  secret?: string
+}
+
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name)
@@ -36,7 +60,7 @@ export class WebhookService {
       failCount: 0,
     })
 
-    return this.toResponse(webhook.toObject(), { includeSecret: true })
+    return this.toResponse(webhook.toObject() as WebhookRecord, { includeSecret: true })
   }
 
   async listByOrg(orgId: string) {
@@ -44,7 +68,7 @@ export class WebhookService {
       orgId: new Types.ObjectId(orgId),
     }).sort({ createdAt: -1 }).lean().exec()
 
-    return webhooks.map(webhook => this.toResponse(webhook))
+    return webhooks.map(webhook => this.toResponse(webhook as WebhookRecord))
   }
 
   async getById(orgId: string, id: string) {
@@ -53,11 +77,11 @@ export class WebhookService {
       throw new NotFoundException('Webhook not found')
     }
 
-    return this.toResponse(webhook)
+    return this.toResponse(webhook as WebhookRecord)
   }
 
-  async update(orgId: string, id: string, data: Partial<Webhook> & { secret?: string }) {
-    const payload: Record<string, any> = {}
+  async update(orgId: string, id: string, data: WebhookUpdateInput) {
+    const payload: WebhookUpdateInput = {}
 
     if ('name' in data && typeof data.name === 'string') {
       payload['name'] = data.name.trim()
@@ -87,7 +111,7 @@ export class WebhookService {
       throw new NotFoundException('Webhook not found')
     }
 
-    return this.toResponse(webhook, { includeSecret: Boolean(payload['secret']) })
+    return this.toResponse(webhook as WebhookRecord, { includeSecret: Boolean(payload.secret) })
   }
 
   async delete(orgId: string, id: string) {
@@ -102,9 +126,9 @@ export class WebhookService {
     }
   }
 
-  async trigger(event: string, payload: Record<string, any>) {
+  async trigger(event: string, payload: WebhookPayload) {
     const resolvedOrgId = this.resolveOrgId(payload)
-    const query: Record<string, any> = {
+    const query: Record<string, unknown> = {
       isActive: true,
       events: event,
     }
@@ -190,12 +214,14 @@ export class WebhookService {
     return [...new Set((events || []).map(event => event.trim()).filter(Boolean))]
   }
 
-  private resolveOrgId(payload: Record<string, any>) {
+  private resolveOrgId(payload: WebhookPayload) {
+    const task = this.toPlainObject(payload['task'])
+    const order = this.toPlainObject(payload['order'])
     const candidates = [
       payload['orgId'],
       payload['userId'],
-      payload['task']?.['orgId'],
-      payload['order']?.['orgId'],
+      task['orgId'],
+      order['orgId'],
     ]
 
     for (const candidate of candidates) {
@@ -234,10 +260,13 @@ export class WebhookService {
     }
   }
 
-  private toResponse(webhook: any, options: { includeSecret?: boolean } = {}) {
+  private toResponse(webhook: WebhookRecord, options: { includeSecret?: boolean } = {}) {
+    const webhookId = this.toObjectIdString(webhook._id)
+    const orgId = this.toObjectIdString(webhook.orgId)
+
     return {
-      id: webhook._id?.toString(),
-      orgId: webhook.orgId?.toString() || null,
+      id: webhookId,
+      orgId,
       name: webhook.name,
       url: webhook.url,
       secret: options.includeSecret ? webhook.secret : undefined,
@@ -250,5 +279,13 @@ export class WebhookService {
       createdAt: webhook.createdAt,
       updatedAt: webhook.updatedAt,
     }
+  }
+
+  private toPlainObject(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {}
+    }
+
+    return value as Record<string, unknown>
   }
 }

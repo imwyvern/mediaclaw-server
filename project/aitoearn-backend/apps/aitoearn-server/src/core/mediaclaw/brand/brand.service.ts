@@ -53,9 +53,9 @@ export class BrandService {
     referenceImages?: string[]
   }) {
     await this.findOwnedBrand(orgId, id)
-    const update: any = {}
+    const update: Record<string, unknown> = {}
     if (assets.logoUrl)
-      update.logoUrl = assets.logoUrl
+      update['logoUrl'] = assets.logoUrl
     if (assets.referenceImages)
       update['visualIdentity.referenceImages'] = assets.referenceImages
     return this.brandModel.findOneAndUpdate(
@@ -71,7 +71,7 @@ export class BrandService {
   async updateVideoStyle(orgId: string, id: string, style: {
     preferredDuration?: number
     aspectRatio?: string
-    subtitleStyle?: Record<string, any>
+    subtitleStyle?: Record<string, unknown>
   }) {
     await this.findOwnedBrand(orgId, id)
     return this.brandModel.findOneAndUpdate(

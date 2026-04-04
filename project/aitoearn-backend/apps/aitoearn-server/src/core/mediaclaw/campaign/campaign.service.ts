@@ -18,7 +18,7 @@ export class CampaignService {
   }
 
   async findByOrg(orgId: string, status?: CampaignStatus) {
-    const query: Record<string, any> = {
+    const query: Record<string, unknown> = {
       orgId: new Types.ObjectId(orgId),
     }
 
@@ -110,7 +110,7 @@ export class CampaignService {
   }
 
   private normalizePayload(data: Partial<Campaign>) {
-    const payload: Record<string, any> = { ...data }
+    const payload: Record<string, unknown> = { ...data }
 
     if ('brandId' in payload) {
       payload['brandId'] = this.toObjectId(payload['brandId'] as string | null | undefined)

@@ -13,6 +13,7 @@ import { FileInterceptor } from '@nestjs/platform-express'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { BrandAssetType } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { AssetService } from './asset.service'
 
 @MediaClawApiController('api/v1/assets')
@@ -22,7 +23,7 @@ export class AssetController {
   @Post()
   @UseInterceptors(FileInterceptor('file'))
   async uploadAsset(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @UploadedFile() file:
       | {
         originalname?: string
@@ -49,7 +50,7 @@ export class AssetController {
 
   @Get()
   async getActiveAsset(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('brandId') brandId: string,
     @Query('type') type: BrandAssetType,
   ) {
@@ -58,7 +59,7 @@ export class AssetController {
 
   @Get('versions')
   async listVersions(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('brandId') brandId: string,
     @Query('type') type: BrandAssetType,
   ) {
@@ -66,12 +67,12 @@ export class AssetController {
   }
 
   @Patch(':id/activate')
-  async setActive(@GetToken() user: any, @Param('id') id: string) {
+  async setActive(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.assetService.setActive(user.orgId || user.id, id)
   }
 
   @Delete(':id')
-  async deleteVersion(@GetToken() user: any, @Param('id') id: string) {
+  async deleteVersion(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.assetService.deleteVersion(user.orgId || user.id, id)
   }
 }

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import {
   BadRequestException,
   Injectable,
@@ -1121,7 +1122,7 @@ export class ProductionOrchestratorService {
     const now = new Date()
     const pad = (value: number) => String(value).padStart(2, '0')
     const stamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}_${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`
-    const random = Math.random().toString(36).slice(2, 6)
+    const random = randomBytes(3).toString('hex').slice(0, 6)
     return `batch_${stamp}_${random}`
   }
 

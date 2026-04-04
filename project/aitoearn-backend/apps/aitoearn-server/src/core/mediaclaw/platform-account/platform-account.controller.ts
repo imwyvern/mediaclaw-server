@@ -2,6 +2,7 @@ import { Body, Delete, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { PlatformAccountPlatform } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { PlatformAccountService } from './platform-account.service'
 
 @MediaClawApiController('api/v1/platform-accounts')
@@ -10,7 +11,7 @@ export class PlatformAccountController {
 
   @Post()
   async create(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: {
       platform: PlatformAccountPlatform
       accountId?: string
@@ -32,23 +33,23 @@ export class PlatformAccountController {
   }
 
   @Get()
-  async list(@GetToken() user: any) {
+  async list(@GetToken() user: MediaClawAuthUser) {
     return this.platformAccountService.listAccounts(user.orgId || user.id)
   }
 
   @Get(':id')
-  async detail(@GetToken() user: any, @Param('id') id: string) {
+  async detail(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.platformAccountService.getAccount(user.orgId || user.id, id)
   }
 
   @Post(':id/sync')
-  async sync(@GetToken() user: any, @Param('id') id: string) {
+  async sync(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.platformAccountService.syncMetrics(user.orgId || user.id, id)
   }
 
   @Get(':id/history')
   async history(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
@@ -60,7 +61,7 @@ export class PlatformAccountController {
   }
 
   @Delete(':id')
-  async remove(@GetToken() user: any, @Param('id') id: string) {
+  async remove(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.platformAccountService.removeAccount(user.orgId || user.id, id)
   }
 }

@@ -2,6 +2,7 @@ import { Body, Delete, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { ReportType } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { ReportService } from './report.service'
 
 @MediaClawApiController('api/v1/reports')
@@ -10,7 +11,7 @@ export class ReportController {
 
   @Post('generate')
   async generate(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: {
       type: ReportType
       period: {
@@ -24,7 +25,7 @@ export class ReportController {
 
   @Post('schedule')
   async schedule(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: Record<string, any>,
   ) {
     return this.reportService.scheduleAutoReport(user.orgId || user.id, body)
@@ -32,7 +33,7 @@ export class ReportController {
 
   @Get()
   async list(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('type') type?: ReportType,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -45,12 +46,12 @@ export class ReportController {
   }
 
   @Get(':id')
-  async detail(@GetToken() user: any, @Param('id') id: string) {
+  async detail(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.reportService.getReport(user.orgId || user.id, id)
   }
 
   @Delete(':id')
-  async remove(@GetToken() user: any, @Param('id') id: string) {
+  async remove(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.reportService.deleteReport(user.orgId || user.id, id)
   }
 }

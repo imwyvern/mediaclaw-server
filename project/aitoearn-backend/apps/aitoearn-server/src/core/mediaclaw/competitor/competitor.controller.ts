@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { CompetitorService } from './competitor.service'
 
 @MediaClawApiController('api/v1/competitors')
@@ -16,7 +17,7 @@ export class CompetitorController {
 
   @Post()
   async addCompetitor(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: {
       orgId?: string
       platform: string
@@ -31,7 +32,7 @@ export class CompetitorController {
   }
 
   @Get()
-  async listCompetitors(@GetToken() user: any) {
+  async listCompetitors(@GetToken() user: MediaClawAuthUser) {
     return this.competitorService.listCompetitors(user.orgId || user.id)
   }
 
@@ -45,7 +46,7 @@ export class CompetitorController {
   }
 
   @Delete(':id')
-  async removeCompetitor(@GetToken() user: any, @Param('id') id: string) {
+  async removeCompetitor(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.competitorService.removeCompetitor(user.orgId || user.id, id)
   }
 }

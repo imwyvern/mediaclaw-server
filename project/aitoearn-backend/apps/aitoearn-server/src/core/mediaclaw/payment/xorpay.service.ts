@@ -38,6 +38,25 @@ export interface CreateXorPayOrderParams {
   openId?: string
 }
 
+interface PaymentOrderSnapshot {
+  _id?: unknown
+  orderId?: string
+  orgId?: unknown
+  userId?: string
+  amount?: number
+  currency?: string
+  paymentMethod?: PaymentMethod
+  status?: PaymentStatus
+  productType?: PaymentProductType
+  productId?: string
+  quantity?: number
+  paidAt?: Date | null
+  expiredAt?: Date | null
+  callbackData?: Record<string, unknown> | null
+  createdAt?: Date | null
+  updatedAt?: Date | null
+}
+
 export interface PaymentOrderListFilters {
   status?: PaymentStatus
   userId?: string
@@ -506,13 +525,15 @@ export class XorPayService {
     throw new BadRequestException('callback amount is invalid')
   }
 
-  private toOrderResponse(order: Partial<PaymentOrder> & { _id?: any, callbackData?: Record<string, any> }) {
+  private toOrderResponse(order: PaymentOrderSnapshot) {
     const callbackData = this.sanitizeCallbackData(order.callbackData)
+    const orderId = this.stringifyId(order._id)
+    const orgId = this.stringifyId(order.orgId)
 
     return {
-      id: order._id?.toString?.() || undefined,
+      id: orderId || undefined,
       orderId: order.orderId,
-      orgId: order.orgId?.toString?.() || null,
+      orgId,
       userId: order.userId,
       amount: order.amount,
       currency: order.currency,
@@ -529,9 +550,9 @@ export class XorPayService {
     }
   }
 
-  private sanitizeCallbackData(callbackData?: Record<string, any> | null) {
+  private sanitizeCallbackData(callbackData?: Record<string, unknown> | null) {
     const data = this.toPlainObject(callbackData)
-    const callbackBody = this.toPlainObject(data['callbackBody'] as Record<string, any> | undefined)
+    const callbackBody = this.toPlainObject(data['callbackBody'] as Record<string, unknown> | undefined)
 
     return {
       payUrl: typeof data['payUrl'] === 'string' ? data['payUrl'] : null,
@@ -541,7 +562,7 @@ export class XorPayService {
     }
   }
 
-  private extractCallbackStatus(callbackBody: Record<string, any>) {
+  private extractCallbackStatus(callbackBody: Record<string, unknown>) {
     const candidate = callbackBody['status']
       || callbackBody['trade_status']
       || callbackBody['pay_status']
@@ -553,7 +574,7 @@ export class XorPayService {
   }
 
   private canAccessOrder(
-    order: Partial<PaymentOrder> & { orgId?: any, userId?: string },
+    order: PaymentOrderSnapshot & { userId?: string },
     user: PaymentOrderAccessUser,
   ) {
     if (order.userId && user.id === order.userId) {
@@ -564,7 +585,7 @@ export class XorPayService {
       return false
     }
 
-    const orderOrgId = order.orgId?.toString?.() || null
+    const orderOrgId = this.stringifyId(order.orgId)
     return Boolean(orderOrgId && user.orgId && orderOrgId === user.orgId)
   }
 
@@ -576,8 +597,21 @@ export class XorPayService {
     return new Types.ObjectId(value)
   }
 
-  private toPlainObject(value: Record<string, any> | undefined | null) {
+  private toPlainObject(value: Record<string, unknown> | undefined | null) {
     return value ? { ...value } : {}
+  }
+
+  private stringifyId(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+
+    if (value && typeof value === 'object' && typeof (value as { toString?: () => string }).toString === 'function') {
+      const serialized = (value as { toString: () => string }).toString()
+      return serialized && serialized !== '[object Object]' ? serialized : null
+    }
+
+    return null
   }
 
   private async findReusablePendingOrder(query: Record<string, any>) {

@@ -2,6 +2,7 @@ import { Body, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { MediaClawApiKeyGuard } from '../apikey/apikey.guard'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { SkillService } from './skill.service'
 
 @Public()
@@ -12,7 +13,7 @@ export class SkillController {
 
   @Post('register')
   async register(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: { agentId: string, capabilities?: string[] },
   ) {
     return this.skillService.registerAgent(body.agentId, body.capabilities || [], {
@@ -22,7 +23,7 @@ export class SkillController {
   }
 
   @Get('config')
-  async getConfig(@GetToken() user: any, @Query('agentId') agentId: string) {
+  async getConfig(@GetToken() user: MediaClawAuthUser, @Query('agentId') agentId: string) {
     return this.skillService.getAgentConfig(agentId, {
       orgId: user.orgId || user.id,
       userId: user.id,
@@ -31,8 +32,8 @@ export class SkillController {
 
   @Post('feedback')
   async submitFeedback(
-    @GetToken() user: any,
-    @Body() body: { agentId: string, taskId: string, feedback: Record<string, any> },
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: { agentId: string, taskId: string, feedback: Record<string, unknown> },
   ) {
     return this.skillService.submitFeedback(body.agentId, body.taskId, body.feedback, {
       orgId: user.orgId || user.id,
@@ -41,7 +42,7 @@ export class SkillController {
   }
 
   @Get('deliveries')
-  async getDeliveries(@GetToken() user: any, @Query('agentId') agentId: string) {
+  async getDeliveries(@GetToken() user: MediaClawAuthUser, @Query('agentId') agentId: string) {
     return this.skillService.getPendingDeliveries(agentId, {
       orgId: user.orgId || user.id,
       userId: user.id,
@@ -50,7 +51,7 @@ export class SkillController {
 
   @Post('confirm-delivery')
   async confirmDelivery(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: { agentId: string, taskId: string },
   ) {
     return this.skillService.confirmDelivery(body.agentId, body.taskId, {

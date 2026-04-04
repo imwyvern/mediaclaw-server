@@ -1,6 +1,7 @@
 import { Get, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { DataDashboardService } from './data-dashboard.service'
 
 @MediaClawApiController('api/v1/data')
@@ -8,31 +9,31 @@ export class DataDashboardController {
   constructor(private readonly dataDashboardService: DataDashboardService) {}
 
   @Get('overview')
-  async getOverview(@GetToken() user: any) {
+  async getOverview(@GetToken() user: MediaClawAuthUser) {
     return this.dataDashboardService.getOverview(user.orgId || user.id)
   }
 
   @Get('health')
-  async getContentHealth(@GetToken() user: any) {
+  async getContentHealth(@GetToken() user: MediaClawAuthUser) {
     return this.dataDashboardService.getContentHealth(user.orgId || user.id)
   }
 
   @Get('benchmark')
   async getCompetitorBenchmark(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('industry') industry = 'generic',
   ) {
     return this.dataDashboardService.getCompetitorBenchmark(user.orgId || user.id, industry)
   }
 
   @Get('cold-start')
-  async getColdStartRecommendations(@GetToken() user: any) {
+  async getColdStartRecommendations(@GetToken() user: MediaClawAuthUser) {
     return this.dataDashboardService.getColdStartRecommendations(user.orgId || user.id)
   }
 
   @Get('export')
   async exportReport(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('format') format = 'json',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,

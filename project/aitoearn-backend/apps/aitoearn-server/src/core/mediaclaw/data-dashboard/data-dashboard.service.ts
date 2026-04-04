@@ -81,6 +81,35 @@ interface BenchmarkPayload {
   taskCount: number
 }
 
+interface BenchmarkMetricSummary {
+  engagementRate?: number
+  completionRate?: number
+  publishingConsistency?: number
+  averageViewsPerVideo?: number
+  lowPlayRatio?: number
+  abnormalEngagementRatio?: number
+  firstDayDecayRate?: number
+  trackedVideos?: number
+  taskCount?: number
+}
+
+type TierVisibilityTotals = Omit<ContentHealthPayload['totals'], 'totalShares'> & {
+  totalShares?: number
+}
+
+interface TierVisibilityPayload {
+  averageEngagementRate?: number
+  averageViewsPerVideo?: number
+  lowPlayRatio?: number
+  abnormalEngagementRatio?: number
+  firstDayDecayRate?: number
+  trackedVideos?: number
+  totals?: TierVisibilityTotals
+  orgMetrics?: BenchmarkMetricSummary
+  industryAverage?: BenchmarkMetricSummary | null
+  delta?: BenchmarkMetricSummary | null
+}
+
 @Injectable()
 export class DataDashboardService {
   constructor(
@@ -934,7 +963,7 @@ export class DataDashboardService {
   }
 
   private buildOrgMatch(orgId: string) {
-    const clauses: Record<string, any>[] = [{ userId: orgId }]
+    const clauses: Array<Record<string, unknown>> = [{ userId: orgId }]
     if (Types.ObjectId.isValid(orgId)) {
       clauses.unshift({ orgId: new Types.ObjectId(orgId) })
     }
@@ -943,7 +972,7 @@ export class DataDashboardService {
   }
 
   private buildTaskMetricStages(analyticsStartDate?: Date): PipelineStage[] {
-    const analyticsMatch: Record<string, any> = {
+    const analyticsMatch: Record<string, unknown> = {
       $expr: { $eq: ['$videoTaskId', '$$taskId'] },
     }
 
@@ -1068,7 +1097,7 @@ export class DataDashboardService {
   }
 
   private buildMetricExpression(paths: string[]) {
-    return paths.reduceRight<any>(
+    return paths.reduceRight<Record<string, unknown> | number>(
       (fallback, path) => ({
         $ifNull: [
           {
@@ -1086,62 +1115,62 @@ export class DataDashboardService {
     )
   }
 
-  private prefixKeys(prefix: string, query: Record<string, any>): Record<string, any> {
+  private prefixKeys(prefix: string, query: Record<string, unknown>): Record<string, unknown> {
     if ('$or' in query && Array.isArray(query['$or'])) {
       return {
-        $or: query['$or'].map((item: Record<string, any>) => this.prefixKeys(prefix, item)),
+        $or: query['$or'].map((item) => this.prefixKeys(prefix, item as Record<string, unknown>)),
       }
     }
 
-    return Object.entries(query).reduce<Record<string, any>>((accumulator, [key, value]) => {
+    return Object.entries(query).reduce<Record<string, unknown>>((accumulator, [key, value]) => {
       accumulator[`${prefix}${key}`] = value
       return accumulator
     }, {})
   }
 
-  private applyTierVisibility<T extends Record<string, any>>(tier: DashboardTier, payload: T) {
+  private applyTierVisibility<T extends TierVisibilityPayload>(tier: DashboardTier, payload: T) {
     if (tier === 'full') {
       return payload
     }
 
-    const result: any = { ...payload }
+    const result: TierVisibilityPayload = { ...payload }
 
     if (tier === 'advanced') {
-      delete result.firstDayDecayRate
+      delete result['firstDayDecayRate']
       if (result.orgMetrics) {
-        delete result.orgMetrics.firstDayDecayRate
+        delete result.orgMetrics['firstDayDecayRate']
       }
       if (result.industryAverage) {
-        delete result.industryAverage.firstDayDecayRate
+        delete result.industryAverage['firstDayDecayRate']
       }
       if (result.delta) {
-        delete result.delta.firstDayDecayRate
+        delete result.delta['firstDayDecayRate']
       }
       return result as T
     }
 
-    delete result.lowPlayRatio
-    delete result.abnormalEngagementRatio
-    delete result.firstDayDecayRate
-    delete result.trackedVideos
+    delete result['lowPlayRatio']
+    delete result['abnormalEngagementRatio']
+    delete result['firstDayDecayRate']
+    delete result['trackedVideos']
 
     if (tier === 'standard') {
       if (result.orgMetrics) {
-        delete result.orgMetrics.lowPlayRatio
-        delete result.orgMetrics.abnormalEngagementRatio
-        delete result.orgMetrics.firstDayDecayRate
+        delete result.orgMetrics['lowPlayRatio']
+        delete result.orgMetrics['abnormalEngagementRatio']
+        delete result.orgMetrics['firstDayDecayRate']
       }
       if (result.industryAverage) {
-        delete result.industryAverage.lowPlayRatio
-        delete result.industryAverage.abnormalEngagementRatio
-        delete result.industryAverage.firstDayDecayRate
-        delete result.industryAverage.trackedVideos
-        delete result.industryAverage.taskCount
+        delete result.industryAverage['lowPlayRatio']
+        delete result.industryAverage['abnormalEngagementRatio']
+        delete result.industryAverage['firstDayDecayRate']
+        delete result.industryAverage['trackedVideos']
+        delete result.industryAverage['taskCount']
       }
       if (result.delta) {
-        delete result.delta.lowPlayRatio
-        delete result.delta.abnormalEngagementRatio
-        delete result.delta.firstDayDecayRate
+        delete result.delta['lowPlayRatio']
+        delete result.delta['abnormalEngagementRatio']
+        delete result.delta['firstDayDecayRate']
       }
       return result as T
     }

@@ -50,6 +50,16 @@ interface TaskTimelineEntry {
   message?: string
 }
 
+interface TaskTimelineSourceTask {
+  createdAt: Date
+  status: VideoTaskStatus
+  startedAt?: Date | null
+  completedAt?: Date | null
+  metadata?: {
+    timeline?: TaskTimelineEntry[]
+  }
+}
+
 interface BatchContext {
   batchId: Types.ObjectId
   batchName: string
@@ -673,14 +683,14 @@ export class TaskMgmtService {
     return query
   }
 
-  private normalizeTimeline(task: any): TaskTimelineEntry[] {
+  private normalizeTimeline(task: TaskTimelineSourceTask): TaskTimelineEntry[] {
     const fromMetadata = Array.isArray(task.metadata?.timeline)
       ? task.metadata.timeline
       : []
 
     if (fromMetadata.length > 0) {
       return fromMetadata
-        .map((entry: any) => ({
+        .map((entry: TaskTimelineEntry) => ({
           status: entry.status,
           rawStatus: entry.rawStatus,
           timestamp: entry.timestamp,

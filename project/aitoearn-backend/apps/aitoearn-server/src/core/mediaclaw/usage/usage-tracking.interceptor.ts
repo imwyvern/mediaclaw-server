@@ -7,7 +7,20 @@ import {
 } from '@nestjs/common'
 import { Observable } from 'rxjs'
 import { finalize } from 'rxjs/operators'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { UsageService } from './usage.service'
+
+interface UsageTrackingRequest extends Record<string, unknown> {
+  originalUrl?: string
+  url?: string
+  baseUrl?: string
+  route?: { path?: string }
+  headers: { authorization?: string }
+  body?: { orgId?: string }
+  query?: { orgId?: string }
+  method?: string
+  user?: MediaClawAuthUser
+}
 
 @Injectable()
 export class UsageTrackingInterceptor implements NestInterceptor {
@@ -15,12 +28,12 @@ export class UsageTrackingInterceptor implements NestInterceptor {
 
   constructor(private readonly usageService: UsageService) {}
 
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') {
       return next.handle()
     }
 
-    const request = context.switchToHttp().getRequest()
+    const request = context.switchToHttp().getRequest<UsageTrackingRequest>()
     const url = request.originalUrl || request.url || ''
     if (!url.startsWith('/api/v1')) {
       return next.handle()
@@ -30,7 +43,7 @@ export class UsageTrackingInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       finalize(() => {
-        const user = request['user']
+        const user = request.user
         const orgId = user?.orgId || user?.id || request.body?.orgId || request.query?.orgId || ''
         if (!orgId) {
           return
@@ -58,7 +71,7 @@ export class UsageTrackingInterceptor implements NestInterceptor {
     )
   }
 
-  private resolveEndpoint(request: any) {
+  private resolveEndpoint(request: UsageTrackingRequest) {
     const baseUrl = request.baseUrl || ''
     const routePath = request.route?.path || ''
 
@@ -69,7 +82,7 @@ export class UsageTrackingInterceptor implements NestInterceptor {
     return (request.originalUrl || request.url || '').split('?')[0]
   }
 
-  private resolveApiKey(request: any) {
+  private resolveApiKey(request: UsageTrackingRequest) {
     const authorization = request.headers.authorization || ''
     const [scheme, token] = authorization.split(' ')
     if (scheme === 'Bearer' && token?.startsWith('mc_live_')) {

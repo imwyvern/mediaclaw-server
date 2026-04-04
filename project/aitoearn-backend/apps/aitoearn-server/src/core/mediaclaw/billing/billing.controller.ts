@@ -2,6 +2,7 @@ import { Body, Get, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { InvoiceStatus } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { BillingService } from './billing.service'
 
 @MediaClawApiController('api/v1/billing')
@@ -18,13 +19,13 @@ export class BillingController {
   }
 
   @Get('balance')
-  async getBalance(@GetToken() user: any) {
+  async getBalance(@GetToken() user: MediaClawAuthUser) {
     return this.billingService.getBalance(user.id)
   }
 
   @Get('orders')
   async getOrders(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {

@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Invoice, InvoiceStatus, PackStatus, PaymentOrder, VideoPack } from '@yikart/mongodb'
@@ -260,7 +261,7 @@ export class BillingService {
 
   generateOrderNo(): string {
     const ts = Math.floor(Date.now() / 1000).toString()
-    const rand = Math.random().toString(36).substring(2, 5).toUpperCase()
+    const rand = randomInt(0, 36 ** 3).toString(36).toUpperCase().padStart(3, '0')
     return 'MC' + ts + rand
   }
 

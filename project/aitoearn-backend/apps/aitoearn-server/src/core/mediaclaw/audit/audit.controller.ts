@@ -2,6 +2,7 @@ import { BadRequestException, Get, Query, Res } from '@nestjs/common'
 import type { Response } from 'express'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { AuditService } from './audit.service'
 
 @MediaClawApiController('api/v1/audit-logs')
@@ -10,7 +11,7 @@ export class AuditController {
 
   @Get('export')
   async export(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('format') format: 'csv' | 'json' = 'json',
     @Query('action') action: string | undefined,
     @Query('resource') resource: string | undefined,
@@ -78,7 +79,7 @@ export class AuditController {
 
   @Get()
   async list(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
     @Query('action') action?: string,

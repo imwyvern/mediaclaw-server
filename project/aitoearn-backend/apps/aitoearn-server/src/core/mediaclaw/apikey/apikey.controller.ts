@@ -1,6 +1,7 @@
 import { Body, Delete, Get, Param, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { MediaClawApiKeyService } from './apikey.service'
 
 @MediaClawApiController('api/v1/apikey')
@@ -9,7 +10,7 @@ export class MediaClawApiKeyController {
 
   @Post()
   async create(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: {
       name: string
       permissions?: string[]
@@ -25,12 +26,12 @@ export class MediaClawApiKeyController {
   }
 
   @Get()
-  async list(@GetToken() user: any) {
+  async list(@GetToken() user: MediaClawAuthUser) {
     return this.apiKeyService.list(user.id)
   }
 
   @Delete(':id')
-  async revoke(@GetToken() user: any, @Param('id') id: string) {
+  async revoke(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.apiKeyService.revoke(id, user.id)
   }
 }

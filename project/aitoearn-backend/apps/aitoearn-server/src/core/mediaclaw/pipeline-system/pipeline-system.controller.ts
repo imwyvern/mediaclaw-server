@@ -8,6 +8,7 @@ import {
 import { GetToken } from '@yikart/aitoearn-auth'
 import { PipelineType } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { PipelineSystemService } from './pipeline-system.service'
 
 @MediaClawApiController('api/v1/pipelines')
@@ -16,7 +17,7 @@ export class PipelineSystemController {
 
   @Post()
   async createTemplate(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Body() body: {
       name: string
       type: PipelineType
@@ -42,7 +43,7 @@ export class PipelineSystemController {
 
   @Get()
   async listTemplates(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query('type') type?: PipelineType,
     @Query('isPublic') isPublic?: string,
   ) {
@@ -54,13 +55,13 @@ export class PipelineSystemController {
   }
 
   @Get(':id([0-9a-fA-F]{24})')
-  async getTemplate(@GetToken() user: any, @Param('id') id: string) {
+  async getTemplate(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.pipelineSystemService.getTemplate(id, user.id)
   }
 
   @Post(':id([0-9a-fA-F]{24})/apply')
   async applyTemplate(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
     @Body() body: {
       brandId: string
@@ -88,7 +89,7 @@ export class PipelineSystemController {
 
   @Post(':id([0-9a-fA-F]{24})/learn')
   async learnPreference(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
     @Body() body: {
       source?: string
@@ -105,7 +106,7 @@ export class PipelineSystemController {
   @Post(':id([0-9a-fA-F]{24})/warm-up')
   async warmUp(
     @Param('id') id: string,
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
   ) {
     return this.pipelineSystemService.warmUp(user.orgId || user.id, id, user.id)
   }

@@ -10,6 +10,7 @@ type TrendPeriod = 'daily' | 'weekly' | 'monthly'
 type AnalyticsMetricKey = 'views' | 'likes' | 'comments' | 'shares' | 'saves' | 'followers' | 'engagementRate'
 type AnalyticsRecord = Record<string, any>
 type VideoTaskRecord = Record<string, any>
+type PrefixedAnalyticsQuery = Record<string, unknown>
 
 interface OverviewWindowSummary {
   windowDays: number
@@ -1006,10 +1007,10 @@ export class AnalyticsService {
     )
   }
 
-  private prefixKeys(prefix: string, query: any): any {
+  private prefixKeys(prefix: string, query: PrefixedAnalyticsQuery): PrefixedAnalyticsQuery {
     if ('$or' in query && Array.isArray(query['$or'])) {
       return {
-        $or: query['$or'].map((item: any) => this.prefixKeys(prefix, item)),
+        $or: query['$or'].map(item => this.prefixKeys(prefix, item as PrefixedAnalyticsQuery)),
       }
     }
 

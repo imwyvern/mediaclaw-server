@@ -21,7 +21,7 @@ import { MediaclawConfigService } from '../mediaclaw-config.service'
 interface NotificationConfigInput {
   channel: NotificationChannel
   events?: NotificationEvent[]
-  config?: Record<string, any>
+  config?: Record<string, unknown>
   isActive?: boolean
 }
 
@@ -29,10 +29,10 @@ interface NotificationConfigRecord {
   _id: { toString: () => string }
   orgId: { toString: () => string }
   channel: NotificationChannel
-  config?: Record<string, any>
+  config?: Record<string, unknown>
   events?: NotificationEvent[]
   isActive?: boolean
-  [key: string]: any
+  [key: string]: unknown
 }
 
 interface NotificationListItem {
@@ -45,7 +45,7 @@ interface NotificationListItem {
   status: string
   relatedId: string
   createdAt: Date
-  data: Record<string, any>
+  data: Record<string, unknown>
 }
 
 interface PersistedEventNotification {

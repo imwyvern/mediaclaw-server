@@ -1,6 +1,7 @@
 import { Body, Get, Post, Query } from "@nestjs/common";
 import { GetToken } from "@yikart/aitoearn-auth";
 import { MediaClawApiController } from "../mediaclaw-api.decorator";
+import { MediaClawAuthUser } from "../mediaclaw-auth.types";
 import { ContentRemixService } from "./content-remix.service";
 import { DiscoveryService } from "./discovery.service";
 
@@ -13,7 +14,7 @@ export class DiscoveryController {
 
   @Get("pool")
   async getRecommendationPool(
-    @GetToken() user: any,
+    @GetToken() user: MediaClawAuthUser,
     @Query("limit") limit = "10",
     @Query("industry") industry?: string,
   ) {
