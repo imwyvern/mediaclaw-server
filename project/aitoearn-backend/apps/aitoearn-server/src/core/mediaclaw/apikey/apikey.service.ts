@@ -12,6 +12,11 @@ interface CreateApiKeyInput {
   role?: string | null
 }
 
+interface ValidateApiKeyInput {
+  key?: string
+  prefix?: string
+}
+
 @Injectable()
 export class MediaClawApiKeyService {
   constructor(
@@ -86,6 +91,36 @@ export class MediaClawApiKeyService {
     }
   }
 
+  async validateOwnedKey(userId: string, input: ValidateApiKeyInput) {
+    const rawKey = input.key?.trim()
+    const prefix = input.prefix?.trim() || this.extractPrefix(rawKey)
+
+    if (rawKey?.startsWith('mc_live_')) {
+      const identity = await this.validate(rawKey)
+      if (identity.id !== userId) {
+        throw new UnauthorizedException('API key does not belong to current user')
+      }
+
+      const record = await this.apiKeyModel.findOne({
+        userId,
+        key: this.hashKey(rawKey),
+      }).exec()
+
+      return this.buildValidationResult(record)
+    }
+
+    if (!prefix) {
+      throw new BadRequestException('key or prefix is required')
+    }
+
+    const record = await this.apiKeyModel.findOne({
+      userId,
+      prefix,
+    }).sort({ createdAt: -1 }).exec()
+
+    return this.buildValidationResult(record)
+  }
+
   async validate(rawKey: string) {
     if (!rawKey.startsWith('mc_live_')) {
       throw new UnauthorizedException('Unsupported API key format')
@@ -127,6 +162,45 @@ export class MediaClawApiKeyService {
 
   private hashKey(rawKey: string) {
     return createHash('sha256').update(rawKey).digest('hex')
+  }
+
+  private extractPrefix(rawKey?: string) {
+    if (!rawKey) {
+      return undefined
+    }
+
+    const match = rawKey.match(/^(mc_live_[a-z0-9]{8})/i)
+    return match?.[1]
+  }
+
+  private buildValidationResult(record: ApiKey | null) {
+    if (!record) {
+      return {
+        valid: false,
+        message: 'API key not found',
+      }
+    }
+
+    if (!record.isActive) {
+      return {
+        valid: false,
+        message: 'API key has been revoked',
+      }
+    }
+
+    if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
+      return {
+        valid: false,
+        message: 'API key has expired',
+      }
+    }
+
+    return {
+      valid: true,
+      message: 'API key is active',
+      expiresAt: record.expiresAt,
+      lastUsedAt: record.lastUsedAt,
+    }
   }
 
   private toObjectId(value?: string | null) {

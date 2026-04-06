@@ -31,6 +31,17 @@ export class MediaClawApiKeyController {
     return this.apiKeyService.list(user.id)
   }
 
+  @Post('validate')
+  async validateKey(
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: {
+      key?: string
+      prefix?: string
+    },
+  ) {
+    return this.apiKeyService.validateOwnedKey(user.id, body)
+  }
+
   @Delete(':id')
   async revoke(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.apiKeyService.revoke(id, user.id)
