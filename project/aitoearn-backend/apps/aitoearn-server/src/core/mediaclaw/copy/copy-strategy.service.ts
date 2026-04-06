@@ -519,15 +519,15 @@ export class CopyStrategyService {
       return 'neutral'
     }
 
-    if (/(马上|立刻|赶紧|限时|现在|别错过|速看|即刻)/.test(normalized)) {
+    if (/马上|立刻|赶紧|限时|现在|别错过|速看|即刻/.test(normalized)) {
       return 'urgent'
     }
 
-    if (/(为什么|怎么|如何|到底|居然|秘密|真相|竟然|\?)/.test(normalized)) {
+    if (/为什么|怎么|如何|到底|居然|秘密|真相|竟然|\?/.test(normalized)) {
       return 'curious'
     }
 
-    if (/(太绝了|爆了|惊喜|上头|封神|高能|狠狠|冲一波|必看)/.test(normalized)) {
+    if (/太绝了|爆了|惊喜|上头|封神|高能|狠狠|冲一波|必看/.test(normalized)) {
       return 'exciting'
     }
 

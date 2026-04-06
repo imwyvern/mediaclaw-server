@@ -180,7 +180,7 @@ export class StyleRewriteService {
       return ''
     }
 
-    if (/^(别划走|先别划走|直接说|先说结论|注意)/.test(normalized)) {
+    if (/^(?:别划走|先别划走|直接说|先说结论|注意)/.test(normalized)) {
       return normalized
     }
 

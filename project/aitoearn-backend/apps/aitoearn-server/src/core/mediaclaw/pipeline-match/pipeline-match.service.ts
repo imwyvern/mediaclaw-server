@@ -843,7 +843,7 @@ export class PipelineMatchService implements OnModuleInit {
     return value
       .trim()
       .toLowerCase()
-      .replace(/[^a-z0-9一-龥]+/g, '-')
+      .replace(/[^\p{Script=Han}a-z0-9]+/gu, '-')
       .replace(/^-+|-+$/g, '')
   }
 

@@ -52,12 +52,6 @@ interface TokenUsageInput {
   packId?: string | null
 }
 
-interface ChargeAllocation {
-  packId: string
-  usageHistoryId: string
-  units: number
-}
-
 interface UsageMetricBucket {
   creditsConsumed: number
   inputTokens: number
