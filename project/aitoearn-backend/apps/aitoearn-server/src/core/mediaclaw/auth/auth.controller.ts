@@ -62,6 +62,7 @@ export class McAuthController {
     body: {
       orgName: string
       adminPhone: string
+      code: string
       adminName?: string
       contactEmail?: string
       contactName?: string

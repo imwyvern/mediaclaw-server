@@ -28,6 +28,7 @@ import { McAuthService } from './auth.service'
 interface RegisterEnterpriseInput {
   orgName: string
   adminPhone: string
+  code: string
   adminName?: string
   contactEmail?: string
   contactName?: string
@@ -84,6 +85,11 @@ export class EnterpriseAuthService {
     }
 
     this.authService.validatePhoneNumber(data.adminPhone)
+    const verificationCode = data.code?.trim()
+    if (!verificationCode) {
+      throw new BadRequestException('code is required')
+    }
+    await this.authService.consumeSmsCode(data.adminPhone, verificationCode)
 
     const now = new Date()
     const trialEnd = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)

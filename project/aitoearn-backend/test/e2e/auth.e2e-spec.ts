@@ -6,16 +6,74 @@ vi.mock('@yikart/mongodb', () => {
   class VideoPack {}
   class Organization {}
   class Subscription {}
+  class EnterpriseInvite {}
+  class OrganizationEnterpriseProfile {}
+
+  const UserRole = {
+    SUPER_ADMIN: 'super_admin',
+    ENTERPRISE_ADMIN: 'admin',
+    OPERATOR: 'editor',
+    EMPLOYEE: 'viewer',
+    ADMIN: 'admin',
+    EDITOR: 'editor',
+    VIEWER: 'viewer',
+  } as const
+
+  const normalizeUserRole = (
+    role: string | null | undefined,
+    fallback: string = UserRole.EMPLOYEE,
+  ) => {
+    if (!role) {
+      return fallback
+    }
+
+    const normalized = role.trim()
+    if (!normalized) {
+      return fallback
+    }
+
+    if (normalized === UserRole.SUPER_ADMIN) {
+      return UserRole.SUPER_ADMIN
+    }
+
+    if (normalized === UserRole.ENTERPRISE_ADMIN || normalized === UserRole.ADMIN) {
+      return UserRole.ENTERPRISE_ADMIN
+    }
+
+    if (normalized === UserRole.OPERATOR || normalized === UserRole.EDITOR) {
+      return UserRole.OPERATOR
+    }
+
+    if (normalized === UserRole.EMPLOYEE || normalized === UserRole.VIEWER) {
+      return UserRole.EMPLOYEE
+    }
+
+    return fallback
+  }
 
   return {
     BillingMode: {
       QUOTA: 'quota',
+    },
+    EnterpriseInvite,
+    EnterpriseInviteStatus: {
+      PENDING: 'pending',
+      ACCEPTED: 'accepted',
+      EXPIRED: 'expired',
+      REVOKED: 'revoked',
+    },
+    isEnterpriseAssignableRole: (role: string | null | undefined) => {
+      const normalized = normalizeUserRole(role)
+      return normalized === UserRole.ENTERPRISE_ADMIN
+        || normalized === UserRole.OPERATOR
+        || normalized === UserRole.EMPLOYEE
     },
     McUserType: {
       INDIVIDUAL: 'individual',
       ENTERPRISE: 'enterprise',
     },
     MediaClawUser,
+    normalizeUserRole,
     OrgStatus: {
       TRIAL: 'trial',
     },
@@ -23,6 +81,7 @@ vi.mock('@yikart/mongodb', () => {
       ENTERPRISE: 'enterprise',
     },
     Organization,
+    OrganizationEnterpriseProfile,
     Subscription,
     SubscriptionPlan: {
       TEAM: 'team',
@@ -30,9 +89,16 @@ vi.mock('@yikart/mongodb', () => {
     SubscriptionStatus: {
       ACTIVE: 'active',
     },
-    UserRole: {
-      ADMIN: 'admin',
-      VIEWER: 'viewer',
+    UserRole,
+    userRoleSatisfies: (role: string | null | undefined, requiredRole: string) => {
+      const rankMap: Record<string, number> = {
+        [UserRole.SUPER_ADMIN]: 400,
+        [UserRole.ENTERPRISE_ADMIN]: 300,
+        [UserRole.OPERATOR]: 200,
+        [UserRole.EMPLOYEE]: 100,
+      }
+
+      return (rankMap[normalizeUserRole(role)] || 0) >= (rankMap[normalizeUserRole(requiredRole)] || 0)
     },
     VideoPack,
   }
@@ -123,7 +189,6 @@ describe('MediaClaw Auth E2E', () => {
     const previousSmsMode = process.env['MEDIACLAW_SMS_MODE']
     process.env['MEDIACLAW_SMS_MODE'] = 'console'
 
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const userModel = {
       findOne: vi.fn(),
       create: vi.fn(),
@@ -144,6 +209,7 @@ describe('MediaClaw Auth E2E', () => {
         videoPackModel as any,
         jwtService as any,
       )
+      const warnSpy = vi.spyOn((service as any).logger, 'warn').mockImplementation(() => {})
 
       await expect(service.sendSmsCode('13800138000')).resolves.toMatchObject({
         success: true,
@@ -151,18 +217,14 @@ describe('MediaClaw Auth E2E', () => {
         code: expect.stringMatching(/^\d{6}$/),
       })
 
-      const mockPayload = JSON.parse(consoleSpy.mock.calls[0]?.[0] as string)
-      expect(mockPayload).toMatchObject({
-        type: 'sms.otp.mock',
-        channel: 'mediaclaw',
-        phone: '13800138000',
-      })
-      expect(mockPayload.code).toMatch(/^\d{6}$/)
-      expect(mockPayload.expiresAt).toBeTruthy()
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /^Console SMS mode enabled for 138\*\*\*\*8000; otp=\d{2}\*{4}; expiresAt=/,
+        ),
+      )
+      warnSpy.mockRestore()
     }
     finally {
-      consoleSpy.mockRestore()
-
       if (previousSmsMode === undefined) {
         delete process.env['MEDIACLAW_SMS_MODE']
       }
@@ -250,8 +312,10 @@ describe('MediaClaw Auth E2E', () => {
     const subscriptionModel = {
       create: vi.fn().mockResolvedValue(subscription),
     }
+    const enterpriseInviteModel = {}
     const authService = {
       validatePhoneNumber: vi.fn(),
+      consumeSmsCode: vi.fn().mockResolvedValue(undefined),
       buildAuthResult: vi.fn().mockReturnValue({
         accessToken: 'access-token',
         refreshToken: 'refresh-token',
@@ -267,18 +331,21 @@ describe('MediaClaw Auth E2E', () => {
       userModel as any,
       organizationModel as any,
       subscriptionModel as any,
+      enterpriseInviteModel as any,
       authService as any,
     )
 
     const result = await service.registerEnterprise({
       orgName: '测试企业',
       adminPhone: '13800138000',
+      code: '123456',
       adminName: '张三',
       contactEmail: 'ops@example.com',
       monthlyQuota: 80,
     })
 
     expect(authService.validatePhoneNumber).toHaveBeenCalledWith('13800138000')
+    expect(authService.consumeSmsCode).toHaveBeenCalledWith('13800138000', '123456')
     expect(result.organization).toMatchObject({
       id: organization._id.toString(),
       name: '测试企业',
@@ -329,7 +396,13 @@ describe('MediaClaw Auth E2E', () => {
 
   it('应执行基于角色的访问控制', () => {
     const reflector = {
-      getAllAndOverride: vi.fn().mockReturnValue([UserRole.ADMIN]),
+      getAllAndOverride: vi.fn().mockImplementation((key: string) => {
+        if (key === 'roles') {
+          return [UserRole.ADMIN]
+        }
+
+        return false
+      }),
     }
     const guard = new PermissionGuard(reflector as any)
 
