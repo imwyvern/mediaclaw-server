@@ -71,7 +71,7 @@ export class ClientMgmtService {
         .exec(),
       this.organizationModel.countDocuments(query),
     ])
-    const orgIds = items.map(org => org._id as Types.ObjectId)
+    const orgIds = items.map(org => new Types.ObjectId(String(org._id)))
     const [memberCounts, videoCounts, subscriptions] = orgIds.length > 0
       ? await Promise.all([
           this.mediaClawUserModel.aggregate<{
