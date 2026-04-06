@@ -71,14 +71,99 @@ export class ClientMgmtService {
         .exec(),
       this.organizationModel.countDocuments(query),
     ])
+    const orgIds = items.map(org => org._id as Types.ObjectId)
+    const [memberCounts, videoCounts, subscriptions] = orgIds.length > 0
+      ? await Promise.all([
+          this.mediaClawUserModel.aggregate<{
+            _id: Types.ObjectId
+            memberCount: number
+          }>([
+            {
+              $match: {
+                'isActive': true,
+              },
+            },
+            {
+              $unwind: '$orgMemberships',
+            },
+            {
+              $match: {
+                'orgMemberships.orgId': { $in: orgIds },
+              },
+            },
+            {
+              $group: {
+                _id: '$orgMemberships.orgId',
+                memberCount: { $sum: 1 },
+              },
+            },
+          ]),
+          this.videoTaskModel.aggregate<{
+            _id: Types.ObjectId
+            videoCount: number
+          }>([
+            {
+              $match: {
+                'orgId': { $in: orgIds },
+              },
+            },
+            {
+              $group: {
+                _id: '$orgId',
+                videoCount: { $sum: 1 },
+              },
+            },
+          ]),
+          this.subscriptionModel.aggregate<{
+            _id: Types.ObjectId
+            plan?: string
+            billingMode?: string
+          }>([
+            {
+              $match: {
+                'orgId': { $in: orgIds },
+              },
+            },
+            {
+              $sort: {
+                orgId: 1,
+                createdAt: -1,
+              },
+            },
+            {
+              $group: {
+                _id: '$orgId',
+                plan: { $first: '$plan' },
+                billingMode: { $first: '$billingMode' },
+              },
+            },
+          ]),
+        ])
+      : [[], [], []]
+
+    const memberCountMap = new Map(
+      memberCounts.map(item => [item._id.toString(), item.memberCount]),
+    )
+    const videoCountMap = new Map(
+      videoCounts.map(item => [item._id.toString(), item.videoCount]),
+    )
+    const subscriptionMap = new Map(
+      subscriptions.map(item => [
+        item._id.toString(),
+        item.plan || item.billingMode || null,
+      ]),
+    )
 
     return {
       items: items.map(org => ({
         id: org._id.toString(),
         name: org.name,
+        plan: subscriptionMap.get(org._id.toString()) || org.billingMode || 'quota',
         type: org.type,
         status: org.status,
         billingMode: org.billingMode,
+        memberCount: memberCountMap.get(org._id.toString()) || 0,
+        videoCount: videoCountMap.get(org._id.toString()) || 0,
         contactName: org.contactName,
         contactPhone: org.contactPhone,
         contactEmail: org.contactEmail,
@@ -113,7 +198,7 @@ export class ClientMgmtService {
     ] = await Promise.all([
       this.mediaClawUserModel.countDocuments({
         'orgMemberships.orgId': normalizedOrgId,
-        isActive: true,
+        'isActive': true,
       }),
       this.mediaClawUserModel.countDocuments({
         orgMemberships: {
@@ -296,7 +381,7 @@ export class ClientMgmtService {
 
     const member = await this.mediaClawUserModel
       .findOne({
-        _id: normalizedUserId,
+        '_id': normalizedUserId,
         'orgMemberships.orgId': normalizedOrgId,
       })
       .exec()
@@ -337,7 +422,7 @@ export class ClientMgmtService {
 
     const member = await this.mediaClawUserModel
       .findOne({
-        _id: normalizedUserId,
+        '_id': normalizedUserId,
         'orgMemberships.orgId': normalizedOrgId,
       })
       .exec()
@@ -383,7 +468,7 @@ export class ClientMgmtService {
   }
 
   private buildOrgQuery(filters: OrgFilters) {
-    const query: Record<string, any> = {}
+    const query: Record<string, unknown> = {}
 
     if (filters.status) {
       query['status'] = filters.status
