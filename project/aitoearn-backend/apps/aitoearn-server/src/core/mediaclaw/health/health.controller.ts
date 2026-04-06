@@ -1,8 +1,10 @@
 import { Body, Get, Post } from '@nestjs/common'
 import { HealthCheck } from '@nestjs/terminus'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
+import { UserRole } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
+import { Roles } from '../permission.guard'
 import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthService } from './health.service'
 
@@ -22,6 +24,12 @@ export class HealthController {
       version: '1.0.0',
       timestamp: new Date().toISOString(),
     }
+  }
+
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('health/status')
+  async getDashboardStatus() {
+    return this.mediaClawHealthCheckService.getDashboardStatus()
   }
 
   @Post('heartbeat')

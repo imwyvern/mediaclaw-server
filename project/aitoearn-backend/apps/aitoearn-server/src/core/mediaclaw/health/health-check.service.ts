@@ -15,6 +15,16 @@ import { Connection, Model } from 'mongoose'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData } from '../worker/worker.constants'
 import { HealthService } from './health.service'
 
+interface DashboardServiceStatus {
+  id: string
+  name: string
+  status: 'up' | 'down'
+  message?: string
+  latencyMs?: number
+  queueDepth?: number
+  meta?: Record<string, unknown>
+}
+
 @Injectable()
 export class MediaClawHealthCheckService {
   constructor(
@@ -83,6 +93,43 @@ export class MediaClawHealthCheckService {
         this.getHeapThreshold(),
       ),
     ])
+  }
+
+  async getDashboardStatus() {
+    const checkedAt = new Date().toISOString()
+    const [services, apiMetrics] = await Promise.all([
+      this.collectDashboardServices(),
+      this.getApiMetrics(),
+    ])
+
+    const healthyServices = services.filter(service => service.status === 'up').length
+    const availability = services.length === 0
+      ? 100
+      : Number(((healthyServices / services.length) * 100).toFixed(1))
+    const queueDepth = services.find(service => service.id === 'bullmq')?.queueDepth || 0
+    const storageUsage = this.resolveStorageUsagePercent(
+      services.find(service => service.id === 'disk_storage'),
+    )
+
+    return {
+      status: healthyServices === services.length
+        ? 'healthy'
+        : healthyServices === 0
+          ? 'down'
+          : 'degraded',
+      availability,
+      queueDepth,
+      storageUsage,
+      checkedAt,
+      metrics: apiMetrics,
+      services: services.map(service => ({
+        id: service.id,
+        name: service.name,
+        status: service.status,
+        message: service.message,
+        latencyMs: service.latencyMs,
+      })),
+    }
   }
 
   async getWorkerStatus() {
@@ -251,7 +298,7 @@ export class MediaClawHealthCheckService {
 
   private async runIndicator(
     name: string,
-    action: () => Promise<Record<string, any>>,
+    action: () => Promise<Record<string, unknown>>,
   ): Promise<HealthIndicatorResult> {
     try {
       return {
@@ -274,5 +321,111 @@ export class MediaClawHealthCheckService {
   private getHeapThreshold() {
     const value = Number(process.env['MEDIACLAW_HEAP_HEALTH_LIMIT_MB'] || 768)
     return Math.max(value, 128) * 1024 * 1024
+  }
+
+  private async collectDashboardServices(): Promise<DashboardServiceStatus[]> {
+    return Promise.all([
+      this.runDashboardCheck('mongodb', 'MongoDB', async () => {
+        const startedAt = Date.now()
+        const db = this.mongooseConnection.db
+        if (!db) {
+          throw new Error('MongoDB connection is not ready')
+        }
+
+        await db.admin().command({ ping: 1 })
+        return {
+          latencyMs: Date.now() - startedAt,
+        }
+      }),
+      this.runDashboardCheck('redis', 'Redis', async () => {
+        const client = await this.videoWorkerQueue.client
+        const startedAt = Date.now()
+        const pong = await client.ping()
+
+        return {
+          latencyMs: Date.now() - startedAt,
+          response: pong,
+        }
+      }),
+      this.runDashboardCheck('bullmq', 'BullMQ Queue', async () => {
+        const counts = await this.videoWorkerQueue.getJobCounts(
+          'waiting',
+          'active',
+          'completed',
+          'failed',
+          'delayed',
+          'prioritized',
+        )
+
+        return {
+          queueDepth:
+            (counts['waiting'] || 0)
+            + (counts['active'] || 0)
+            + (counts['delayed'] || 0)
+            + (counts['prioritized'] || 0),
+          counts,
+        }
+      }),
+      this.runDashboardCheck('disk_storage', 'Disk Storage', async () => {
+        const result = await this.diskHealthIndicator.checkStorage('disk_storage', {
+          path: process.cwd(),
+          thresholdPercent: 0.9,
+        })
+        return (result['disk_storage'] || {}) as Record<string, unknown>
+      }),
+      this.runDashboardCheck('memory_heap', 'Memory Heap', async () => {
+        const result = await this.memoryHealthIndicator.checkHeap(
+          'memory_heap',
+          this.getHeapThreshold(),
+        )
+        return (result['memory_heap'] || {}) as Record<string, unknown>
+      }),
+    ])
+  }
+
+  private async runDashboardCheck(
+    id: string,
+    name: string,
+    action: () => Promise<Record<string, unknown>>,
+  ): Promise<DashboardServiceStatus> {
+    try {
+      const meta = await action()
+      return {
+        id,
+        name,
+        status: 'up',
+        message: typeof meta['message'] === 'string' ? meta['message'] : undefined,
+        latencyMs: typeof meta['latencyMs'] === 'number' ? meta['latencyMs'] : undefined,
+        queueDepth: typeof meta['queueDepth'] === 'number' ? meta['queueDepth'] : undefined,
+        meta,
+      }
+    }
+    catch (error) {
+      return {
+        id,
+        name,
+        status: 'down',
+        message: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  private resolveStorageUsagePercent(service?: DashboardServiceStatus) {
+    if (!service?.meta) {
+      return 0
+    }
+
+    const usedPercent = Number(service.meta['usedPercent'])
+    if (Number.isFinite(usedPercent)) {
+      return Number(usedPercent.toFixed(1))
+    }
+
+    const size = Number(service.meta['size'])
+    const free = Number(service.meta['free'])
+    if (Number.isFinite(size) && size > 0 && Number.isFinite(free)) {
+      return Number((((size - free) / size) * 100).toFixed(1))
+    }
+
+    return 0
   }
 }
