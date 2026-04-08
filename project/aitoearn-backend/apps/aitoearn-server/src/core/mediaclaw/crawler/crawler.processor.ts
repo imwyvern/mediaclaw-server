@@ -18,8 +18,11 @@ export class CrawlerProcessor extends WorkerHost {
   async process(job: Job<CrawlJobData>) {
     const persisted = await this.discoveryService.ingestSearchResults({
       platform: job.data.platform,
-      industry: job.data.keyword,
-      keywords: [job.data.keyword],
+      industry: job.data.industry || job.data.keyword,
+      keywords: this.mergeKeywords(job.data.keywords || [], [
+        job.data.keyword,
+        job.data.industry,
+      ]),
       items: job.data.route.tikhubResponse.items,
       discoveredAt: new Date(job.data.createdAt),
     })
@@ -29,6 +32,9 @@ export class CrawlerProcessor extends WorkerHost {
       platform: job.data.platform,
       keyword: job.data.keyword,
       depth: job.data.depth,
+      industry: job.data.industry,
+      keywords: job.data.keywords,
+      sourceTrigger: job.data.source,
       routeMode: job.data.route.mode,
       source: job.data.route.tikhubResponse.source,
       persisted,
@@ -50,5 +56,16 @@ export class CrawlerProcessor extends WorkerHost {
   @OnWorkerEvent('failed')
   onFailed(job: Job<CrawlJobData> | undefined, error: Error) {
     this.logger.error(`Crawler job failed for ${job?.id || 'unknown'}: ${error.message}`)
+  }
+
+  private mergeKeywords(primary: string[], secondary: Array<string | undefined>) {
+    return Array.from(
+      new Set(
+        [...primary, ...secondary]
+          .filter((item): item is string => typeof item === 'string')
+          .map(item => item.trim())
+          .filter(Boolean),
+      ),
+    )
   }
 }

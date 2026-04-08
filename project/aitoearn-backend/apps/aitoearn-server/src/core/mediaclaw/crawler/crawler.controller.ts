@@ -11,11 +11,19 @@ export class CrawlerController {
     platform?: string
     keyword?: string
     depth?: number
+    industry?: string
+    keywords?: string[]
+    source?: string
   }) {
     return this.crawlerService.enqueueCrawl(
       body.platform || '',
       body.keyword || '',
       body.depth,
+      {
+        industry: body.industry,
+        keywords: body.keywords,
+        source: body.source,
+      },
     )
   }
 

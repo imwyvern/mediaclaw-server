@@ -18,6 +18,17 @@ export interface CrawlSeedResult {
   author: string
   contentUrl: string
   thumbnailUrl: string
+  publishedAt: string
+  views: number
+  likes: number
+  comments: number
+  shares: number
+}
+
+export interface CrawlOptions {
+  industry?: string
+  keywords?: string[]
+  source?: string
 }
 
 export interface CrawlRouteDecision {
@@ -45,6 +56,9 @@ export interface CrawlJobData {
   platform: string
   keyword: string
   depth: number
+  industry: string
+  keywords: string[]
+  source: string
   route: CrawlRouteDecision
   seedResults: CrawlSeedResult[]
   createdAt: string
@@ -58,13 +72,23 @@ export class CrawlerService {
     private readonly tikHubService: TikHubService,
   ) {}
 
-  async enqueueCrawl(platform: string, keyword: string, depth = 1) {
+  async enqueueCrawl(
+    platform: string,
+    keyword: string,
+    depth = 1,
+    options: CrawlOptions = {},
+  ) {
     const safeKeyword = keyword.trim()
     if (!safeKeyword) {
       throw new BadRequestException('keyword is required')
     }
 
     const normalizedDepth = this.normalizeDepth(depth)
+    const normalizedIndustry = options.industry?.trim() || safeKeyword
+    const normalizedKeywords = this.mergeKeywords(
+      options.keywords || [],
+      [safeKeyword, normalizedIndustry],
+    )
     const route = await this.dualLayerRoute({
       platform,
       keyword: safeKeyword,
@@ -75,6 +99,9 @@ export class CrawlerService {
       platform,
       keyword: safeKeyword,
       depth: normalizedDepth,
+      industry: normalizedIndustry,
+      keywords: normalizedKeywords,
+      source: options.source?.trim() || 'manual',
       route,
       seedResults: route.tikhubResponse.items.map(item => ({
         platform: item.platform,
@@ -83,6 +110,11 @@ export class CrawlerService {
         author: item.author,
         contentUrl: item.contentUrl,
         thumbnailUrl: item.thumbnailUrl,
+        publishedAt: item.publishedAt,
+        views: item.metrics.views,
+        likes: item.metrics.likes,
+        comments: item.metrics.comments,
+        shares: item.metrics.shares,
       })),
       createdAt: new Date().toISOString(),
     }
@@ -99,6 +131,9 @@ export class CrawlerService {
       jobId: String(job.id || ''),
       queueName: MEDIACLAW_CRAWL_QUEUE,
       status: await job.getState(),
+      industry: normalizedIndustry,
+      keywords: normalizedKeywords,
+      source: data.source,
       route,
       seededResults: data.seedResults,
     }
@@ -121,6 +156,9 @@ export class CrawlerService {
         ? new Date(job.finishedOn).toISOString()
         : null,
       routeMode: job.data.route.mode,
+      industry: job.data.industry,
+      keywords: job.data.keywords,
+      source: job.data.source,
     }
   }
 
@@ -139,6 +177,9 @@ export class CrawlerService {
       jobId,
       queueName: MEDIACLAW_CRAWL_QUEUE,
       state,
+      industry: job.data.industry,
+      keywords: job.data.keywords,
+      source: job.data.source,
       route: job.data.route,
       total,
       results,
@@ -201,5 +242,16 @@ export class CrawlerService {
     }
 
     return Math.min(Math.max(Math.trunc(depth as number), 1), 10)
+  }
+
+  private mergeKeywords(primary: string[], secondary: string[]) {
+    return Array.from(
+      new Set(
+        [...primary, ...secondary]
+          .filter((item): item is string => typeof item === 'string')
+          .map(item => item.trim())
+          .filter(Boolean),
+      ),
+    )
   }
 }
