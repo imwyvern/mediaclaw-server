@@ -2,6 +2,18 @@ import { Body, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
+import {
+  AssignmentQueryDto,
+  BatchDispatchDto,
+  BindImAccountDto,
+  CreateEmployeeAssignmentDto,
+  DeliveryPublishDto,
+  DispatchStatsQueryDto,
+  DispatchToEmployeeDto,
+  PendingDeliveriesQueryDto,
+  UpdateEmployeeAssignmentDto,
+} from './employee-dispatch.dto'
 import { EmployeeDispatchService } from './employee-dispatch.service'
 
 @MediaClawApiController('api/v1/dispatch')
@@ -10,86 +22,113 @@ export class EmployeeDispatchController {
 
   @Post('assignments')
   async createAssignment(
-    @GetToken() user: { orgId?: string, id?: string },
-    @Body() body: Record<string, unknown>,
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: CreateEmployeeAssignmentDto,
   ) {
-    return this.employeeDispatchService.createAssignment(user.orgId || user.id || '', body)
+    return this.employeeDispatchService.createAssignment(
+      user.orgId || user.id || '',
+      body as unknown as Record<string, unknown>,
+    )
   }
 
   @Get('assignments')
   async listAssignments(
-    @GetToken() user: { orgId?: string, id?: string },
-    @Query('status') status?: string,
-    @Query('keyword') keyword?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @GetToken() user: MediaClawAuthUser,
+    @Query() query: AssignmentQueryDto,
   ) {
     return this.employeeDispatchService.listAssignments(
       user.orgId || user.id || '',
-      { status, keyword },
+      { status: query.status, keyword: query.keyword },
       {
-        page: page ? Number.parseInt(page, 10) : 1,
-        limit: limit ? Number.parseInt(limit, 10) : 20,
+        page: query.page,
+        limit: query.limit,
       },
     )
   }
 
   @Patch('assignments/:id')
-  async updateAssignment(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.employeeDispatchService.updateAssignment(id, body)
+  async updateAssignment(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: UpdateEmployeeAssignmentDto,
+  ) {
+    return this.employeeDispatchService.updateAssignment(
+      user.orgId || user.id || '',
+      id,
+      body as unknown as Record<string, unknown>,
+    )
   }
 
   @Delete('assignments/:id')
-  async removeAssignment(@Param('id') id: string) {
-    return this.employeeDispatchService.removeAssignment(id)
+  async removeAssignment(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
+    return this.employeeDispatchService.removeAssignment(user.orgId || user.id || '', id)
   }
 
   @Post('assignments/:id/bind-im')
   async bindImAccount(
+    @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: { channel?: string } & Record<string, unknown>,
+    @Body() body: BindImAccountDto,
   ) {
-    return this.employeeDispatchService.bindImAccount(id, body.channel || '', body)
+    return this.employeeDispatchService.bindImAccount(
+      user.orgId || user.id || '',
+      id,
+      body.channel,
+      body as unknown as Record<string, unknown>,
+    )
   }
 
   @Post('deliver')
   async dispatchToEmployee(
-    @Body() body: { videoTaskId: string, assignmentId: string },
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: DispatchToEmployeeDto,
   ) {
-    return this.employeeDispatchService.dispatchToEmployee(body.videoTaskId, body.assignmentId)
+    return this.employeeDispatchService.dispatchToEmployee(user.orgId || user.id || '', body.videoTaskId, body.assignmentId)
   }
 
   @Post('batch')
   async batchDispatch(
-    @Body() body: { videoTaskIds?: string[], rules?: Record<string, unknown> },
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: BatchDispatchDto,
   ) {
-    return this.employeeDispatchService.batchDispatch(body.videoTaskIds || [], body.rules || {})
+    return this.employeeDispatchService.batchDispatch(user.orgId || user.id || '', body.videoTaskIds || [], body.rules || {})
   }
 
   @Post('deliveries/:id/confirm')
-  async confirmDelivery(@Param('id') id: string) {
-    return this.employeeDispatchService.confirmDelivery(id)
+  async confirmDelivery(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
+    return this.employeeDispatchService.confirmDelivery(user.orgId || user.id || '', id)
   }
 
   @Post('deliveries/:id/published')
   async markPublished(
+    @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: DeliveryPublishDto,
   ) {
-    return this.employeeDispatchService.markPublished(id, body)
+    return this.employeeDispatchService.markPublished(user.orgId || user.id || '', id, body)
+  }
+
+  @Get('deliveries/pending')
+  async listPendingDeliveries(
+    @GetToken() user: MediaClawAuthUser,
+    @Query() query: PendingDeliveriesQueryDto,
+  ) {
+    return this.employeeDispatchService.listPendingDeliveries(
+      user.orgId || user.id || '',
+      query as unknown as Record<string, unknown>,
+      { page: query.page, limit: query.limit },
+    )
   }
 
   @Get('stats')
   async getDispatchStats(
-    @GetToken() user: { orgId?: string, id?: string },
-    @Query('period') period?: string,
-    @Query('startAt') startAt?: string,
-    @Query('endAt') endAt?: string,
+    @GetToken() user: MediaClawAuthUser,
+    @Query() query: DispatchStatsQueryDto,
   ) {
     return this.employeeDispatchService.getDispatchStats(user.orgId || user.id || '', {
-      period,
-      startAt,
-      endAt,
+      period: query.period,
+      startAt: query.startAt,
+      endAt: query.endAt,
     })
   }
 }

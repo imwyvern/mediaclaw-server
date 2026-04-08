@@ -6,27 +6,25 @@ import {
   Optional,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
+import { Cron, CronExpression } from '@nestjs/schedule'
 import {
   DistributionRule,
   DistributionRuleType,
   NotificationEvent,
-  Pipeline,
   PaymentOrder,
+  Pipeline,
   VideoTask,
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
-import { isDistributableVideoTaskStatus } from '../video-task-status.utils'
-import { WebhookService } from '../webhook/webhook.service'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 import { NotificationService } from '../notification/notification.service'
-
-export enum DistributionPublishStatus {
-  COMPLETED = 'completed',
-  PUSHED = 'pushed',
-  PUBLISHED = 'published',
-  EXPIRED = 'expired',
-}
+import { isDistributableVideoTaskStatus } from '../video-task-status.utils'
+import { WebhookService } from '../webhook/webhook.service'
+import {
+  DistributionPublishStatus,
+  isDistributionPublishStatus,
+} from './distribution.constants'
 
 export interface DistributionRuleEntryPayload {
   condition?: Record<string, unknown> | null
@@ -58,6 +56,22 @@ interface DistributionTimelineEntry {
   status: DistributionPublishStatus
   timestamp: string
   details?: Record<string, unknown>
+}
+
+interface RuleEvaluationResult {
+  matched: boolean
+  rule: {
+    id?: string
+    name?: string
+    type?: DistributionRuleType
+    priority?: number
+    isActive?: boolean
+    rules?: DistributionRuleEntryPayload[]
+  } | null
+  selected: {
+    action: string
+    target: string
+  } | null
 }
 
 type DistributionLifecycleStatus = 'pending_assignment' | 'assigned' | 'published' | 'tracked'
@@ -134,7 +148,7 @@ export class DistributionService {
     }
   }
 
-  async evaluateRules(orgId: string, content: Record<string, unknown>) {
+  async evaluateRules(orgId: string, content: Record<string, unknown>): Promise<RuleEvaluationResult> {
     const rules = await this.distributionRuleModel.find({
       orgId: this.toObjectId(orgId, 'orgId'),
       isActive: true,
@@ -236,7 +250,7 @@ export class DistributionService {
     const currentStatus = this.resolvePublishStatus(task)
 
     if (currentStatus === status) {
-      return this.toDistributionResponse(task.toObject())
+      return this.toDistributionResponse(task.toObject?.() || (task as Record<string, any>))
     }
 
     if (!this.canTransition(currentStatus, status)) {
@@ -252,6 +266,8 @@ export class DistributionService {
     }
 
     if (status === DistributionPublishStatus.PUBLISHED) {
+      setPayload['status'] = VideoTaskStatus.PUBLISHED
+      setPayload['publishedAt'] = new Date(timestamp)
       setPayload['metadata.publishedAt'] = timestamp
     }
 
@@ -321,7 +337,12 @@ export class DistributionService {
     return this.toDistributionResponse(updated)
   }
 
-  async dispatchByPipelineRules(pipelineId: string, videoTaskIds: string[]) {
+  async dispatchByPipelineRules(
+    orgId: string,
+    pipelineId: string,
+    videoTaskIds: string[],
+    overrideRules: Record<string, unknown> = {},
+  ) {
     if (!this.employeeDispatchService) {
       return {
         total: videoTaskIds.length,
@@ -345,24 +366,41 @@ export class DistributionService {
       throw new BadRequestException('pipelineId is invalid')
     }
 
-    const pipeline = await this.pipelineModel.findById(new Types.ObjectId(pipelineId)).lean().exec() as Record<string, any> | null
+    const pipeline = await this.pipelineModel.findOne({
+      _id: new Types.ObjectId(pipelineId),
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }).lean().exec() as Record<string, any> | null
     if (!pipeline) {
       throw new NotFoundException('Pipeline not found')
     }
 
     const distributionRules = this.asRecord(pipeline['distributionRules']) || {}
-    return this.employeeDispatchService.batchDispatch(normalizedTaskIds, {
-      pipelineId,
-      assignmentIds: Array.isArray(distributionRules['assignmentIds']) ? distributionRules['assignmentIds'] as string[] : [],
-      preferredPlatforms: Array.isArray(distributionRules['preferredPlatforms']) ? distributionRules['preferredPlatforms'] as string[] : [],
-      preferredCategories: Array.isArray(distributionRules['preferredCategories']) ? distributionRules['preferredCategories'] as string[] : [],
-      strategy: typeof distributionRules['strategy'] === 'string' ? distributionRules['strategy'] : undefined,
-    })
+    return this.employeeDispatchService.batchDispatch(
+      orgId,
+      normalizedTaskIds,
+      this.mergeDispatchRules(
+        {
+          pipelineId,
+          assignmentIds: Array.isArray(distributionRules['assignmentIds']) ? distributionRules['assignmentIds'] as string[] : [],
+          preferredPlatforms: Array.isArray(distributionRules['preferredPlatforms']) ? distributionRules['preferredPlatforms'] as string[] : [],
+          preferredCategories: Array.isArray(distributionRules['preferredCategories']) ? distributionRules['preferredCategories'] as string[] : [],
+          strategy: typeof distributionRules['strategy'] === 'string' ? distributionRules['strategy'] : undefined,
+        },
+        overrideRules,
+      ),
+    )
   }
 
   async assignByRule(orgId: string, contentId: string) {
     const task = await this.getTaskOrFail(orgId, contentId)
     const taskId = task._id.toString()
+    const ruleResult = await this.evaluateRules(
+      orgId,
+      this.buildRuleEvaluationContent(task.toObject?.() || (task as Record<string, any>)),
+    ) as RuleEvaluationResult
+    const ruleDispatchRules = ruleResult.matched && ruleResult.selected
+      ? this.buildDispatchRulesFromSelection(ruleResult.selected, ruleResult.rule?.type || null)
+      : {}
 
     let dispatchResult: Record<string, any>
     if (!this.employeeDispatchService) {
@@ -381,32 +419,48 @@ export class DistributionService {
       }
     }
     else if (task.pipelineId) {
-      dispatchResult = await this.dispatchByPipelineRules(task.pipelineId.toString(), [taskId])
+      dispatchResult = await this.dispatchByPipelineRules(
+        orgId,
+        task.pipelineId.toString(),
+        [taskId],
+        ruleDispatchRules,
+      )
     }
     else {
-      dispatchResult = await this.employeeDispatchService.batchDispatch([taskId], {})
+      dispatchResult = await this.employeeDispatchService.batchDispatch(orgId, [taskId], ruleDispatchRules)
     }
 
     const refreshed = await this.videoTaskModel.findById(task._id).lean().exec()
     return {
+      matchedRule: ruleResult.rule,
+      matchedSelection: ruleResult.selected,
       assignment: Array.isArray(dispatchResult['results']) ? dispatchResult['results'][0] || null : dispatchResult,
       batch: dispatchResult,
-      ...(refreshed ? this.toDistributionResponse(refreshed) : this.toDistributionResponse(task.toObject?.() || task as Record<string, any>)),
+      ...(refreshed ? this.toDistributionResponse(refreshed) : this.toDistributionResponse(task.toObject?.() || (task as Record<string, any>))),
     }
   }
 
-  async confirmPublish(orgId: string, contentId: string, publishUrl: string, platform?: string) {
-    if (!publishUrl?.trim()) {
-      throw new BadRequestException('publishUrl is required')
+  async confirmPublish(
+    orgId: string,
+    contentId: string,
+    publishUrl?: string,
+    platform?: string,
+    publishPostId?: string,
+  ) {
+    const normalizedPublishUrl = publishUrl?.trim() || ''
+    const normalizedPlatform = platform?.trim() || ''
+    const normalizedPublishPostId = publishPostId?.trim() || ''
+
+    if (!normalizedPublishUrl && !normalizedPublishPostId) {
+      throw new BadRequestException('publishUrl or publishPostId is required')
     }
 
     const task = await this.getTaskOrFail(orgId, contentId)
-    const normalizedPublishUrl = publishUrl.trim()
-    const normalizedPlatform = platform?.trim() || ''
     const confirmation = this.employeeDispatchService
       ? await this.employeeDispatchService.confirmPublished(orgId, contentId, {
           publishUrl: normalizedPublishUrl,
           publishPlatform: normalizedPlatform,
+          publishPostId: normalizedPublishPostId,
         })
       : {
           confirmed: false,
@@ -416,6 +470,7 @@ export class DistributionService {
     if (confirmation['confirmed']) {
       const refreshed = await this.videoTaskModel.findById(task._id).lean().exec()
       if (refreshed) {
+        await this.emitPublishedSignals(orgId, contentId, normalizedPlatform, normalizedPublishUrl, normalizedPublishPostId)
         return {
           confirmation,
           ...this.toDistributionResponse(refreshed),
@@ -429,9 +484,22 @@ export class DistributionService {
       {
         $set: {
           'metadata.publishedAt': timestamp,
+          'publishedAt': new Date(timestamp),
+          'status': VideoTaskStatus.PUBLISHED,
+          'platformPostId': normalizedPublishPostId,
+          'platformPostUrl': normalizedPublishUrl,
+          'metadata.platformPostId': normalizedPublishPostId,
+          'metadata.platformPostUrl': normalizedPublishUrl,
+          'metadata.publishInfo': {
+            platform: normalizedPlatform,
+            publishUrl: normalizedPublishUrl,
+            publishPostId: normalizedPublishPostId,
+            publishedAt: timestamp,
+          },
           'metadata.distribution.publishStatus': DistributionPublishStatus.PUBLISHED,
           'metadata.distribution.publishUrl': normalizedPublishUrl,
           'metadata.distribution.platform': normalizedPlatform,
+          'metadata.distribution.publishPostId': normalizedPublishPostId,
           'metadata.distribution.lastStatusAt': timestamp,
         },
         $push: {
@@ -440,6 +508,7 @@ export class DistributionService {
               this.createDistributionHistory(DistributionPublishStatus.PUBLISHED, timestamp, {
                 publishUrl: normalizedPublishUrl,
                 platform: normalizedPlatform,
+                publishPostId: normalizedPublishPostId,
                 confirmation,
               }),
             ],
@@ -453,6 +522,8 @@ export class DistributionService {
       throw new NotFoundException('Content not found')
     }
 
+    await this.emitPublishedSignals(orgId, contentId, normalizedPlatform, normalizedPublishUrl, normalizedPublishPostId)
+
     return {
       confirmation,
       ...this.toDistributionResponse(updated),
@@ -463,7 +534,7 @@ export class DistributionService {
     if (input.contentId) {
       const task = await this.getTaskOrFail(orgId, input.contentId)
       return {
-        items: [this.toDistributionResponse(task.toObject?.() || task as Record<string, any>)],
+        items: [this.toDistributionResponse(task.toObject?.() || (task as Record<string, any>))],
         total: 1,
         page: 1,
         limit: 1,
@@ -504,16 +575,18 @@ export class DistributionService {
     const orgId = task.orgId?.toString() || null
     const pipelineId = task.pipelineId?.toString() || null
     const employeeDispatch = this.employeeDispatchService && taskId
-      ? await (pipelineId
-          ? this.dispatchByPipelineRules(pipelineId, [taskId])
-          : this.employeeDispatchService.batchDispatch([taskId], {})).catch((error) => {
-            this.logger.warn({
-              message: 'Employee dispatch failed after task completion',
-              taskId,
-              error: error instanceof Error ? error.message : String(error),
-            })
-            return null
+      ? await (pipelineId && orgId
+          ? this.dispatchByPipelineRules(orgId, pipelineId, [taskId])
+          : orgId
+            ? this.employeeDispatchService.batchDispatch(orgId, [taskId], {})
+            : Promise.resolve(null)).catch((error) => {
+          this.logger.warn({
+            message: 'Employee dispatch failed after task completion',
+            taskId,
+            error: error instanceof Error ? error.message : String(error),
           })
+          return null
+        })
       : null
 
     const payload = {
@@ -573,6 +646,73 @@ export class DistributionService {
       paidAt: order.paidAt,
       callbackData: order.callbackData,
     })
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async expireStaleDistributions() {
+    const cutoffIso = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+    const staleTasks = await this.videoTaskModel.find({
+      'metadata.distribution.publishStatus': DistributionPublishStatus.PUSHED,
+      'metadata.distribution.lastDistributedAt': { $lte: cutoffIso },
+    }).lean().exec() as Array<Record<string, any>>
+
+    for (const task of staleTasks) {
+      const expiredAt = new Date().toISOString()
+      const orgId = task['orgId']?.toString?.() || ''
+      const deliveryRecordId = this.normalizeOptionalString(
+        task['metadata']?.['distribution']?.['employeeDispatch']?.['deliveryRecordId'],
+      )
+
+      await this.videoTaskModel.findByIdAndUpdate(task['_id'], {
+        $set: {
+          'metadata.distribution.publishStatus': DistributionPublishStatus.EXPIRED,
+          'metadata.distribution.expiredAt': expiredAt,
+          'metadata.distribution.lastStatusAt': expiredAt,
+          'metadata.distribution.heartbeatPending': false,
+        },
+        $push: {
+          'metadata.distribution.history': {
+            $each: [
+              this.createDistributionHistory(DistributionPublishStatus.EXPIRED, expiredAt, {
+                reason: 'publish_not_confirmed_within_48h',
+              }),
+            ],
+          },
+        },
+      }).exec()
+
+      if (this.employeeDispatchService && orgId && deliveryRecordId) {
+        await this.employeeDispatchService.expireDeliveryRecord(orgId, deliveryRecordId, {
+          expiredAt,
+          reason: 'publish_not_confirmed_within_48h',
+        }).catch((error) => {
+          this.logger.warn({
+            message: 'Expire delivery record failed',
+            taskId: task['_id']?.toString?.() || '',
+            deliveryRecordId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+      }
+
+      await this.webhookService.trigger('distribution.expired', {
+        orgId: orgId || null,
+        contentId: task['_id']?.toString?.() || '',
+        expiredAt,
+        reason: 'publish_not_confirmed_within_48h',
+      }).catch((error) => {
+        this.logger.warn({
+          message: 'Distribution expiry webhook failed',
+          taskId: task['_id']?.toString?.() || '',
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+    }
+
+    return {
+      total: staleTasks.length,
+      cutoffAt: cutoffIso,
+    }
   }
 
   private buildRulePayload(
@@ -659,6 +799,100 @@ export class DistributionService {
     })
   }
 
+  private buildRuleEvaluationContent(task: Record<string, any>) {
+    const now = new Date()
+    const platform = this.normalizePlatform(
+      task['metadata']?.['publishInfo']?.['platform']
+      || task['metadata']?.['distribution']?.['platform']
+      || task['metadata']?.['platform']
+      || task['source']?.['type'],
+    )
+    const categories = this.normalizeStringList(
+      task['metadata']?.['contentTags']
+      || task['metadata']?.['tags']
+      || task['metadata']?.['keywords']
+      || task['metadata']?.['categories']
+      || [],
+    )
+
+    return {
+      contentId: task['_id']?.toString?.() || '',
+      pipelineId: task['pipelineId']?.toString?.() || '',
+      brandId: task['brandId']?.toString?.() || '',
+      platform,
+      categories,
+      tags: categories,
+      dispatch: {
+        weekday: now.getUTCDay(),
+        hour: now.getUTCHours(),
+        slot: this.resolveDispatchSlot(now.getUTCHours()),
+      },
+      metadata: task['metadata'] || {},
+    }
+  }
+
+  private buildDispatchRulesFromSelection(
+    selection: { action: string, target: string },
+    ruleType: DistributionRuleType | null,
+  ) {
+    const target = this.normalizeOptionalString(selection.target)
+    const action = this.normalizeOptionalString(selection.action).toLowerCase()
+    const [prefix, rawValue] = target.includes(':')
+      ? target.split(/:(.+)/, 2)
+      : ['', target]
+    const normalizedPrefix = prefix.toLowerCase()
+    const normalizedValue = this.normalizeOptionalString(rawValue || target)
+
+    const dispatchRules: Record<string, unknown> = {}
+    const shouldUseAssignment = ruleType === DistributionRuleType.BY_EMPLOYEE
+      || normalizedPrefix === 'employee'
+      || normalizedPrefix === 'assignment'
+      || action === 'assign'
+    const shouldUsePlatform = ruleType === DistributionRuleType.BY_PLATFORM
+      || normalizedPrefix === 'platform'
+      || action === 'platform'
+    const shouldUseCategory = normalizedPrefix === 'category'
+    const shouldUseStrategy = normalizedPrefix === 'strategy' || action === 'strategy'
+
+    if (shouldUseAssignment && Types.ObjectId.isValid(normalizedValue)) {
+      dispatchRules['assignmentIds'] = [normalizedValue]
+    }
+
+    if (shouldUsePlatform && normalizedValue) {
+      dispatchRules['preferredPlatforms'] = [this.normalizePlatform(normalizedValue)]
+    }
+
+    if (shouldUseCategory && normalizedValue) {
+      dispatchRules['preferredCategories'] = [normalizedValue.toLowerCase()]
+    }
+
+    if (shouldUseStrategy && normalizedValue) {
+      dispatchRules['strategy'] = normalizedValue
+    }
+
+    return dispatchRules
+  }
+
+  private mergeDispatchRules(
+    baseRules: Record<string, unknown> = {},
+    overrideRules: Record<string, unknown> = {},
+  ) {
+    const baseAssignments = this.normalizeStringList(baseRules['assignmentIds'])
+    const overrideAssignments = this.normalizeStringList(overrideRules['assignmentIds'])
+    const basePlatforms = this.normalizeStringList(baseRules['preferredPlatforms'])
+    const overridePlatforms = this.normalizeStringList(overrideRules['preferredPlatforms']).map(platform => this.normalizePlatform(platform))
+    const baseCategories = this.normalizeStringList(baseRules['preferredCategories'])
+    const overrideCategories = this.normalizeStringList(overrideRules['preferredCategories'])
+
+    return {
+      pipelineId: this.normalizeOptionalString(overrideRules['pipelineId'] || baseRules['pipelineId']),
+      assignmentIds: Array.from(new Set([...baseAssignments, ...overrideAssignments])),
+      preferredPlatforms: Array.from(new Set([...basePlatforms.map(platform => this.normalizePlatform(platform)), ...overridePlatforms])),
+      preferredCategories: Array.from(new Set([...baseCategories, ...overrideCategories])),
+      strategy: this.normalizeOptionalString(overrideRules['strategy'] || baseRules['strategy']) || 'round-robin',
+    }
+  }
+
   private matchesCondition(
     content: Record<string, unknown>,
     condition: Record<string, unknown> | null,
@@ -706,6 +940,7 @@ export class DistributionService {
     expected: unknown,
   ) {
     const op = typeof operator === 'string' ? operator : 'eq'
+    const actualNumber = this.toNumericValue(actual)
 
     switch (op) {
       case 'eq':
@@ -723,13 +958,22 @@ export class DistributionService {
         }
         return false
       case 'gte':
-        return typeof actual === 'number' && typeof expected === 'number'
-          ? actual >= expected
+        return actualNumber !== null && this.toNumericValue(expected) !== null
+          ? actualNumber >= (this.toNumericValue(expected) as number)
           : false
       case 'lte':
-        return typeof actual === 'number' && typeof expected === 'number'
-          ? actual <= expected
+        return actualNumber !== null && this.toNumericValue(expected) !== null
+          ? actualNumber <= (this.toNumericValue(expected) as number)
           : false
+      case 'between': {
+        if (!Array.isArray(expected) || expected.length < 2 || actualNumber === null) {
+          return false
+        }
+
+        const min = this.toNumericValue(expected[0])
+        const max = this.toNumericValue(expected[1])
+        return min !== null && max !== null && actualNumber >= min && actualNumber <= max
+      }
       case 'exists':
         return Boolean(actual) === Boolean(expected)
       default:
@@ -809,8 +1053,22 @@ export class DistributionService {
 
   private resolvePublishStatus(task: VideoTask | Record<string, any>): DistributionPublishStatus {
     const fromMetadata = task.metadata?.distribution?.publishStatus
-    if (this.isDistributionPublishStatus(fromMetadata)) {
+    if (isDistributionPublishStatus(fromMetadata)) {
       return fromMetadata
+    }
+
+    if (
+      fromMetadata === 'pushed'
+      || fromMetadata === 'delivered'
+      || fromMetadata === 'received'
+      || fromMetadata === 'confirmed'
+      || fromMetadata === 'downloaded'
+    ) {
+      return DistributionPublishStatus.PUSHED
+    }
+
+    if (fromMetadata === 'expired') {
+      return DistributionPublishStatus.EXPIRED
     }
 
     if (task.status === VideoTaskStatus.PUBLISHED) {
@@ -824,23 +1082,25 @@ export class DistributionService {
     return DistributionPublishStatus.COMPLETED
   }
 
-  private isDistributionPublishStatus(value: unknown): value is DistributionPublishStatus {
-    return typeof value === 'string'
-      && Object.values(DistributionPublishStatus).includes(value as DistributionPublishStatus)
-  }
-
   private canTransition(
     currentStatus: DistributionPublishStatus,
     nextStatus: DistributionPublishStatus,
   ) {
-    const transitions: Record<DistributionPublishStatus, DistributionPublishStatus | null> = {
-      [DistributionPublishStatus.COMPLETED]: DistributionPublishStatus.PUSHED,
-      [DistributionPublishStatus.PUSHED]: DistributionPublishStatus.PUBLISHED,
-      [DistributionPublishStatus.PUBLISHED]: DistributionPublishStatus.EXPIRED,
-      [DistributionPublishStatus.EXPIRED]: null,
+    if (currentStatus === nextStatus) {
+      return true
     }
 
-    return transitions[currentStatus] === nextStatus
+    const transitions: Record<DistributionPublishStatus, DistributionPublishStatus[]> = {
+      [DistributionPublishStatus.COMPLETED]: [DistributionPublishStatus.PUSHED],
+      [DistributionPublishStatus.PUSHED]: [
+        DistributionPublishStatus.PUBLISHED,
+        DistributionPublishStatus.EXPIRED,
+      ],
+      [DistributionPublishStatus.PUBLISHED]: [],
+      [DistributionPublishStatus.EXPIRED]: [],
+    }
+
+    return transitions[currentStatus].includes(nextStatus)
   }
 
   private createDistributionHistory(
@@ -894,13 +1154,17 @@ export class DistributionService {
       distributionStatus: this.resolveLifecycleStatus(task),
       publishStatus: this.resolvePublishStatus(task),
       employeeDispatch: distribution?.['employeeDispatch'] || null,
-      publishUrl: distribution?.['publishUrl'] || publishInfo?.['publishUrl'] || null,
-      platform: distribution?.['platform'] || publishInfo?.['platform'] || null,
+      publishUrl: distribution?.['publishUrl'] || publishInfo?.['publishUrl'] || task['platformPostUrl'] || metadata?.['platformPostUrl'] || null,
+      publishPostId: distribution?.['publishPostId'] || publishInfo?.['publishPostId'] || task['platformPostId'] || metadata?.['platformPostId'] || null,
+      platform: distribution?.['platform'] || publishInfo?.['platform'] || metadata?.['publishInfo']?.['platform'] || null,
       targets: distribution?.['targets'] || [],
       feedback: distribution?.['feedback'] || [],
       history: distribution?.['history'] || [],
+      heartbeatPending: Boolean(distribution?.['heartbeatPending']),
+      manualPickupRequired: Boolean(distribution?.['manualPickupRequired']),
       lastDistributedAt: distribution?.['lastDistributedAt'] || null,
       lastStatusAt: distribution?.['lastStatusAt'] || null,
+      expiredAt: distribution?.['expiredAt'] || null,
     }
   }
 
@@ -926,6 +1190,88 @@ export class DistributionService {
     }
 
     return 'pending_assignment'
+  }
+
+  private async emitPublishedSignals(
+    orgId: string,
+    contentId: string,
+    platform: string,
+    publishUrl: string,
+    publishPostId: string,
+  ) {
+    await Promise.allSettled([
+      this.notificationService
+        ? this.notificationService.send(orgId, NotificationEvent.CONTENT_PUBLISHED, {
+            contentId,
+            platform,
+            publishUrl,
+            publishPostId,
+          })
+        : Promise.resolve(null),
+      this.webhookService.trigger('distribution.published', {
+        orgId,
+        contentId,
+        platform,
+        publishUrl,
+        publishPostId,
+      }),
+    ])
+  }
+
+  private normalizeOptionalString(value: unknown) {
+    return typeof value === 'string' ? value.trim() : ''
+  }
+
+  private normalizeStringList(value: unknown) {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return Array.from(new Set(value
+      .map(item => this.normalizeOptionalString(item).toLowerCase())
+      .filter(Boolean)))
+  }
+
+  private normalizePlatform(value: unknown) {
+    const normalized = this.normalizeOptionalString(value).toLowerCase()
+    if (normalized === 'xhs' || normalized === 'rednote') {
+      return 'xiaohongshu'
+    }
+    return normalized
+  }
+
+  private resolveDispatchSlot(hour: number) {
+    if (hour < 6) {
+      return 'overnight'
+    }
+    if (hour < 12) {
+      return 'morning'
+    }
+    if (hour < 18) {
+      return 'afternoon'
+    }
+    return 'evening'
+  }
+
+  private toNumericValue(value: unknown) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const asNumber = Number(value)
+      if (Number.isFinite(asNumber)) {
+        return asNumber
+      }
+
+      const parsedDate = Date.parse(value)
+      if (!Number.isNaN(parsedDate)) {
+        return parsedDate
+      }
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.getTime()
+    }
+    return null
   }
 
   private toObjectId(value: string, field: string) {

@@ -3,31 +3,22 @@ import {
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import { Types } from 'mongoose'
-import { vi } from 'vitest'
-import { describeModuleSpec } from '../testing/module-spec.factory'
-import { DistributionController } from './distribution.controller'
-import { DistributionModule } from './distribution.module'
-import {
-  DistributionPublishStatus,
-  DistributionService,
-} from './distribution.service'
-
-describeModuleSpec<DistributionService>({
-  suiteName: 'DistributionModule',
-  module: DistributionModule,
-  service: DistributionService,
-  controller: DistributionController,
-  keyMethods: ['listRules', 'evaluateRules', 'distribute'],
-})
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { DistributionPublishStatus } from './distribution.constants'
+import { DistributionService } from './distribution.service'
 
 function createQuery<T>(value: T) {
   const query = {
     sort: vi.fn(),
+    skip: vi.fn(),
+    limit: vi.fn(),
     lean: vi.fn(),
     exec: vi.fn().mockResolvedValue(value),
   }
 
   query.sort.mockReturnValue(query)
+  query.skip.mockReturnValue(query)
+  query.limit.mockReturnValue(query)
   query.lean.mockReturnValue(query)
 
   return query
@@ -37,26 +28,43 @@ describe('distributionService', () => {
   let service: DistributionService
   let distributionRuleModel: Record<string, any>
   let videoTaskModel: Record<string, any>
+  let pipelineModel: Record<string, any>
   let webhookService: Record<string, any>
+  let employeeDispatchService: Record<string, any>
+  let notificationService: Record<string, any>
 
   beforeEach(() => {
     distributionRuleModel = {
       find: vi.fn(),
     }
-
     videoTaskModel = {
+      find: vi.fn(),
+      findOne: vi.fn(),
       findById: vi.fn(),
       findByIdAndUpdate: vi.fn(),
     }
-
+    pipelineModel = {
+      findOne: vi.fn(),
+    }
     webhookService = {
       trigger: vi.fn().mockResolvedValue(undefined),
+    }
+    employeeDispatchService = {
+      batchDispatch: vi.fn(),
+      confirmPublished: vi.fn(),
+      expireDeliveryRecord: vi.fn().mockResolvedValue(undefined),
+    }
+    notificationService = {
+      send: vi.fn().mockResolvedValue(undefined),
     }
 
     service = new DistributionService(
       distributionRuleModel as any,
       videoTaskModel as any,
+      pipelineModel as any,
       webhookService as any,
+      employeeDispatchService as any,
+      notificationService as any,
     )
   })
 
@@ -97,117 +105,191 @@ describe('distributionService', () => {
     expect(result.rule?.name).toBe('高优先级规则')
   })
 
-  it('应推送已完成内容并记录分发结果', async () => {
+  it('应将命中的员工规则转换为投递路由', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId().toString()
+    const assignmentId = new Types.ObjectId().toString()
+    const task = {
+      _id: new Types.ObjectId(taskId),
+      orgId: new Types.ObjectId(orgId),
+      status: VideoTaskStatus.COMPLETED,
+      metadata: {
+        platform: 'xiaohongshu',
+        contentTags: ['beauty'],
+      },
+      toObject() {
+        return this
+      },
+    }
+    const rule = {
+      _id: new Types.ObjectId(),
+      orgId: new Types.ObjectId(orgId),
+      name: '员工分发',
+      type: DistributionRuleType.BY_EMPLOYEE,
+      priority: 100,
+      isActive: true,
+      rules: [
+        {
+          condition: {
+            field: 'platform',
+            op: 'eq',
+            value: 'xiaohongshu',
+          },
+          action: 'assign',
+          target: assignmentId,
+        },
+      ],
+    }
+
+    distributionRuleModel.find.mockReturnValue(createQuery([rule]))
+    videoTaskModel.findOne.mockReturnValue(createQuery(task))
+    videoTaskModel.findById.mockReturnValue(createQuery({
+      ...task,
+      metadata: {
+        distribution: {
+          publishStatus: DistributionPublishStatus.PUSHED,
+        },
+      },
+    }))
+    employeeDispatchService.batchDispatch.mockResolvedValue({
+      total: 1,
+      dispatched: 1,
+      failed: 0,
+      pending: 0,
+      strategy: 'round-robin',
+      results: [
+        {
+          videoTaskId: taskId,
+          dispatched: true,
+          assignmentId,
+          status: 'pushed',
+        },
+      ],
+    })
+
+    const result = await service.assignByRule(orgId, taskId)
+
+    expect(employeeDispatchService.batchDispatch).toHaveBeenCalledWith(
+      orgId,
+      [taskId],
+      expect.objectContaining({
+        assignmentIds: [assignmentId],
+      }),
+    )
+    expect(result.matchedRule?.type).toBe(DistributionRuleType.BY_EMPLOYEE)
+    expect(result.assignment?.assignmentId).toBe(assignmentId)
+  })
+
+  it('应在48小时未确认发布后将任务标记为 expired', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId()
+    const deliveryRecordId = new Types.ObjectId().toString()
+    const staleTask = {
+      _id: taskId,
+      orgId: new Types.ObjectId(orgId),
+      metadata: {
+        distribution: {
+          publishStatus: DistributionPublishStatus.PUSHED,
+          lastDistributedAt: '2026-04-01T00:00:00.000Z',
+          employeeDispatch: {
+            deliveryRecordId,
+          },
+        },
+      },
+    }
+
+    videoTaskModel.find.mockReturnValue(createQuery([staleTask]))
+    videoTaskModel.findByIdAndUpdate.mockReturnValue(createQuery(null))
+
+    const result = await service.expireStaleDistributions()
+
+    expect(result.total).toBe(1)
+    expect(videoTaskModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      taskId,
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          'metadata.distribution.publishStatus': DistributionPublishStatus.EXPIRED,
+        }),
+      }),
+    )
+    expect(employeeDispatchService.expireDeliveryRecord).toHaveBeenCalledWith(
+      orgId,
+      deliveryRecordId,
+      expect.objectContaining({
+        reason: 'publish_not_confirmed_within_48h',
+      }),
+    )
+    expect(webhookService.trigger).toHaveBeenCalledWith(
+      'distribution.expired',
+      expect.objectContaining({
+        contentId: taskId.toString(),
+      }),
+    )
+  })
+
+  it('应在发布确认时回传 publishPostId 并触发数据回流', async () => {
     const orgId = new Types.ObjectId().toString()
     const taskId = new Types.ObjectId().toString()
     const task = {
       _id: new Types.ObjectId(taskId),
       orgId: new Types.ObjectId(orgId),
       status: VideoTaskStatus.COMPLETED,
-      metadata: {},
-    }
-    const updatedTask = {
-      _id: task._id,
-      orgId: task.orgId,
-      status: VideoTaskStatus.COMPLETED,
-      metadata: {
-        distribution: {
-          publishStatus: DistributionPublishStatus.PUSHED,
-          targets: [
-            {
-              action: 'publish',
-              target: 'douyin-official',
-              status: DistributionPublishStatus.PUSHED,
-              pushedAt: '2026-03-29T10:00:00.000Z',
-            },
-          ],
-          history: [],
-          feedback: [],
-          lastDistributedAt: '2026-03-29T10:00:00.000Z',
-          lastStatusAt: '2026-03-29T10:00:00.000Z',
-        },
-      },
-    }
-
-    videoTaskModel.findById.mockReturnValue(createQuery(task))
-    videoTaskModel.findByIdAndUpdate.mockReturnValue(createQuery(updatedTask))
-
-    const result = await service.distribute(orgId, taskId, [
-      {
-        action: 'publish',
-        target: 'douyin-official',
-      },
-    ])
-
-    expect(result.publishStatus).toBe(DistributionPublishStatus.PUSHED)
-    expect(result.targets).toHaveLength(1)
-    expect(result.targets[0]).toMatchObject({
-      action: 'publish',
-      target: 'douyin-official',
-      status: DistributionPublishStatus.PUSHED,
-    })
-    expect(webhookService.trigger).toHaveBeenCalledWith(
-      'distribution.pushed',
-      expect.objectContaining({
-        orgId,
-        contentId: taskId,
-      }),
-    )
-  })
-
-  it('应跟踪内容发布状态', async () => {
-    const taskId = new Types.ObjectId().toString()
-    const task = {
-      _id: new Types.ObjectId(taskId),
-      status: VideoTaskStatus.COMPLETED,
       metadata: {
         distribution: {
           publishStatus: DistributionPublishStatus.PUSHED,
         },
       },
-      toObject: () => ({
-        _id: new Types.ObjectId(taskId),
-        status: VideoTaskStatus.COMPLETED,
-        metadata: {
-          distribution: {
-            publishStatus: DistributionPublishStatus.PUSHED,
-          },
-        },
-      }),
     }
-    const publishedTask = {
-      _id: task._id,
-      status: VideoTaskStatus.COMPLETED,
+    const refreshedTask = {
+      ...task,
+      status: VideoTaskStatus.PUBLISHED,
       metadata: {
-        publishedAt: '2026-03-29T11:00:00.000Z',
+        publishInfo: {
+          platform: 'xiaohongshu',
+          publishUrl: 'https://publish.example.com/post/1',
+          publishPostId: 'post_1',
+        },
         distribution: {
           publishStatus: DistributionPublishStatus.PUBLISHED,
-          history: [],
-          feedback: [],
-          targets: [],
-          lastStatusAt: '2026-03-29T11:00:00.000Z',
         },
       },
     }
 
-    videoTaskModel.findById.mockReturnValue(createQuery(task))
-    videoTaskModel.findByIdAndUpdate.mockReturnValue(createQuery(publishedTask))
+    videoTaskModel.findOne.mockReturnValue(createQuery(task))
+    videoTaskModel.findById.mockReturnValue(createQuery(refreshedTask))
+    employeeDispatchService.confirmPublished.mockResolvedValue({
+      confirmed: true,
+      id: new Types.ObjectId().toString(),
+    })
 
-    const result = await service.trackPublishStatus(
+    const result = await service.confirmPublish(
+      orgId,
       taskId,
-      DistributionPublishStatus.PUBLISHED,
+      'https://publish.example.com/post/1',
+      'xiaohongshu',
+      'post_1',
     )
 
-    expect(result.publishStatus).toBe(DistributionPublishStatus.PUBLISHED)
-    expect(videoTaskModel.findByIdAndUpdate).toHaveBeenCalledWith(
-      task._id,
+    expect(employeeDispatchService.confirmPublished).toHaveBeenCalledWith(
+      orgId,
+      taskId,
       expect.objectContaining({
-        $set: expect.objectContaining({
-          'metadata.distribution.publishStatus': DistributionPublishStatus.PUBLISHED,
-          'metadata.publishedAt': expect.any(String),
-        }),
+        publishPostId: 'post_1',
       }),
-      { new: true },
     )
+    expect(notificationService.send).toHaveBeenCalledWith(
+      orgId,
+      expect.any(String),
+      expect.objectContaining({
+        publishPostId: 'post_1',
+      }),
+    )
+    expect(webhookService.trigger).toHaveBeenCalledWith(
+      'distribution.published',
+      expect.objectContaining({
+        publishPostId: 'post_1',
+      }),
+    )
+    expect(result.publishPostId).toBe('post_1')
   })
 })

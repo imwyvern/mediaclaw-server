@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
@@ -17,6 +16,7 @@ import {
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
+import { DistributionPublishStatus } from '../distribution/distribution.constants'
 import { FeishuPushService } from './feishu-push.service'
 import { ImDeliveryService } from './im-delivery.service'
 import {
@@ -59,10 +59,13 @@ interface PublishData {
   publishPostId?: string
 }
 
+interface ExpireDeliveryOptions {
+  expiredAt?: string
+  reason?: string
+}
+
 @Injectable()
 export class EmployeeDispatchService {
-  private readonly logger = new Logger(EmployeeDispatchService.name)
-
   constructor(
     @InjectModel(EmployeeAssignment.name)
     private readonly employeeAssignmentModel: Model<EmployeeAssignment>,
@@ -115,8 +118,8 @@ export class EmployeeDispatchService {
     return this.toAssignmentResponse(assignment)
   }
 
-  async updateAssignment(id: string, data: Record<string, unknown>) {
-    const existing = await this.getAssignmentOrFail(id)
+  async updateAssignment(orgId: string, id: string, data: Record<string, unknown>) {
+    const existing = await this.getAssignmentOrFail(id, orgId)
     const normalized = await this.normalizeAssignmentPayload(existing['orgId'], data, existing)
 
     const updated = await this.employeeAssignmentModel.findByIdAndUpdate(
@@ -137,8 +140,8 @@ export class EmployeeDispatchService {
     return this.toAssignmentResponse(updated)
   }
 
-  async removeAssignment(id: string) {
-    const assignment = await this.getAssignmentOrFail(id)
+  async removeAssignment(orgId: string, id: string) {
+    const assignment = await this.getAssignmentOrFail(id, orgId)
     await this.employeeAssignmentModel.findByIdAndUpdate(assignment['_id'], {
       $set: {
         status: EmployeeAssignmentStatus.REMOVED,
@@ -190,13 +193,13 @@ export class EmployeeDispatchService {
     }
   }
 
-  async bindImAccount(assignmentId: string, channel: string, binding: Record<string, unknown>) {
+  async bindImAccount(orgId: string, assignmentId: string, channel: string, binding: Record<string, unknown>) {
     const normalizedChannel = this.normalizeChannel(channel)
     if (normalizedChannel !== DeliveryChannel.FEISHU && normalizedChannel !== DeliveryChannel.WECOM) {
       throw new BadRequestException('channel must be feishu or wecom')
     }
 
-    const assignment = await this.getAssignmentOrFail(assignmentId)
+    const assignment = await this.getAssignmentOrFail(assignmentId, orgId)
     const normalizedBinding = this.normalizeImBinding(normalizedChannel, binding)
 
     const updated = await this.employeeAssignmentModel.findByIdAndUpdate(
@@ -212,9 +215,9 @@ export class EmployeeDispatchService {
     return this.toAssignmentResponse(updated)
   }
 
-  async dispatchToEmployee(videoTaskId: string, assignmentId: string) {
-    const task = await this.getTaskOrFail(videoTaskId)
-    const assignment = await this.getAssignmentOrFail(assignmentId)
+  async dispatchToEmployee(orgId: string, videoTaskId: string, assignmentId: string) {
+    const task = await this.getTaskOrFail(videoTaskId, orgId)
+    const assignment = await this.getAssignmentOrFail(assignmentId, orgId)
     const taskOrgId = this.resolveTaskOrgId(task)
 
     if (assignment['orgId'] !== taskOrgId) {
@@ -224,13 +227,15 @@ export class EmployeeDispatchService {
     return this.dispatchTaskWithAssignment(task, assignment)
   }
 
-  async batchDispatch(videoTaskIds: string[], dispatchRules: DispatchRulesInput = {}) {
+  async batchDispatch(orgId: string, videoTaskIds: string[], dispatchRules: DispatchRulesInput = {}) {
     if (!Array.isArray(videoTaskIds) || videoTaskIds.length === 0) {
       throw new BadRequestException('videoTaskIds is required')
     }
 
+    const normalizedOrgId = this.normalizeOrgId(orgId)
     const normalizedTaskIds = Array.from(new Set(videoTaskIds.map(id => id.trim()).filter(Boolean)))
     const tasks = await this.videoTaskModel.find({
+      orgId: normalizedOrgId,
       _id: {
         $in: normalizedTaskIds
           .filter(id => Types.ObjectId.isValid(id))
@@ -307,9 +312,12 @@ export class EmployeeDispatchService {
     }
   }
 
-  async confirmDelivery(deliveryRecordId: string) {
-    const record = await this.getDeliveryRecordOrFail(deliveryRecordId)
-    if (record['status'] === DeliveryRecordStatus.CONFIRMED || record['status'] === DeliveryRecordStatus.PUBLISHED) {
+  async confirmDelivery(orgId: string, deliveryRecordId: string) {
+    const record = await this.getDeliveryRecordOrFail(deliveryRecordId, orgId)
+    if (
+      record['status'] === DeliveryRecordStatus.RECEIVED
+      || record['status'] === DeliveryRecordStatus.PUBLISHED
+    ) {
       return this.toDeliveryResponse(record)
     }
 
@@ -318,23 +326,36 @@ export class EmployeeDispatchService {
       record['_id'],
       {
         $set: {
-          status: DeliveryRecordStatus.CONFIRMED,
+          status: DeliveryRecordStatus.RECEIVED,
           confirmedAt,
+          receivedAt: confirmedAt,
         },
       },
       { new: true },
     ).lean().exec()
 
-    await this.appendTaskDistributionHistory(record['videoTaskId'], 'confirmed', {
-      deliveryRecordId,
-      confirmedAt: confirmedAt.toISOString(),
-    })
+    await Promise.all([
+      this.videoTaskModel.findByIdAndUpdate(record['videoTaskId'], {
+        $set: {
+          'metadata.distribution.publishStatus': DistributionPublishStatus.PUSHED,
+          'metadata.distribution.lastStatusAt': confirmedAt.toISOString(),
+          'metadata.distribution.heartbeatPending': false,
+          'metadata.distribution.manualPickupRequired': false,
+          'metadata.distribution.employeeDispatch.receivedAt': confirmedAt.toISOString(),
+          'metadata.distribution.employeeDispatch.deliveryStatus': DeliveryRecordStatus.RECEIVED,
+        },
+      }).exec(),
+      this.appendTaskDistributionHistory(record['videoTaskId'], 'received', {
+        deliveryRecordId,
+        confirmedAt: confirmedAt.toISOString(),
+      }),
+    ])
 
     return this.toDeliveryResponse(updated)
   }
 
-  async markPublished(deliveryRecordId: string, publishData: PublishData = {}) {
-    const record = await this.getDeliveryRecordOrFail(deliveryRecordId)
+  async markPublished(orgId: string, deliveryRecordId: string, publishData: PublishData = {}) {
+    const record = await this.getDeliveryRecordOrFail(deliveryRecordId, orgId)
     if (record['status'] === DeliveryRecordStatus.PUBLISHED) {
       return this.toDeliveryResponse(record)
     }
@@ -343,6 +364,10 @@ export class EmployeeDispatchService {
     const normalizedPublishUrl = this.normalizeOptionalString(publishData.publishUrl)
     const normalizedPlatform = this.normalizeOptionalString(publishData.publishPlatform)
     const normalizedPostId = this.normalizeOptionalString(publishData.publishPostId)
+
+    if (!normalizedPublishUrl && !normalizedPostId) {
+      throw new BadRequestException('publishUrl or publishPostId is required')
+    }
 
     const updatedRecord = await this.deliveryRecordModel.findByIdAndUpdate(
       record['_id'],
@@ -363,24 +388,38 @@ export class EmployeeDispatchService {
         $inc: {
           'stats.totalPublished': 1,
           'stats.totalPending': -1,
-          totalConfirmedPublished: 1,
+          'totalConfirmedPublished': 1,
         },
         $set: {
           'stats.lastPublishedAt': publishedAt,
-          lastConfirmedAt: publishedAt,
+          'lastConfirmedAt': publishedAt,
         },
       }).exec(),
       this.videoTaskModel.findByIdAndUpdate(record['videoTaskId'], {
         $set: {
-          status: VideoTaskStatus.PUBLISHED,
+          'status': VideoTaskStatus.PUBLISHED,
           publishedAt,
+          'platformPostId': normalizedPostId,
+          'platformPostUrl': normalizedPublishUrl,
           'metadata.publishedAt': publishedAt.toISOString(),
-          'metadata.distribution.publishStatus': DeliveryRecordStatus.PUBLISHED,
+          'metadata.platformPostId': normalizedPostId,
+          'metadata.platformPostUrl': normalizedPublishUrl,
+          'metadata.publishInfo': {
+            platform: normalizedPlatform,
+            publishUrl: normalizedPublishUrl,
+            publishPostId: normalizedPostId,
+            publishedAt: publishedAt.toISOString(),
+          },
+          'metadata.distribution.publishStatus': DistributionPublishStatus.PUBLISHED,
           'metadata.distribution.publishUrl': normalizedPublishUrl,
           'metadata.distribution.platform': normalizedPlatform,
-          'metadata.distribution.postId': normalizedPostId,
+          'metadata.distribution.publishPostId': normalizedPostId,
           'metadata.distribution.lastStatusAt': publishedAt.toISOString(),
           'metadata.distribution.employeeDispatch.publishedAt': publishedAt.toISOString(),
+          'metadata.distribution.employeeDispatch.publishConfirmed': true,
+          'metadata.distribution.employeeDispatch.deliveryStatus': DeliveryRecordStatus.PUBLISHED,
+          'metadata.distribution.heartbeatPending': false,
+          'metadata.distribution.manualPickupRequired': false,
         },
         $push: {
           'metadata.distribution.history': {
@@ -398,6 +437,131 @@ export class EmployeeDispatchService {
     ])
 
     return this.toDeliveryResponse(updatedRecord)
+  }
+
+  async listPendingDeliveries(orgId: string, filters: Record<string, unknown> = {}, pagination: PaginationInput = {}) {
+    const normalizedOrgId = this.normalizeOrgId(orgId)
+    const page = Math.max(Number(pagination.page || 1), 1)
+    const limit = Math.min(Math.max(Number(pagination.limit || 20), 1), 100)
+    const skip = (page - 1) * limit
+    const query: Record<string, unknown> = {
+      orgId: normalizedOrgId,
+      status: {
+        $in: [
+          DeliveryRecordStatus.PENDING,
+          DeliveryRecordStatus.PUSHED,
+          DeliveryRecordStatus.RECEIVED,
+          DeliveryRecordStatus.DOWNLOADED,
+        ],
+      },
+    }
+
+    if (typeof filters['assignmentId'] === 'string' && Types.ObjectId.isValid(filters['assignmentId'])) {
+      query['employeeAssignmentId'] = filters['assignmentId']
+    }
+    if (typeof filters['videoTaskId'] === 'string' && Types.ObjectId.isValid(filters['videoTaskId'])) {
+      query['videoTaskId'] = filters['videoTaskId']
+    }
+    if (typeof filters['channel'] === 'string' && filters['channel']) {
+      query['deliveryChannel'] = filters['channel']
+    }
+
+    const [records, total] = await Promise.all([
+      this.deliveryRecordModel.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec() as Promise<DeliveryRecordDocument[]>,
+      this.deliveryRecordModel.countDocuments(query),
+    ])
+
+    const assignmentIds = Array.from(new Set(records.map(record => record['employeeAssignmentId']).filter(Boolean)))
+    const taskIds = Array.from(new Set(records.map(record => record['videoTaskId']).filter(Boolean)))
+    const [assignments, tasks] = await Promise.all([
+      this.employeeAssignmentModel.find({ _id: { $in: assignmentIds } }).lean().exec() as Promise<AssignmentRecord[]>,
+      this.videoTaskModel.find({ _id: { $in: taskIds } }).lean().exec() as Promise<VideoTaskRecord[]>,
+    ])
+
+    const assignmentMap = new Map(assignments.map(assignment => [assignment['_id'].toString(), assignment]))
+    const taskMap = new Map(tasks.map(task => [task['_id'].toString(), task]))
+
+    return {
+      items: records.map((record) => {
+        const task = taskMap.get(String(record['videoTaskId']))
+        const assignment = assignmentMap.get(String(record['employeeAssignmentId']))
+        return {
+          ...this.toDeliveryResponse(record),
+          heartbeatPending: Boolean(task?.['metadata']?.['distribution']?.['heartbeatPending']),
+          assignment: assignment
+            ? {
+                id: assignment['_id'].toString(),
+                employeeName: assignment['employeeName'] || '',
+                employeePhone: assignment['employeePhone'] || '',
+              }
+            : null,
+          task: task
+            ? {
+                id: task['_id'].toString(),
+                title: this.normalizeOptionalString(task['copy']?.['title']) || task['_id'].toString(),
+                outputVideoUrl: this.normalizeOptionalString(task['outputVideoUrl']),
+                publishStatus: task['metadata']?.['distribution']?.['publishStatus'] || DistributionPublishStatus.COMPLETED,
+              }
+            : null,
+        }
+      }),
+      total,
+      page,
+      limit,
+    }
+  }
+
+  async expireDeliveryRecord(orgId: string, deliveryRecordId: string, options: ExpireDeliveryOptions = {}) {
+    const record = await this.getDeliveryRecordOrFail(deliveryRecordId, orgId)
+    if (
+      record['status'] === DeliveryRecordStatus.EXPIRED
+      || record['status'] === DeliveryRecordStatus.PUBLISHED
+      || record['status'] === DeliveryRecordStatus.FAILED
+    ) {
+      return this.toDeliveryResponse(record)
+    }
+
+    const expiredAt = new Date(options.expiredAt || new Date().toISOString())
+    const failReason = this.normalizeOptionalString(options.reason) || 'delivery_expired'
+
+    const updated = await this.deliveryRecordModel.findByIdAndUpdate(
+      record['_id'],
+      {
+        $set: {
+          status: DeliveryRecordStatus.EXPIRED,
+          expiredAt,
+          failReason,
+        },
+      },
+      { new: true },
+    ).lean().exec()
+
+    await Promise.all([
+      this.employeeAssignmentModel.findByIdAndUpdate(record['employeeAssignmentId'], {
+        $inc: {
+          'stats.totalPending': -1,
+        },
+      }).exec(),
+      this.videoTaskModel.findByIdAndUpdate(record['videoTaskId'], {
+        $set: {
+          'metadata.distribution.employeeDispatch.deliveryStatus': DeliveryRecordStatus.EXPIRED,
+          'metadata.distribution.employeeDispatch.expiredAt': expiredAt.toISOString(),
+          'metadata.distribution.heartbeatPending': false,
+        },
+      }).exec(),
+      this.appendTaskDistributionHistory(record['videoTaskId'], 'expired', {
+        deliveryRecordId,
+        expiredAt: expiredAt.toISOString(),
+        reason: failReason,
+      }),
+    ])
+
+    return this.toDeliveryResponse(updated)
   }
 
   async getDispatchStats(orgId: string, period: Record<string, unknown> = {}) {
@@ -438,7 +602,10 @@ export class EmployeeDispatchService {
         removed: assignmentSummary.filter(item => item['status'] === EmployeeAssignmentStatus.REMOVED).length,
       },
       publishedCount: byStatus[DeliveryRecordStatus.PUBLISHED] || 0,
-      pendingCount: byStatus[DeliveryRecordStatus.PENDING] || 0,
+      pendingCount: (byStatus[DeliveryRecordStatus.PENDING] || 0)
+        + (byStatus[DeliveryRecordStatus.PUSHED] || 0)
+        + (byStatus[DeliveryRecordStatus.RECEIVED] || 0)
+        + (byStatus[DeliveryRecordStatus.DOWNLOADED] || 0),
     }
   }
 
@@ -457,7 +624,7 @@ export class EmployeeDispatchService {
       }
     }
 
-    const published = await this.markPublished(record['_id'].toString(), publishData)
+    const published = await this.markPublished(orgId, record['_id'].toString(), publishData)
     return {
       confirmed: true,
       ...published,
@@ -465,63 +632,105 @@ export class EmployeeDispatchService {
   }
 
   private async dispatchTaskWithAssignment(task: VideoTaskRecord, assignment: AssignmentRecord) {
-  const deliveryChannel = this.resolveDeliveryChannel(assignment)
-  const created = await this.deliveryRecordModel.create({
-    orgId: assignment['orgId'],
-    videoTaskId: task['_id'].toString(),
-    employeeAssignmentId: assignment['_id'].toString(),
-    deliveryChannel,
-    status: DeliveryRecordStatus.PENDING,
-    retryCount: 0,
-  })
+    const deliveryChannel = this.resolveDeliveryChannel(assignment)
+    const created = await this.deliveryRecordModel.create({
+      orgId: assignment['orgId'],
+      videoTaskId: task['_id'].toString(),
+      employeeAssignmentId: assignment['_id'].toString(),
+      deliveryChannel,
+      status: DeliveryRecordStatus.PENDING,
+      retryCount: 0,
+    })
 
-  const deliveryRecord = this.toWebhookDeliveryRecord(created, deliveryChannel)
-  const videoData = this.buildVideoCard(task)
-  const pushResult = await this.pushVideoCard(deliveryChannel, assignment, deliveryRecord, videoData)
-  const manualPickupRequired = Boolean(pushResult.manualPickupRequired)
-  const processedAt = pushResult.deliveredAt || new Date()
-  const nextStatus = pushResult.status
-    || (manualPickupRequired
+    const deliveryRecord = this.toWebhookDeliveryRecord(created, deliveryChannel)
+    const videoData = this.buildVideoCard(task)
+    const pushResult = await this.pushVideoCard(deliveryChannel, assignment, deliveryRecord, videoData)
+    const manualPickupRequired = Boolean(pushResult.manualPickupRequired)
+    const processedAt = pushResult.deliveredAt || new Date()
+    const nextStatus = manualPickupRequired
       ? DeliveryRecordStatus.PENDING
       : pushResult.success
-        ? DeliveryRecordStatus.DELIVERED
-        : DeliveryRecordStatus.FAILED)
-  const reason = manualPickupRequired
-    ? 'manual_pickup_required'
-    : nextStatus === DeliveryRecordStatus.FAILED
-      ? pushResult.errorMessage || 'push_failed'
-      : ''
-
-  if (manualPickupRequired || !pushResult.status) {
+        ? DeliveryRecordStatus.PUSHED
+        : pushResult.status || DeliveryRecordStatus.FAILED
+    const reason = manualPickupRequired
+      ? 'manual_pickup_required'
+      : nextStatus === DeliveryRecordStatus.FAILED
+        ? pushResult.errorMessage || 'push_failed'
+        : ''
     await this.deliveryRecordModel.findByIdAndUpdate(
       created._id,
       {
         $set: {
           status: nextStatus,
-          deliveredAt: nextStatus === DeliveryRecordStatus.DELIVERED ? processedAt : null,
+          deliveredAt: nextStatus === DeliveryRecordStatus.PUSHED ? processedAt : null,
+          pushedAt: nextStatus === DeliveryRecordStatus.PUSHED ? processedAt : null,
           failReason: nextStatus === DeliveryRecordStatus.FAILED ? reason : '',
           deliveryPayload: pushResult.payload,
           retryCount: Number(pushResult.retryCount || 0),
         },
       },
     ).exec()
-  }
 
-  if (pushResult.success || manualPickupRequired) {
-    const eventStatus = manualPickupRequired ? 'pending_manual_pickup' : 'pushed'
-    await Promise.all([
-      this.employeeAssignmentModel.findByIdAndUpdate(assignment['_id'], {
-        $inc: {
-          'stats.totalAssigned': 1,
-          'stats.totalPending': 1,
-          dailyAssignedCount: 1,
-        },
-        $set: {
-          'stats.lastAssignedAt': processedAt,
-          lastDispatchedAt: processedAt,
-        },
-      }).exec(),
-      this.videoTaskModel.findByIdAndUpdate(task['_id'], {
+    if (pushResult.success || manualPickupRequired) {
+      const eventStatus = manualPickupRequired ? 'heartbeat_pending' : 'pushed'
+      const publishStatus = manualPickupRequired
+        ? DistributionPublishStatus.COMPLETED
+        : DistributionPublishStatus.PUSHED
+      await Promise.all([
+        this.employeeAssignmentModel.findByIdAndUpdate(assignment['_id'], {
+          $inc: {
+            'stats.totalAssigned': 1,
+            'stats.totalPending': 1,
+            'dailyAssignedCount': 1,
+          },
+          $set: {
+            'stats.lastAssignedAt': processedAt,
+            'lastDispatchedAt': processedAt,
+          },
+        }).exec(),
+        this.videoTaskModel.findByIdAndUpdate(task['_id'], {
+          $set: {
+            'metadata.distribution.employeeDispatch': {
+              assignmentId: assignment['_id'].toString(),
+              employeeName: assignment['employeeName'] || '',
+              employeePhone: assignment['employeePhone'] || '',
+              webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+              deliveryRecordId: created._id.toString(),
+              deliveryChannel,
+              assignedAt: processedAt.toISOString(),
+              deliveredAt: nextStatus === DeliveryRecordStatus.PUSHED ? processedAt.toISOString() : null,
+              pushedAt: nextStatus === DeliveryRecordStatus.PUSHED ? processedAt.toISOString() : null,
+              deliveryStatus: nextStatus,
+              publishConfirmed: false,
+              manualPickupRequired,
+              heartbeatPending: manualPickupRequired,
+            },
+            'metadata.distribution.publishStatus': publishStatus,
+            'metadata.distribution.lastDistributedAt': processedAt.toISOString(),
+            'metadata.distribution.lastStatusAt': processedAt.toISOString(),
+            'metadata.distribution.manualPickupRequired': manualPickupRequired,
+            'metadata.distribution.heartbeatPending': manualPickupRequired,
+            'metadata.distribution.deliveryStatus': nextStatus,
+            'metadata.distribution.pushedAt': nextStatus === DeliveryRecordStatus.PUSHED ? processedAt.toISOString() : null,
+          },
+          $push: {
+            'metadata.distribution.history': {
+              status: eventStatus,
+              timestamp: processedAt.toISOString(),
+              details: {
+                deliveryRecordId: created._id.toString(),
+                assignmentId: assignment['_id'].toString(),
+                deliveryChannel,
+                manualPickupRequired,
+                webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+              },
+            },
+          },
+        }).exec(),
+      ])
+    }
+    else {
+      await this.videoTaskModel.findByIdAndUpdate(task['_id'], {
         $set: {
           'metadata.distribution.employeeDispatch': {
             assignmentId: assignment['_id'].toString(),
@@ -531,80 +740,46 @@ export class EmployeeDispatchService {
             deliveryRecordId: created._id.toString(),
             deliveryChannel,
             assignedAt: processedAt.toISOString(),
-            deliveredAt: nextStatus === DeliveryRecordStatus.DELIVERED ? processedAt.toISOString() : null,
-            deliveryStatus: nextStatus,
+            deliveredAt: null,
+            deliveryStatus: DeliveryRecordStatus.FAILED,
             publishConfirmed: false,
-            manualPickupRequired,
+            manualPickupRequired: false,
+            heartbeatPending: false,
+            failReason: reason,
           },
-          'metadata.distribution.publishStatus': nextStatus,
-          'metadata.distribution.lastDistributedAt': processedAt.toISOString(),
+          'metadata.distribution.publishStatus': DistributionPublishStatus.COMPLETED,
           'metadata.distribution.lastStatusAt': processedAt.toISOString(),
-          'metadata.distribution.manualPickupRequired': manualPickupRequired,
+          'metadata.distribution.manualPickupRequired': false,
+          'metadata.distribution.heartbeatPending': false,
+          'metadata.distribution.deliveryStatus': DeliveryRecordStatus.FAILED,
         },
         $push: {
           'metadata.distribution.history': {
-            status: eventStatus,
+            status: 'delivery_failed',
             timestamp: processedAt.toISOString(),
             details: {
               deliveryRecordId: created._id.toString(),
               assignmentId: assignment['_id'].toString(),
               deliveryChannel,
-              manualPickupRequired,
-              webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+              failReason: reason,
             },
           },
         },
-      }).exec(),
-    ])
-  }
-  else {
-    await this.videoTaskModel.findByIdAndUpdate(task['_id'], {
-      $set: {
-        'metadata.distribution.employeeDispatch': {
-          assignmentId: assignment['_id'].toString(),
-          employeeName: assignment['employeeName'] || '',
-          employeePhone: assignment['employeePhone'] || '',
-          webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
-          deliveryRecordId: created._id.toString(),
-          deliveryChannel,
-          assignedAt: processedAt.toISOString(),
-          deliveredAt: null,
-          deliveryStatus: DeliveryRecordStatus.FAILED,
-          publishConfirmed: false,
-          manualPickupRequired: false,
-          failReason: reason,
-        },
-        'metadata.distribution.publishStatus': DeliveryRecordStatus.FAILED,
-        'metadata.distribution.lastStatusAt': processedAt.toISOString(),
-        'metadata.distribution.manualPickupRequired': false,
-      },
-      $push: {
-        'metadata.distribution.history': {
-          status: 'delivery_failed',
-          timestamp: processedAt.toISOString(),
-          details: {
-            deliveryRecordId: created._id.toString(),
-            assignmentId: assignment['_id'].toString(),
-            deliveryChannel,
-            failReason: reason,
-          },
-        },
-      },
-    }).exec()
-  }
+      }).exec()
+    }
 
-  return {
-    dispatched: pushResult.success,
-    pendingManualPickup: manualPickupRequired,
-    manualPickupRequired,
-    videoTaskId: task['_id'].toString(),
-    assignmentId: assignment['_id'].toString(),
-    deliveryRecordId: created._id.toString(),
-    status: nextStatus,
-    reason,
-    deliveryChannel,
+    return {
+      dispatched: pushResult.success,
+      pendingManualPickup: manualPickupRequired,
+      manualPickupRequired,
+      videoTaskId: task['_id'].toString(),
+      assignmentId: assignment['_id'].toString(),
+      deliveryRecordId: created._id.toString(),
+      status: nextStatus,
+      reason,
+      deliveryChannel,
+    }
   }
-}
 
   private async resolveEligibleAssignments(task: VideoTaskRecord, rules: Required<DispatchRulesInput>) {
     const orgId = this.resolveTaskOrgId(task)
@@ -919,30 +1094,30 @@ export class EmployeeDispatchService {
   }
 
   private buildVideoCard(task: VideoTaskRecord): DispatchVideoCard {
-  const title = this.normalizeOptionalString(task['copy']?.['title'])
-    || this.normalizeOptionalString(task['metadata']?.['title'])
-    || this.normalizeOptionalString(task['outputVideoUrl'])
-    || task['_id'].toString()
-  const description = this.normalizeOptionalString(task['copy']?.['description'])
-  const subtitle = this.normalizeOptionalString(task['copy']?.['subtitle'])
-  const hashtags = this.normalizeStringList(task['copy']?.['hashtags']).map(tag => `#${tag}`)
-  const publishGuide = this.resolvePublishGuide(task)
-  const primaryPlatform = this.resolveTaskPlatform(task)
+    const title = this.normalizeOptionalString(task['copy']?.['title'])
+      || this.normalizeOptionalString(task['metadata']?.['title'])
+      || this.normalizeOptionalString(task['outputVideoUrl'])
+      || task['_id'].toString()
+    const description = this.normalizeOptionalString(task['copy']?.['description'])
+    const subtitle = this.normalizeOptionalString(task['copy']?.['subtitle'])
+    const hashtags = this.normalizeStringList(task['copy']?.['hashtags']).map(tag => `#${tag}`)
+    const publishGuide = this.resolvePublishGuide(task)
+    const primaryPlatform = this.resolveTaskPlatform(task)
 
-  return {
-    videoTaskId: task['_id'].toString(),
-    title,
-    description,
-    copy: [title, subtitle, description, hashtags.join(' ')].filter(Boolean).join('\n'),
-    coverUrl: this.resolveTaskCoverUrl(task),
-    outputVideoUrl: this.normalizeOptionalString(task['output']?.['url'])
-      || this.normalizeOptionalString(task['outputVideoUrl']),
-    publishGuide,
-    publishPlatforms: primaryPlatform ? [primaryPlatform] : [],
-    primaryPlatform,
-    tags: this.resolveTaskCategories(task),
+    return {
+      videoTaskId: task['_id'].toString(),
+      title,
+      description,
+      copy: [title, subtitle, description, hashtags.join(' ')].filter(Boolean).join('\n'),
+      coverUrl: this.resolveTaskCoverUrl(task),
+      outputVideoUrl: this.normalizeOptionalString(task['output']?.['url'])
+        || this.normalizeOptionalString(task['outputVideoUrl']),
+      publishGuide,
+      publishPlatforms: primaryPlatform ? [primaryPlatform] : [],
+      primaryPlatform,
+      tags: this.resolveTaskCategories(task),
+    }
   }
-}
 
   private resolveTaskPlatform(task: VideoTaskRecord) {
     const candidates = [
@@ -970,10 +1145,10 @@ export class EmployeeDispatchService {
   private resolveTaskCategories(task: VideoTaskRecord) {
     return this.normalizeStringList(
       task['metadata']?.['contentTags']
-        || task['metadata']?.['tags']
-        || task['metadata']?.['keywords']
-        || task['metadata']?.['categories']
-        || [],
+      || task['metadata']?.['tags']
+      || task['metadata']?.['keywords']
+      || task['metadata']?.['categories']
+      || [],
     )
   }
 
@@ -1188,20 +1363,20 @@ export class EmployeeDispatchService {
   }
 
   private buildManualPickupResult(channel: DeliveryChannel, videoData: DispatchVideoCard): ImPushResult {
-  return {
-    success: false,
-    manualPickupRequired: true,
-    status: DeliveryRecordStatus.PENDING,
-    deliveredAt: null,
-    retryCount: 0,
-    payload: {
-      channel,
-      reason: 'webhook_missing',
+    return {
+      success: false,
       manualPickupRequired: true,
-      videoData,
-    },
+      status: DeliveryRecordStatus.PENDING,
+      deliveredAt: null,
+      retryCount: 0,
+      payload: {
+        channel,
+        reason: 'webhook_missing',
+        manualPickupRequired: true,
+        videoData,
+      },
+    }
   }
-}
 
   private readWebhookHost(webhookUrl: string) {
     try {
@@ -1226,7 +1401,7 @@ export class EmployeeDispatchService {
     return Object.prototype.hasOwnProperty.call(value, key)
   }
 
-  private async getAssignmentOrFail(id: string) {
+  private async getAssignmentOrFail(id: string, expectedOrgId?: string) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('assignmentId is invalid')
     }
@@ -1236,10 +1411,14 @@ export class EmployeeDispatchService {
       throw new NotFoundException('Employee assignment not found')
     }
 
+    if (expectedOrgId && assignment['orgId'] !== this.normalizeOrgId(expectedOrgId)) {
+      throw new NotFoundException('Employee assignment not found')
+    }
+
     return assignment
   }
 
-  private async getTaskOrFail(id: string) {
+  private async getTaskOrFail(id: string, expectedOrgId?: string) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('videoTaskId is invalid')
     }
@@ -1249,16 +1428,24 @@ export class EmployeeDispatchService {
       throw new NotFoundException('Video task not found')
     }
 
+    if (expectedOrgId && this.resolveTaskOrgId(task) !== this.normalizeOrgId(expectedOrgId)) {
+      throw new NotFoundException('Video task not found')
+    }
+
     return task
   }
 
-  private async getDeliveryRecordOrFail(id: string) {
+  private async getDeliveryRecordOrFail(id: string, expectedOrgId?: string) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('deliveryRecordId is invalid')
     }
 
     const record = await this.deliveryRecordModel.findById(new Types.ObjectId(id)).lean().exec() as DeliveryRecordDocument | null
     if (!record) {
+      throw new NotFoundException('Delivery record not found')
+    }
+
+    if (expectedOrgId && record['orgId'] !== this.normalizeOrgId(expectedOrgId)) {
       throw new NotFoundException('Delivery record not found')
     }
 
@@ -1306,8 +1493,12 @@ export class EmployeeDispatchService {
       deliveryChannel: record['deliveryChannel'],
       status: record['status'],
       deliveredAt: record['deliveredAt'] || null,
+      pushedAt: record['pushedAt'] || null,
       confirmedAt: record['confirmedAt'] || null,
+      receivedAt: record['receivedAt'] || null,
+      downloadedAt: record['downloadedAt'] || null,
       publishedAt: record['publishedAt'] || null,
+      expiredAt: record['expiredAt'] || null,
       publishUrl: record['publishUrl'] || '',
       publishPlatform: record['publishPlatform'] || '',
       publishPostId: record['publishPostId'] || '',

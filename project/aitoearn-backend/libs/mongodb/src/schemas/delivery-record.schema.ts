@@ -14,9 +14,13 @@ export enum DeliveryChannel {
 
 export enum DeliveryRecordStatus {
   PENDING = 'pending',
-  DELIVERED = 'delivered',
-  CONFIRMED = 'confirmed',
+  PUSHED = 'pushed',
+  DELIVERED = 'pushed',
+  RECEIVED = 'received',
+  CONFIRMED = 'received',
+  DOWNLOADED = 'downloaded',
   PUBLISHED = 'published',
+  EXPIRED = 'expired',
   FAILED = 'failed',
 }
 
@@ -53,10 +57,22 @@ export class DeliveryRecord extends WithTimestampSchema {
   deliveredAt?: Date | null
 
   @Prop({ type: Date, default: null })
+  pushedAt?: Date | null
+
+  @Prop({ type: Date, default: null })
   confirmedAt?: Date | null
 
   @Prop({ type: Date, default: null })
+  receivedAt?: Date | null
+
+  @Prop({ type: Date, default: null })
+  downloadedAt?: Date | null
+
+  @Prop({ type: Date, default: null })
   publishedAt?: Date | null
+
+  @Prop({ type: Date, default: null })
+  expiredAt?: Date | null
 
   @Prop({ type: String, default: '' })
   publishUrl?: string
