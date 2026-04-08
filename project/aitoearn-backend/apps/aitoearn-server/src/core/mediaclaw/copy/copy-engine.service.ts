@@ -1,8 +1,8 @@
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
-import { InjectModel } from '@nestjs/mongoose'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { Brand, CopyHistory, OrgApiKeyProvider, Organization, UsageHistoryType } from '@yikart/mongodb'
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
+import { InjectModel } from '@nestjs/mongoose'
+import { Brand, CopyHistory, Organization, OrgApiKeyProvider, UsageHistoryType } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { ModelResolverService } from '../model-resolver/model-resolver.service'
 import { ByokService } from '../settings/byok.service'
@@ -11,6 +11,7 @@ import { UsageService } from '../usage/usage.service'
 export interface GeneratedCopy {
   title: string
   subtitle: string
+  description: string
   hashtags: string[]
   blueWords: string[]
   commentGuide: string
@@ -41,12 +42,14 @@ interface CopyHistoryWriteOptions {
 interface HistoricalCopyExample {
   title: string
   subtitle: string
+  description: string
   hashtags: string[]
 }
 
 interface GeneratedCopyDraft {
   title?: unknown
   subtitle?: unknown
+  description?: unknown
   hashtags?: unknown
   blueWords?: unknown
   commentGuide?: unknown
@@ -162,8 +165,9 @@ export class CopyEngineService {
     const resolvedOrgId = brand?.orgId?.toString() || this.readMetadataObjectId(metadata, 'orgId')
 
     const brandName = brand?.name || 'MediaClaw'
-    const toneKeywords = brand?.assets?.keywords || []
     const avoidKeywords = brand?.assets?.prohibitedWords || []
+    const toneKeywords = this.filterProhibitedTerms(this.buildBrandKeywords(brand), avoidKeywords)
+    const brandSlogans = this.filterProhibitedTerms(brand?.assets?.slogans || [], avoidKeywords)
     const scene = this.readMetadataString(metadata, 'scene')
       || this.readMetadataString(metadata, 'theme')
       || this.readMetadataString(metadata, 'campaign')
@@ -194,6 +198,7 @@ export class CopyEngineService {
         title: match.title,
         subtitle: match.subtitle,
       })),
+      brandSlogans,
       strategyHints,
       metadata,
     })
@@ -226,7 +231,7 @@ export class CopyEngineService {
   }
 
   async rewriteCopyRecord(
-    copyHistory: Pick<CopyHistory, 'title' | 'subtitle' | 'hashtags' | 'blueWords' | 'commentGuide' | 'orgId' | 'taskId'>,
+    copyHistory: Pick<CopyHistory, 'title' | 'subtitle' | 'description' | 'hashtags' | 'blueWords' | 'commentGuide' | 'orgId' | 'taskId'>,
     brandId: string | null | undefined,
     instructions?: string,
     metadata: Record<string, any> = {},
@@ -246,7 +251,7 @@ export class CopyEngineService {
       rewriteMetadata,
     )
     const toneKeywords = brand?.assets?.keywords?.length
-      ? brand.assets.keywords
+      ? this.filterProhibitedTerms(this.buildBrandKeywords(brand), brand?.assets?.prohibitedWords || [])
       : (copyHistory.blueWords || []).map(item => item.replace(/^#+/, '')).filter(Boolean)
     const rewritten = this.normalizeGeneratedCopy({
       draft: llmResult.draft,
@@ -314,7 +319,7 @@ export class CopyEngineService {
       throw new BadRequestException('baseTitle is required')
     }
 
-    const normalizedCount = Math.min(Math.max(Math.trunc(Number(count) || 3), 1), 10)
+    const normalizedCount = Math.min(Math.max(Math.trunc(Number(count) || 3), 1), 3)
     const candidates = [
       `${normalizedTitle}，看完就能直接复用`,
       `为什么说${normalizedTitle}更容易起量`,
@@ -352,7 +357,7 @@ export class CopyEngineService {
     }
   }
 
-  async checkDedupHistory(orgId: string, content: string | { title?: string, subtitle?: string }) {
+  async checkDedupHistory(orgId: string, content: string | { title?: string, subtitle?: string, description?: string }) {
     if (!Types.ObjectId.isValid(orgId)) {
       return {
         isDuplicate: false,
@@ -363,7 +368,7 @@ export class CopyEngineService {
 
     const normalizedContent = typeof content === 'string'
       ? content.trim()
-      : [content.title, content.subtitle].filter(Boolean).join(' ').trim()
+      : [content.title, content.subtitle, content.description].filter(Boolean).join(' ').trim()
 
     if (!normalizedContent) {
       return {
@@ -410,6 +415,7 @@ export class CopyEngineService {
     sourceHint: string
     historyExamples: HistoricalCopyExample[]
     dedupMatches: Array<{ title: string, subtitle: string }>
+    brandSlogans: string[]
     strategyHints: CopyStrategyPromptHints | null
     metadata: Record<string, any>
   }): Promise<CopyLlmResult> {
@@ -555,6 +561,7 @@ export class CopyEngineService {
       model: '',
     }
   }
+
   private buildPrompt(input: {
     brandName: string
     toneKeywords: string[]
@@ -563,17 +570,19 @@ export class CopyEngineService {
     sourceHint: string
     historyExamples: HistoricalCopyExample[]
     dedupMatches: Array<{ title: string, subtitle: string }>
+    brandSlogans: string[]
     strategyHints: CopyStrategyPromptHints | null
     metadata: Record<string, any>
   }) {
     const platform = this.readMetadataString(input.metadata, 'platform') || '通用短视频平台'
     const style = this.readMetadataString(input.metadata, 'style') || '自然转化'
+    const styleGuide = this.resolveStyleGuide(style)
     const variantGoal = this.readMetadataString(input.metadata, 'variantGoal')
     const avoidTitles = this.readMetadataStringArray(input.metadata, 'avoidTitles')
     const platformRules = this.buildPlatformRules(platform)
     const examples = input.historyExamples.length > 0
       ? input.historyExamples.map(example =>
-          `- 标题: ${example.title}; 字幕: ${example.subtitle}; 标签: ${example.hashtags.join(' ')}`,
+          `- 标题: ${example.title}; 字幕: ${example.subtitle}; 正文: ${example.description}; 标签: ${example.hashtags.join(' ')}`,
         ).join('\n')
       : '- 暂无历史高效文案'
     const dedupHints = input.dedupMatches.length > 0
@@ -586,12 +595,14 @@ export class CopyEngineService {
 
     return [
       '你是 MediaClaw 的品牌短视频文案引擎，只能输出 JSON。',
-      '输出字段必须包含: title, subtitle, hashtags, blueWords, commentGuides。',
-      '约束: 标题 <=60字; 字幕 15-60字; hashtags 5-10个; blueWords 1-3个; commentGuides 必须正好 3 条。',
+      '输出字段必须包含: title, subtitle, description, hashtags, blueWords, commentGuides。',
+      '约束: 标题 <=60字; 字幕 15-60字; description 30-120字; hashtags 5-10个; blueWords 1-3个; commentGuides 必须正好 3 条。',
       `品牌名称: ${input.brandName}`,
       `内容场景: ${input.scene}`,
       `创作风格: ${style}`,
+      styleGuide ? `风格要求: ${styleGuide}` : '',
       variantGoal ? `变体目标: ${variantGoal}` : '',
+      input.brandSlogans.length > 0 ? `品牌话术: ${input.brandSlogans.join('、')}` : '',
       `品牌关键词: ${input.toneKeywords.join('、') || '品牌感、转化、种草'}`,
       `禁用词: ${input.avoidKeywords.join('、') || '无'}`,
       `平台规则: ${platformRules}`,
@@ -605,6 +616,7 @@ export class CopyEngineService {
       strategyPrompt ? '当前组织已验证的高表现文案策略:' : '',
       strategyPrompt,
       'hashtags 统一带 # 前缀，blueWords 更适合小红书互动语境。',
+      '禁用词不能出现在 title、subtitle、description、hashtags、commentGuides 的任何位置。',
     ].filter(Boolean).join('\n')
   }
 
@@ -802,7 +814,7 @@ export class CopyEngineService {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -990,7 +1002,7 @@ export class CopyEngineService {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -1076,6 +1088,7 @@ export class CopyEngineService {
         return 'heuristic'
     }
   }
+
   private normalizeGeneratedCopy(input: {
     draft: GeneratedCopyDraft | null
     brandName: string
@@ -1091,34 +1104,60 @@ export class CopyEngineService {
       input.avoidKeywords,
     )
 
-    const titleBase = this.coerceText(input.draft?.title) || heuristic.title
-    const subtitleBase = this.coerceText(input.draft?.subtitle) || heuristic.subtitle
+    const titleBase = this.filterProhibitedText(this.coerceText(input.draft?.title) || heuristic.title, input.avoidKeywords)
+      || heuristic.title
+    const subtitleBase = this.filterProhibitedText(this.coerceText(input.draft?.subtitle) || heuristic.subtitle, input.avoidKeywords)
+      || heuristic.subtitle
+    const descriptionBase = this.filterProhibitedText(this.coerceText(input.draft?.description) || heuristic.description, input.avoidKeywords)
+      || heuristic.description
     const hashtagsBase = this.coerceStringArray(input.draft?.hashtags)
     const blueWordsBase = this.coerceStringArray(input.draft?.blueWords)
     const commentGuidesBase = this.coerceCommentGuides(input.draft) || heuristic.commentGuides
 
-    let title = this.limitText(titleBase, 60)
+    let title = this.filterProhibitedText(this.limitText(titleBase, 60), input.avoidKeywords)
+      || heuristic.title
     if (input.dedupDuplicate) {
       title = this.generateABVariants(title, 1)[0] || title
     }
 
-    const blueWordResult = this.generateBlueWords(title, blueWordsBase.length > 0 ? blueWordsBase : input.toneKeywords)
-    const subtitle = this.normalizeSubtitle(subtitleBase, input.brandName, input.scene)
+    const blueWordSeeds = this.filterProhibitedTerms(
+      blueWordsBase.length > 0
+        ? blueWordsBase
+        : input.toneKeywords.length > 0
+          ? input.toneKeywords
+          : [input.brandName, input.scene],
+      input.avoidKeywords,
+    )
+    const blueWordResult = this.generateBlueWords(
+      title,
+      blueWordSeeds.length > 0 ? blueWordSeeds : [input.brandName],
+    )
+    const subtitle = this.normalizeSubtitle(subtitleBase, input.brandName, input.scene, input.avoidKeywords)
+    const description = this.normalizeDescription(
+      descriptionBase,
+      input.brandName,
+      input.scene,
+      input.toneKeywords,
+      input.avoidKeywords,
+    )
     const hashtags = this.normalizeHashtags(
       hashtagsBase.length > 0 ? hashtagsBase : heuristic.hashtags,
       input.brandName,
       input.toneKeywords,
       blueWordResult.blueWords,
+      input.avoidKeywords,
     )
     const commentGuides = this.normalizeCommentGuides(
       commentGuidesBase,
       input.brandName,
-      subtitle,
+      description,
+      input.avoidKeywords,
     )
 
     return {
       title: blueWordResult.title,
       subtitle,
+      description,
       hashtags,
       blueWords: blueWordResult.blueWords,
       commentGuide: commentGuides.join('\n'),
@@ -1134,23 +1173,39 @@ export class CopyEngineService {
   ): GeneratedCopy {
     const primaryTone = toneKeywords[0] || '品牌感'
     const titleSeed = `${brandName}${primaryTone}短视频`
-    const blueWordResult = this.generateBlueWords(titleSeed, toneKeywords)
+    const blueWordSeeds = this.filterProhibitedTerms(
+      toneKeywords.length > 0 ? toneKeywords : [brandName, scene],
+      avoidKeywords,
+    )
+    const blueWordResult = this.generateBlueWords(
+      titleSeed,
+      blueWordSeeds.length > 0 ? blueWordSeeds : [brandName],
+    )
     const subtitle = this.normalizeSubtitle(
       `${scene}场景成片已生成，突出${toneKeywords.slice(0, 2).join('、') || '品牌识别度'}`,
       brandName,
       scene,
+      avoidKeywords,
+    )
+    const description = this.normalizeDescription(
+      `${brandName}${scene}发布版文案已同步生成，重点突出${toneKeywords.slice(0, 3).join('、') || '品牌亮点'}，可直接继续审核或分发。`,
+      brandName,
+      scene,
+      toneKeywords,
+      avoidKeywords,
     )
     const commentGuides = avoidKeywords.length > 0
       ? [
-          `评论区建议围绕体验和反馈展开，避免提及：${avoidKeywords.join('、')}。`,
+          '评论区建议围绕真实体验和使用反馈展开，避免绝对化表达。',
           `如果你也在做 ${scene}，留言“案例”我继续补充合规版本。`,
           `想看 ${brandName} 下一条更强转化还是更强种草？直接留言告诉我。`,
         ]
-      : this.generateCommentGuides(brandName, subtitle)
+      : this.generateCommentGuides(brandName, description)
 
     return {
       title: blueWordResult.title,
       subtitle,
+      description,
       hashtags: this.buildHashtags(brandName, toneKeywords, blueWordResult.blueWords),
       blueWords: blueWordResult.blueWords,
       commentGuide: commentGuides.join('\n'),
@@ -1158,8 +1213,8 @@ export class CopyEngineService {
     }
   }
 
-  private normalizeSubtitle(subtitle: string, brandName: string, scene: string) {
-    let normalized = subtitle.trim()
+  private normalizeSubtitle(subtitle: string, brandName: string, scene: string, avoidKeywords: string[]) {
+    let normalized = this.filterProhibitedText(subtitle.trim(), avoidKeywords)
     if (!normalized) {
       normalized = `${brandName}${scene}场景成片已生成，品牌信息与节奏已同步优化。`
     }
@@ -1171,28 +1226,67 @@ export class CopyEngineService {
     return this.limitText(normalized, 60)
   }
 
+  private normalizeDescription(
+    description: string,
+    brandName: string,
+    scene: string,
+    keywords: string[],
+    avoidKeywords: string[],
+  ) {
+    let normalized = this.filterProhibitedText(description.trim(), avoidKeywords)
+    if (!normalized) {
+      normalized = `${brandName}${scene}发布版文案已同步整理，重点围绕${keywords.slice(0, 3).join('、') || '品牌亮点'}展开，可直接进入审核和分发。`
+    }
+
+    while (normalized.length < 30) {
+      normalized = `${normalized}${brandName}发布节奏已同步。`
+    }
+
+    return this.limitText(normalized, 120)
+  }
+
   private normalizeHashtags(
     hashtags: string[],
     brandName: string,
     keywords: string[],
     blueWords: string[],
+    avoidKeywords: string[],
   ) {
     const normalized = [...new Set([
       ...hashtags,
       ...this.buildHashtags(brandName, keywords, blueWords),
-    ].map(item => this.toBlueWord(item)).filter(Boolean))]
+    ]
+      .map(item => this.toBlueWord(item))
+      .filter(Boolean)
+      .filter(item => !this.containsProhibitedKeyword(item, avoidKeywords)))]
 
-    return normalized.slice(0, Math.max(5, Math.min(normalized.length, 10)))
+    const fallback = this.buildHashtags(
+      brandName,
+      [...keywords, brandName, '内容创作', '发布文案'],
+      blueWords,
+    ).filter(item => !this.containsProhibitedKeyword(item, avoidKeywords))
+
+    for (const item of fallback) {
+      if (normalized.length >= 5) {
+        break
+      }
+
+      if (!normalized.includes(item)) {
+        normalized.push(item)
+      }
+    }
+
+    return normalized.slice(0, Math.min(Math.max(normalized.length, 5), 10))
   }
 
-  private normalizeCommentGuides(commentGuides: string[], brandName: string, content: string) {
+  private normalizeCommentGuides(commentGuides: string[], brandName: string, content: string, avoidKeywords: string[]) {
     const normalized = commentGuides
-      .map(item => item.trim())
+      .map(item => this.filterProhibitedText(item.trim(), avoidKeywords))
       .filter(Boolean)
 
     const fallback = this.generateCommentGuides(brandName, content)
     while (normalized.length < 3) {
-      normalized.push(fallback[normalized.length] || fallback[0])
+      normalized.push(this.filterProhibitedText(fallback[normalized.length] || fallback[0], avoidKeywords))
     }
 
     return normalized.slice(0, 3)
@@ -1386,7 +1480,7 @@ export class CopyEngineService {
     const history = await this.copyHistoryModel.find({
       orgId: new Types.ObjectId(orgId),
     })
-      .sort({ 'performance.views': -1, 'performance.ctr': -1, createdAt: -1 })
+      .sort({ 'performance.views': -1, 'performance.ctr': -1, 'createdAt': -1 })
       .limit(5)
       .lean()
       .exec()
@@ -1394,6 +1488,7 @@ export class CopyEngineService {
     return history.map(item => ({
       title: item.title || '',
       subtitle: item.subtitle || '',
+      description: item.description || '',
       hashtags: item.hashtags || [],
     }))
   }
@@ -1423,6 +1518,7 @@ export class CopyEngineService {
       '#短视频',
       '#品牌营销',
       '#内容增长',
+      '#内容创作',
     ].filter(Boolean))].slice(0, 10)
   }
 
@@ -1450,6 +1546,7 @@ export class CopyEngineService {
         : null,
       title: payload.title,
       subtitle: payload.subtitle,
+      description: payload.description,
       hashtags: payload.hashtags,
       blueWords: payload.blueWords,
       commentGuide: payload.commentGuide,
@@ -1472,7 +1569,7 @@ export class CopyEngineService {
   }
 
   private buildRewritePrompt(
-    copyHistory: Pick<CopyHistory, 'title' | 'subtitle' | 'hashtags' | 'blueWords' | 'commentGuide'>,
+    copyHistory: Pick<CopyHistory, 'title' | 'subtitle' | 'description' | 'hashtags' | 'blueWords' | 'commentGuide'>,
     instructions?: string,
     metadata: Record<string, any> = {},
   ) {
@@ -1483,17 +1580,96 @@ export class CopyEngineService {
 
     return [
       '你是 MediaClaw 的短视频文案改写引擎，只能输出 JSON。',
-      '输出字段必须包含: title, subtitle, hashtags, blueWords, commentGuides。',
+      '输出字段必须包含: title, subtitle, description, hashtags, blueWords, commentGuides。',
       `当前标题: ${copyHistory.title || '无'}`,
       `当前字幕: ${copyHistory.subtitle || '无'}`,
+      `当前正文: ${copyHistory.description || '无'}`,
       `当前 hashtags: ${(copyHistory.hashtags || []).join(' ') || '无'}`,
       `当前 blueWords: ${(copyHistory.blueWords || []).join(' ') || '无'}`,
       `当前评论引导: ${(copyHistory.commentGuide || '').replace(/\n/g, ' | ') || '无'}`,
       platform ? `目标平台: ${platform}` : '',
       style ? `期望风格: ${style}` : '',
       `改写要求: ${normalizedInstructions}`,
-      '保持主题不跑偏，优化表达效率、互动感和可发布度。',
+      '保持主题不跑偏，优化表达效率、互动感和可发布度，并确保禁用词不会出现在任何字段。',
     ].filter(Boolean).join('\n')
+  }
+
+  private buildBrandKeywords(brand: Brand | null) {
+    if (!brand) {
+      return []
+    }
+
+    return [
+      ...(brand.assets?.keywords || []),
+      ...(brand.assets?.slogans || []),
+      brand.industry || '',
+      brand.name || '',
+    ]
+      .map(item => item.trim())
+      .filter(Boolean)
+  }
+
+  private filterProhibitedTerms(terms: string[], avoidKeywords: string[]) {
+    return [...new Set(
+      terms
+        .map(item => item.trim())
+        .filter(Boolean)
+        .filter(item => !this.containsProhibitedKeyword(item, avoidKeywords)),
+    )]
+  }
+
+  private filterProhibitedText(text: string, avoidKeywords: string[]) {
+    let normalized = text.trim()
+    if (!normalized || avoidKeywords.length === 0) {
+      return normalized
+    }
+
+    for (const keyword of avoidKeywords) {
+      const safeKeyword = keyword.trim()
+      if (!safeKeyword) {
+        continue
+      }
+
+      normalized = normalized.replace(new RegExp(this.escapeRegex(safeKeyword), 'gi'), '')
+    }
+
+    return normalized
+      .replace(/\s{2,}/g, ' ')
+      .replace(/[，。！？；、,.!?;:\s]+$/g, '')
+      .trim()
+  }
+
+  private containsProhibitedKeyword(value: string, avoidKeywords: string[]) {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized) {
+      return false
+    }
+
+    return avoidKeywords.some((keyword) => {
+      const safeKeyword = keyword.trim().toLowerCase()
+      return safeKeyword ? normalized.includes(safeKeyword) : false
+    })
+  }
+
+  private resolveStyleGuide(style: string) {
+    switch (style.trim().toLowerCase()) {
+      case '种草':
+      case 'grass-seeding':
+      case 'recommendation':
+        return '像真人经验分享，强调真实体验、轻决策和收藏欲。'
+      case '测评':
+      case 'review':
+        return '突出对比、结果和判断依据，语气客观但有结论。'
+      case '促销':
+      case 'promotion':
+        return '强调利益点、限时感和转化动作，但不要硬广堆砌。'
+      case '品牌故事':
+      case 'brand_story':
+      case 'brand-story':
+        return '突出品牌理念、情绪价值和长期记忆点，表达更有叙事感。'
+      default:
+        return style.trim() ? `保持${style.trim()}的表达气质和平台适配。` : ''
+    }
   }
 
   private escapeRegex(value: string) {

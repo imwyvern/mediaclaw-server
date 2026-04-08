@@ -32,6 +32,9 @@ export class CopyHistory extends WithTimestampSchema {
   @Prop({ type: String, default: '' })
   subtitle: string
 
+  @Prop({ type: String, default: '' })
+  description: string
+
   @Prop({ type: [String], default: [] })
   hashtags: string[]
 
@@ -46,5 +49,5 @@ export class CopyHistory extends WithTimestampSchema {
 }
 
 export const CopyHistorySchema = SchemaFactory.createForClass(CopyHistory)
-CopyHistorySchema.index({ orgId: 1, title: 'text' })
+CopyHistorySchema.index({ orgId: 1, title: 'text', subtitle: 'text', description: 'text' })
 CopyHistorySchema.index({ orgId: 1, createdAt: -1 })

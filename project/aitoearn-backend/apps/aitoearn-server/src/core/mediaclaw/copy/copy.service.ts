@@ -1,9 +1,10 @@
+import type { GeneratedCopy } from './copy-engine.service'
+import type { CopyHistoryQueryDto } from './copy.dto'
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { CopyHistory, VideoTask } from '@yikart/mongodb'
+import { Brand, CopyHistory, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { CopyEngineService } from './copy-engine.service'
-import type { GeneratedCopy } from './copy-engine.service'
 import { CopyStrategyService } from './copy-strategy.service'
 
 export interface GenerateCopyHttpInput {
@@ -38,6 +39,8 @@ export class CopyService {
   constructor(
     private readonly copyEngineService: CopyEngineService,
     private readonly copyStrategyService: CopyStrategyService,
+    @InjectModel(Brand.name)
+    private readonly brandModel: Model<Brand>,
     @InjectModel(VideoTask.name)
     private readonly videoTaskModel: Model<VideoTask>,
     @InjectModel(CopyHistory.name)
@@ -69,15 +72,19 @@ export class CopyService {
     userId: string,
     body: GenerateCopyHttpInput,
   ) {
-    const normalizedCount = Math.min(Math.max(Math.trunc(Number(body.count) || 1), 1), 5)
+    const normalizedCount = Math.min(Math.max(Math.trunc(Number(body.count) || 1), 1), 3)
     const task = await this.findVideoTaskForOrg(orgId, body.videoTaskId)
     const taskMetadata = this.toPlainObject(task?.metadata)
     const resolvedOrgId = this.normalizeObjectIdString(task?.orgId)
       || this.normalizeObjectIdString(orgId)
       || null
-    const resolvedBrandId = this.normalizeObjectIdString(body.brandId)
+    const requestedBrandId = this.normalizeObjectIdString(body.brandId)
+    const resolvedBrandId = requestedBrandId
       || this.normalizeObjectIdString(task?.brandId)
       || null
+    if (requestedBrandId) {
+      await this.findBrandForOrg(orgId, requestedBrandId)
+    }
     const resolvedTaskId = this.normalizeObjectIdString(task?._id) || null
     const resolvedVideoUrl = task?.outputVideoUrl?.trim()
       || task?.sourceVideoUrl?.trim()
@@ -117,11 +124,7 @@ export class CopyService {
         },
       )
 
-      copies.push({
-        variantIndex: index + 1,
-        copyHistoryId: generated.copyHistoryId,
-        ...generated.copy,
-      })
+      copies.push(this.toCopyHistoryPayload(generated.copy, generated.copyHistoryId, index + 1))
     }
 
     return {
@@ -206,6 +209,49 @@ export class CopyService {
     )
   }
 
+  async listHistory(orgId: string, query: CopyHistoryQueryDto = {}) {
+    const normalizedOrgId = this.requireObjectId(orgId, 'orgId')
+    const normalizedPage = Math.max(Math.trunc(Number(query.page) || 1), 1)
+    const normalizedLimit = Math.min(Math.max(Math.trunc(Number(query.limit) || 20), 1), 100)
+    const matchStage: Record<string, unknown> = {
+      orgId: new Types.ObjectId(normalizedOrgId),
+    }
+
+    if (query.videoTaskId) {
+      matchStage['taskId'] = new Types.ObjectId(this.requireObjectId(query.videoTaskId, 'videoTaskId'))
+    }
+
+    const [total, items] = await Promise.all([
+      this.copyHistoryModel.countDocuments(matchStage).exec(),
+      this.copyHistoryModel.find(matchStage)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((normalizedPage - 1) * normalizedLimit)
+        .limit(normalizedLimit)
+        .lean()
+        .exec() as Promise<Array<Record<string, any>>>,
+    ])
+
+    return {
+      page: normalizedPage,
+      limit: normalizedLimit,
+      total,
+      items: items.map(item => this.serializeCopyHistory(item)),
+    }
+  }
+
+  async getHistory(orgId: string, copyId: string) {
+    const normalizedOrgId = this.requireObjectId(orgId, 'orgId')
+    const normalizedCopyId = this.requireObjectId(copyId, 'copyId')
+    const item = await this.copyHistoryModel.findById(new Types.ObjectId(normalizedCopyId)).lean().exec() as Record<string, any> | null
+
+    if (!item) {
+      throw new NotFoundException('Copy history not found')
+    }
+
+    this.assertOrgAccess(normalizedOrgId, this.normalizeObjectIdString(item['orgId']), 'Copy history')
+    return this.serializeCopyHistory(item)
+  }
+
   private async findVideoTaskForOrg(orgId: string, videoTaskId?: string) {
     if (!videoTaskId) {
       return null
@@ -219,6 +265,52 @@ export class CopyService {
 
     this.assertOrgAccess(orgId, task.orgId?.toString() || null, 'Video task')
     return task
+  }
+
+  private async findBrandForOrg(orgId: string, brandId: string) {
+    const normalizedBrandId = this.requireObjectId(brandId, 'brandId')
+    const brand = await this.brandModel.findById(new Types.ObjectId(normalizedBrandId)).exec()
+    if (!brand) {
+      throw new NotFoundException('Brand not found')
+    }
+
+    this.assertOrgAccess(orgId, brand.orgId?.toString() || null, 'Brand')
+    return brand
+  }
+
+  private serializeCopyHistory(item: Record<string, any>) {
+    const commentGuides = this.readString(item['commentGuide'])
+      .split('\n')
+      .map(candidate => candidate.trim())
+      .filter(Boolean)
+
+    return {
+      id: item['_id']?.toString?.() || null,
+      orgId: this.normalizeObjectIdString(item['orgId']),
+      taskId: this.normalizeObjectIdString(item['taskId']),
+      title: this.readString(item['title']),
+      subtitle: this.readString(item['subtitle']),
+      description: this.readString(item['description']) || this.readString(item['subtitle']),
+      hashtags: Array.isArray(item['hashtags']) ? item['hashtags'] : [],
+      blueWords: Array.isArray(item['blueWords']) ? item['blueWords'] : [],
+      commentGuide: this.readString(item['commentGuide']),
+      commentGuides,
+      performance: this.toPlainObject(item['performance']),
+      createdAt: item['createdAt'] || null,
+      updatedAt: item['updatedAt'] || null,
+    }
+  }
+
+  private toCopyHistoryPayload(
+    copy: GeneratedCopy,
+    copyHistoryId: string | null,
+    variantIndex: number,
+  ) {
+    return {
+      copyHistoryId,
+      variantIndex,
+      ...copy,
+    }
   }
 
   private assertOrgAccess(currentOrgId: string, resourceOrgId: string | null, resourceName: string) {

@@ -1,12 +1,43 @@
-import { describeModuleSpec } from '../testing/module-spec.factory'
+import { describe, expect, it, vi } from 'vitest'
 import { CopyController } from './copy.controller'
-import { CopyModule } from './copy.module'
 import { CopyService } from './copy.service'
+import { StyleRewriteService } from './style-rewrite.service'
 
-describeModuleSpec<CopyService>({
-  suiteName: 'CopyModule',
-  module: CopyModule,
-  service: CopyService,
-  controller: CopyController,
-  keyMethods: ['generateCopy'],
+describe('copyModule smoke', () => {
+  it('service can be instantiated with copy dependencies', () => {
+    const service = new CopyService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    )
+
+    expect(service).toBeInstanceOf(CopyService)
+    expect(service.generateCopy).toBeTypeOf('function')
+  })
+
+  it('controller can be instantiated with copy services', () => {
+    const controller = new CopyController(
+      {
+        generateForHttp: vi.fn(),
+        rewriteForHttp: vi.fn(),
+        generateBlueWords: vi.fn(),
+        generateCommentGuide: vi.fn(),
+        generateABVariants: vi.fn(),
+        recordPerformance: vi.fn(),
+        listHistory: vi.fn(),
+        getHistory: vi.fn(),
+        getInsights: vi.fn(),
+        getTopPatterns: vi.fn(),
+      } as unknown as CopyService,
+      {
+        rewriteForPlatform: vi.fn(),
+      } as unknown as StyleRewriteService,
+    )
+
+    expect(controller).toBeInstanceOf(CopyController)
+    expect(controller.generateCopy).toBeTypeOf('function')
+    expect(controller.getHistory).toBeTypeOf('function')
+  })
 })
