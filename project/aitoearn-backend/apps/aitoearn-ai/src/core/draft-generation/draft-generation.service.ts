@@ -32,8 +32,10 @@ import { ImageService } from '../ai/image/image.service'
 import { calculatePricingPoints, ChatPricing } from '../ai/pricing/pricing-calculator'
 import { VideoService } from '../ai/video/video.service'
 import { getCompatibleAccountTypes } from '../material-adaptation/material-adaptation.constants'
+import { DraftCopyClientService, DraftCopyProvider, DraftCopyVariant } from './draft-copy-client.service'
 import { DRAFT_GENERATION_SYSTEM_PROMPT } from './draft-generation.constants'
 import {
+  CopyModel,
   CreateDraftGenerationV2Dto,
   CreateImageTextDraftDto,
   DraftType,
@@ -54,20 +56,8 @@ export class DraftGenerationError extends Error {
   }
 }
 
-/** V2 Gemini 规划步骤的输出 schema（仅负责描述和话题生成，不影响视频生成） */
-const V2PlanResultSchema = z.object({
-  title: z.string().max(200).describe('TikTok video title'),
-  description: z.string().max(2200).describe('TikTok video description'),
-  topics: z.array(z.string()).max(5).describe('Hashtag topics without # prefix'),
-})
-
-type V2PlanResult = z.infer<typeof V2PlanResultSchema>
-
 /** 图文草稿规划步骤的输出 schema（包含每张图片的生成 prompt） */
 const ImageTextPlanResultSchema = z.object({
-  title: z.string().max(200).describe('Post title'),
-  description: z.string().max(2200).describe('Post description/caption'),
-  topics: z.array(z.string()).max(5).describe('Hashtag topics without # prefix'),
   imagePrompts: z.array(z.string().max(1000)).describe('Prompt for each image to generate'),
 })
 
@@ -103,6 +93,7 @@ export class DraftGenerationService implements OnModuleDestroy {
     private readonly videoMetadataService: VideoMetadataService,
     private readonly imageService: ImageService,
     private readonly mediaRepository: MediaRepository,
+    private readonly draftCopyClientService: DraftCopyClientService,
   ) { }
 
   /** 优雅关机：等待所有正在运行的生成任务完成后再销毁模块 */
@@ -387,6 +378,8 @@ export class DraftGenerationService implements OnModuleDestroy {
           imageUrls: dto.imageUrls,
           videoUrls: dto.videoUrls,
           draftType: dto.draftType ?? 'draft',
+          copyModel: dto.copyModel ?? 'auto',
+          copyStyle: dto.copyStyle,
         },
         response: {},
       })
@@ -405,6 +398,8 @@ export class DraftGenerationService implements OnModuleDestroy {
         videoUrls: dto.videoUrls,
         draftType: dto.draftType ?? 'draft',
         platforms: dto.platforms,
+        copyModel: dto.copyModel ?? 'auto',
+        copyStyle: dto.copyStyle,
       })
 
       aiLogIds.push(aiLog.id)
@@ -438,6 +433,8 @@ export class DraftGenerationService implements OnModuleDestroy {
       videoUrls?: string[]
       draftType?: DraftType
       platforms?: string[]
+      copyModel?: CopyModel
+      copyStyle?: string
     },
   ): Promise<{ consumedPoints: number }> {
     let consumedPoints = 0
@@ -449,14 +446,6 @@ export class DraftGenerationService implements OnModuleDestroy {
       const model = options?.model ?? 'grok-imagine-video'
       const duration = options?.duration
       const aspectRatio = options?.aspectRatio ?? '9:16'
-
-      // 仅 draft 类型需要 Gemini 规划（生成标题/描述/话题）
-      let plan: V2PlanResult | undefined
-      if (draftType === 'draft') {
-        const { plan: geminiPlan, points: planPoints } = await this.planWithGemini(userId, userType, candidateImageUrls, options?.prompt)
-        plan = geminiPlan
-        consumedPoints += planPoints
-      }
 
       const { videoUrl, points: videoPoints } = await this.generateVideo(
         aiLogId,
@@ -504,6 +493,22 @@ export class DraftGenerationService implements OnModuleDestroy {
         return { consumedPoints }
       }
 
+      const copy = await this.generateDraftCopyPayload({
+        userId,
+        prompt: options?.prompt,
+        videoUrl,
+        sourceHint: this.buildDraftSourceHint({
+          type: 'video',
+          prompt: options?.prompt,
+          model,
+          primaryMediaUrl: videoUrl,
+          referenceImageCount: candidateImageUrls.length,
+        }),
+        platform: this.pickPrimaryPlatform(options?.platforms),
+        copyStyle: options?.copyStyle,
+        copyModel: options?.copyModel,
+      })
+
       // draft 类型：保存完整草稿素材
       const material = await this.materialRepository.create({
         userId,
@@ -512,29 +517,38 @@ export class DraftGenerationService implements OnModuleDestroy {
         type: MaterialType.VIDEO,
         source: MaterialSource.PlaceDraft,
         status: MaterialStatus.SUCCESS,
-        title: plan!.title,
-        desc: plan!.description,
-        topics: plan!.topics,
+        title: copy.title,
+        desc: copy.description,
+        topics: copy.hashtags,
         coverUrl,
         mediaList: [{ url: videoUrl, type: MediaType.VIDEO, thumbUrl: coverUrl }],
         useCount: 0,
         autoDeleteMedia: false,
         openAffiliate: true,
         model,
+        option: {
+          copy: this.buildMaterialCopyOption(copy, options?.copyModel, options?.copyStyle),
+        },
         accountTypes: (options?.platforms as AccountType[]) ?? getCompatibleAccountTypes({
           type: 'video',
-          title: plan!.title,
-          desc: plan!.description,
-          topics: plan!.topics,
+          title: copy.title,
+          desc: copy.description,
+          topics: copy.hashtags,
           duration,
           aspectRatio,
         }),
       })
 
       const result: DraftGenerationResult = {
-        title: plan!.title,
-        description: plan!.description,
-        topics: plan!.topics,
+        title: copy.title,
+        subtitle: copy.subtitle,
+        description: copy.description,
+        topics: copy.hashtags,
+        hashtags: copy.hashtags,
+        blueWords: copy.blueWords,
+        commentGuide: copy.commentGuide,
+        commentGuides: copy.commentGuides,
+        copyHistoryId: copy.copyHistoryId || undefined,
         videoUrl,
         coverUrl,
       }
@@ -559,98 +573,6 @@ export class DraftGenerationService implements OnModuleDestroy {
         error,
       )
     }
-  }
-
-  /**
-   * V2 辅助方法：调用 Gemini Flash 一次性完成选图 + 视频 prompt + 元数据生成
-   */
-  private async planWithGemini(
-    userId: string,
-    userType: UserType,
-    imageUrls: string[],
-    userPrompt?: string,
-  ): Promise<{ plan: V2PlanResult, points: number }> {
-    const modelName = 'gemini-3-flash-preview'
-    const startedAt = new Date()
-
-    const userPromptSection = userPrompt
-      ? `\n## User Instructions (HIGHEST PRIORITY)\n${userPrompt}\n`
-      : ''
-    const prompt = `You are a TikTok content generation assistant.
-## Task
-Analyze the user's prompt and reference images below, then generate TikTok video metadata (title, description, and hashtag topics).
-${userPromptSection}
-
-## Reference Images
-${imageUrls.map((url, i) => `- Image ${i + 1}: ${url}`).join('\n')}
-
-## Instructions
-
-Generate TikTok metadata for a video based on the user's prompt and images:
-- **title**: Catchy title under 30 characters, in the language matching the user's prompt or images
-- **description**: Engaging description with call-to-action, under 2200 characters, in the language matching the user's prompt or images.
-- **topics**: 3-5 relevant hashtags (without # prefix)
-- **IMPORTANT**: Do NOT generate any content featuring children, minors, or anyone appearing under 18. If the user's prompt mentions minors, replace them with adults in the output.
-Return the result as JSON.`
-
-    const model = new ChatGoogleGenerativeAI({
-      model: modelName,
-      apiKey: config.ai.gemini.apiKey,
-      baseUrl: config.ai.gemini.baseUrl,
-      temperature: 1.2, // 提高创意多样性
-    })
-
-    const messageContent: Array<{ type: 'image_url', image_url: string } | { type: 'text', text: string }> = []
-
-    for (const url of imageUrls) {
-      const fullUrl = FileUtil.buildUrl(url)
-      const { base64, mimeType } = await this.fetchImageAsBase64(fullUrl)
-      messageContent.push({
-        type: 'image_url',
-        image_url: `data:${mimeType};base64,${base64}`,
-      })
-    }
-    messageContent.push({ type: 'text', text: prompt })
-
-    const structuredModel = model.withStructuredOutput(z.toJSONSchema(V2PlanResultSchema), { includeRaw: true })
-    const { raw, parsed: structuredResult } = await structuredModel.invoke([
-      new HumanMessage({ content: messageContent }),
-    ])
-
-    if (!structuredResult) {
-      throw new Error('V2: No response from Gemini planning step')
-    }
-
-    const parsed = z.safeParse(V2PlanResultSchema, structuredResult)
-    if (!parsed.success) {
-      throw new Error(`V2: Invalid plan result: ${z.prettifyError(parsed.error)}`)
-    }
-
-    // 记录用量和扣费
-    const usage = AIMessage.isInstance(raw) ? raw.usage_metadata : undefined
-    const chatModel = config.ai.models.chat.find(m => m.name === modelName)
-    if (chatModel && usage) {
-      const pricing = chatModel.pricing as ChatPricing
-      const consumedPoints = calculatePricingPoints(pricing, usage)
-      const duration = Date.now() - startedAt.getTime()
-
-      await this.aiLogRepository.create({
-        userId,
-        userType,
-        type: AiLogType.Agent,
-        model: modelName,
-        channel: AiLogChannel.Gemini,
-        startedAt,
-        duration,
-        points: consumedPoints,
-        request: { imageCount: imageUrls.length },
-        response: parsed.data,
-        status: AiLogStatus.Success,
-      })
-    }
-
-    this.logger.log({ plan: parsed.data }, 'V2: Plan generated')
-    return { plan: parsed.data, points: 0 }
   }
 
   /**
@@ -753,6 +675,8 @@ Return the result as JSON.`
           prompt: dto.prompt,
           imageUrls: dto.imageUrls,
           draftType: dto.draftType ?? 'draft',
+          copyModel: dto.copyModel ?? 'auto',
+          copyStyle: dto.copyStyle,
         },
         response: {},
       })
@@ -771,6 +695,8 @@ Return the result as JSON.`
         aspectRatio: dto.aspectRatio,
         imageTextDraftType: dto.draftType ?? 'draft',
         platforms: dto.platforms,
+        copyModel: dto.copyModel ?? 'auto',
+        copyStyle: dto.copyStyle,
       })
 
       aiLogIds.push(aiLog.id)
@@ -801,6 +727,8 @@ Return the result as JSON.`
       aspectRatio?: string
       draftType?: ImageTextDraftType
       platforms?: string[]
+      copyModel?: CopyModel
+      copyStyle?: string
     },
   ): Promise<{ consumedPoints: number }> {
     let consumedPoints = 0
@@ -814,8 +742,6 @@ Return the result as JSON.`
         'ImageText: Starting generation',
       )
 
-      // 仅 draft 类型需要 Gemini 规划（生成标题/描述/话题/图片 prompts）
-      let plan: ImageTextPlanResult | undefined
       let imagePrompts: string[]
 
       if (draftType === 'draft') {
@@ -826,11 +752,10 @@ Return the result as JSON.`
           options.prompt,
           options.imageCount,
         )
-        plan = geminiPlan
-        imagePrompts = plan.imagePrompts
+        imagePrompts = geminiPlan.imagePrompts
         consumedPoints += planPoints
         this.logger.log(
-          { aiLogId, title: plan.title, imagePromptsCount: plan.imagePrompts.length, planPoints },
+          { aiLogId, imagePromptsCount: geminiPlan.imagePrompts.length, planPoints },
           'ImageText: Planning completed',
         )
       }
@@ -887,6 +812,20 @@ Return the result as JSON.`
 
       // draft 类型：保存完整图文草稿素材
       const coverUrl = generatedImageUrls[0]
+      const copy = await this.generateDraftCopyPayload({
+        userId,
+        prompt: options.prompt,
+        sourceHint: this.buildDraftSourceHint({
+          type: 'image-text',
+          prompt: options.prompt,
+          model: options.imageModel,
+          primaryMediaUrl: coverUrl,
+          imageCount: generatedImageUrls.length,
+        }),
+        platform: this.pickPrimaryPlatform(options.platforms),
+        copyStyle: options.copyStyle,
+        copyModel: options.copyModel,
+      })
 
       const material = await this.materialRepository.create({
         userId,
@@ -895,29 +834,38 @@ Return the result as JSON.`
         type: MaterialType.ARTICLE,
         source: MaterialSource.PlaceDraft,
         status: MaterialStatus.SUCCESS,
-        title: plan!.title,
-        desc: plan!.description,
-        topics: plan!.topics,
+        title: copy.title,
+        desc: copy.description,
+        topics: copy.hashtags,
         coverUrl,
         mediaList: generatedImageUrls.map(url => ({ url, type: MediaType.IMG })),
         useCount: 0,
         autoDeleteMedia: false,
         openAffiliate: true,
         model: options.imageModel,
+        option: {
+          copy: this.buildMaterialCopyOption(copy, options.copyModel, options.copyStyle),
+        },
         accountTypes: (options.platforms as AccountType[]) ?? getCompatibleAccountTypes({
           type: 'article',
-          title: plan!.title,
-          desc: plan!.description,
-          topics: plan!.topics,
+          title: copy.title,
+          desc: copy.description,
+          topics: copy.hashtags,
           imageCount: generatedImageUrls.length,
           aspectRatio: options.aspectRatio,
         }),
       })
 
       const result: DraftGenerationResult = {
-        title: plan!.title,
-        description: plan!.description,
-        topics: plan!.topics,
+        title: copy.title,
+        subtitle: copy.subtitle,
+        description: copy.description,
+        topics: copy.hashtags,
+        hashtags: copy.hashtags,
+        blueWords: copy.blueWords,
+        commentGuide: copy.commentGuide,
+        commentGuides: copy.commentGuides,
+        copyHistoryId: copy.copyHistoryId || undefined,
         coverUrl,
         imageUrls: generatedImageUrls,
       }
@@ -959,7 +907,7 @@ Return the result as JSON.`
 
     const prompt = `You are a social media content generation assistant.
 ## Task
-Analyze the user's prompt and reference images below, then generate post metadata and image generation prompts.
+Analyze the user's prompt and reference images below, then generate image generation prompts.
 
 ## User Instructions (HIGHEST PRIORITY)
 ${userPrompt}
@@ -969,10 +917,7 @@ ${imageUrls.map((url, i) => `- Image ${i + 1}: ${url}`).join('\n') || 'No refere
 
 ## Instructions
 
-Generate metadata and ${imageCount} image prompts for a social media image-text post:
-- **title**: Catchy title under 30 characters, in the language matching the user's prompt
-- **description**: Engaging description with call-to-action, under 2200 characters, in the language matching the user's prompt
-- **topics**: 3-5 relevant hashtags (without # prefix)
+Generate exactly ${imageCount} image prompts for a social media image-text post:
 - **imagePrompts**: Exactly ${imageCount} detailed image generation prompts in English. Each prompt should:
   - Be self-contained and descriptive (the image generator has no context of other images)
   - Describe visual style, composition, colors, and mood
@@ -1031,7 +976,7 @@ Return the result as JSON.`
         startedAt,
         duration,
         points: consumedPoints,
-        request: { imageCount: imageUrls.length },
+        request: { imageCount: imageUrls.length, promptCount: imageCount },
         response: parsed.data,
         status: AiLogStatus.Success,
       })
@@ -1039,6 +984,78 @@ Return the result as JSON.`
 
     this.logger.log({ plan: parsed.data }, 'ImageText: Plan generated')
     return { plan: parsed.data, points: 0 }
+  }
+
+  private async generateDraftCopyPayload(input: {
+    userId: string
+    prompt?: string
+    videoUrl?: string
+    sourceHint: string
+    platform?: string
+    copyStyle?: string
+    copyModel?: CopyModel
+  }) {
+    const copy = await this.draftCopyClientService.generateCopy({
+      userId: input.userId,
+      theme: input.prompt,
+      platform: input.platform,
+      style: input.copyStyle,
+      videoUrl: input.videoUrl,
+      sourceHint: input.sourceHint,
+      provider: this.resolveRequestedCopyProvider(input.copyModel),
+    })
+
+    return copy
+  }
+
+  private resolveRequestedCopyProvider(copyModel?: CopyModel): DraftCopyProvider | undefined {
+    if (!copyModel || copyModel === 'auto') {
+      return undefined
+    }
+    return copyModel
+  }
+
+  private pickPrimaryPlatform(platforms?: string[]) {
+    return platforms?.find(Boolean)
+  }
+
+  private buildDraftSourceHint(input: {
+    type: 'video' | 'image-text'
+    prompt?: string
+    model: string
+    primaryMediaUrl?: string
+    imageCount?: number
+    referenceImageCount?: number
+  }) {
+    const parts = [
+      input.type === 'video' ? 'AI 视频草稿已生成。' : 'AI 图文草稿已生成。',
+      input.prompt ? `原始创作需求: ${input.prompt}` : '',
+      input.type === 'video'
+        ? `视频模型: ${input.model}`
+        : `图片模型: ${input.model}`,
+      input.imageCount ? `已生成图片数量: ${input.imageCount}` : '',
+      input.referenceImageCount ? `参考图片数量: ${input.referenceImageCount}` : '',
+      input.primaryMediaUrl ? `首个媒体地址: ${input.primaryMediaUrl}` : '',
+    ].filter(Boolean)
+
+    return parts.join(' ')
+  }
+
+  private buildMaterialCopyOption(
+    copy: DraftCopyVariant,
+    copyModel?: CopyModel,
+    copyStyle?: string,
+  ) {
+    return {
+      copyHistoryId: copy.copyHistoryId,
+      requestedCopyModel: copyModel ?? 'auto',
+      copyStyle: copyStyle || null,
+      subtitle: copy.subtitle,
+      hashtags: copy.hashtags,
+      blueWords: copy.blueWords,
+      commentGuide: copy.commentGuide,
+      commentGuides: copy.commentGuides,
+    }
   }
 
   /**

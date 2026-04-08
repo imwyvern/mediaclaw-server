@@ -24,7 +24,7 @@ export class DraftGenerationConsumer extends WorkerHost {
 
     try {
       if (version === 'v2-image-text') {
-        const { prompt, imageUrls, imageModel, imageCount, aspectRatio, imageTextDraftType, platforms } = job.data
+        const { prompt, imageUrls, imageModel, imageCount, aspectRatio, imageTextDraftType, platforms, copyModel, copyStyle } = job.data
         this.logger.log(
           { aiLogId, imageModel, imageCount, aspectRatio, imageUrlsCount: imageUrls?.length ?? 0, promptLength: prompt?.length ?? 0, draftType: imageTextDraftType },
           'Processing v2-image-text generation',
@@ -37,11 +37,13 @@ export class DraftGenerationConsumer extends WorkerHost {
           aspectRatio,
           draftType: imageTextDraftType,
           platforms,
+          copyModel,
+          copyStyle,
         })
         this.logger.log({ aiLogId, consumedPoints }, 'v2-image-text generation completed')
       }
       else if (version === 'v2') {
-        const { prompt, imageUrls, model, duration, aspectRatio, videoUrls, draftType, platforms } = job.data
+        const { prompt, imageUrls, model, duration, aspectRatio, videoUrls, draftType, platforms, copyModel, copyStyle } = job.data
         const { consumedPoints } = await this.draftGenerationService.generateContentV2(aiLogId, userId, userType, groupId, {
           prompt,
           imageUrls,
@@ -51,6 +53,8 @@ export class DraftGenerationConsumer extends WorkerHost {
           videoUrls,
           draftType,
           platforms,
+          copyModel,
+          copyStyle,
         })
         this.logger.log({ aiLogId, consumedPoints }, 'v2 generation completed')
       }

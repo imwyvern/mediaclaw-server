@@ -4,6 +4,8 @@ import { z } from 'zod'
 export const IMAGE_TEXT_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9'] as const
 
 export const ALL_ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'] as const
+export const COPY_MODELS = ['auto', 'deepseek', 'gemini'] as const
+export type CopyModel = (typeof COPY_MODELS)[number]
 
 /** 视频草稿生成类型：draft 完整草稿（含标题/描述/话题），video 仅生成视频 */
 export const DRAFT_TYPES = ['draft', 'video'] as const
@@ -33,6 +35,8 @@ export const CreateDraftGenerationV2DtoSchema = z.object({
   videoUrls: z.array(z.url()).max(3).optional().describe('运动参考视频 URL 数组，最多3个'),
   draftType: z.enum(DRAFT_TYPES).default('draft').describe('草稿类型：draft 完整草稿，video 仅生成视频'),
   platforms: z.array(z.enum(AccountType)).optional().describe('目标平台列表，如 ["tiktok", "youtube"]'),
+  copyModel: z.enum(COPY_MODELS).default('auto').describe('文案生成模型：auto/deepseek/gemini'),
+  copyStyle: z.string().max(100).optional().describe('文案风格偏好，如种草、测评、教程'),
 })
 export class CreateDraftGenerationV2Dto extends createZodDto(CreateDraftGenerationV2DtoSchema, 'CreateDraftGenerationV2Dto') { }
 
@@ -57,6 +61,8 @@ export const CreateImageTextDraftDtoSchema = z.object({
   aspectRatio: z.enum(IMAGE_TEXT_ASPECT_RATIOS).optional().describe('图片宽高比'),
   draftType: z.enum(IMAGE_TEXT_DRAFT_TYPES).default('draft').describe('草稿类型：draft 完整草稿，image 仅生成图片'),
   platforms: z.array(z.enum(AccountType)).optional().describe('目标平台列表，如 ["tiktok", "xhs"]'),
+  copyModel: z.enum(COPY_MODELS).default('auto').describe('文案生成模型：auto/deepseek/gemini'),
+  copyStyle: z.string().max(100).optional().describe('文案风格偏好，如种草、测评、教程'),
 })
 
 export class CreateImageTextDraftDto extends createZodDto(CreateImageTextDraftDtoSchema, 'CreateImageTextDraftDto') { }

@@ -18,4 +18,6 @@ export interface DraftGenerationData {
   draftType?: 'draft' | 'video'
   imageTextDraftType?: 'draft' | 'image'
   platforms?: string[]
+  copyModel?: 'auto' | 'deepseek' | 'gemini'
+  copyStyle?: string
 }

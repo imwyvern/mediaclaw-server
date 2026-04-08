@@ -173,7 +173,9 @@ export class CopyEngineService {
       || this.readMetadataString(metadata, 'campaign')
       || this.readMetadataString(metadata, 'platform')
       || '内容分发'
-    const sourceHint = videoUrl ? `视频素材地址: ${videoUrl}` : '未提供视频素材地址'
+    const sourceHint = videoUrl
+      ? `视频素材地址: ${videoUrl}`
+      : this.readMetadataString(metadata, 'sourceHint') || '未提供视频素材地址'
     const dedup = resolvedOrgId
       ? await this.checkDedupHistory(resolvedOrgId, {
           title: `${brandName}${scene}`,
@@ -482,6 +484,16 @@ export class CopyEngineService {
   private async resolveProviderConfig(metadata: Record<string, any>) {
     const orgId = this.readMetadataObjectId(metadata, 'orgId')
     const pipelineId = this.readMetadataObjectId(metadata, 'pipelineId')
+    const requestedProvider = this.normalizeRequestedProvider(
+      this.readMetadataString(metadata, 'copyProvider') || this.readMetadataString(metadata, 'provider'),
+    )
+    if (requestedProvider) {
+      const forcedConfig = await this.resolveForcedProviderConfig(metadata, requestedProvider)
+      if (forcedConfig) {
+        return forcedConfig
+      }
+    }
+
     if (this.modelResolverService && orgId) {
       const resolved = await this.modelResolverService.resolveCapability(orgId, 'copy', pipelineId)
       const provider = this.mapProviderEnum(resolved.provider)
@@ -559,6 +571,61 @@ export class CopyEngineService {
     return {
       provider: 'heuristic' as const,
       model: '',
+    }
+  }
+
+  private async resolveForcedProviderConfig(
+    metadata: Record<string, any>,
+    provider: Exclude<CopyProvider, 'heuristic'>,
+  ) {
+    const providerEnum = this.mapCopyProviderToApiProvider(provider)
+    const apiKey = await this.resolveApiKey(metadata, providerEnum, this.fallbackEnvNames(providerEnum))
+    if (!apiKey) {
+      return null
+    }
+
+    return {
+      provider,
+      model: this.defaultModelForProvider(provider),
+    }
+  }
+
+  private normalizeRequestedProvider(value: string): Exclude<CopyProvider, 'heuristic'> | null {
+    const normalized = value.trim().toLowerCase()
+    if (!normalized || normalized === 'auto') {
+      return null
+    }
+
+    if (normalized === 'deepseek' || normalized === 'gemini' || normalized === 'openai') {
+      return normalized
+    }
+
+    return null
+  }
+
+  private mapCopyProviderToApiProvider(provider: Exclude<CopyProvider, 'heuristic'>) {
+    switch (provider) {
+      case 'deepseek':
+        return OrgApiKeyProvider.DEEPSEEK
+      case 'gemini':
+        return OrgApiKeyProvider.GEMINI
+      case 'openai':
+        return OrgApiKeyProvider.OPENAI
+      default:
+        throw new Error(`Unsupported copy provider: ${provider}`)
+    }
+  }
+
+  private defaultModelForProvider(provider: Exclude<CopyProvider, 'heuristic'>) {
+    switch (provider) {
+      case 'deepseek':
+        return process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || process.env['DEEPSEEK_MODEL']?.trim() || 'deepseek-chat'
+      case 'gemini':
+        return process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || process.env['GEMINI_MODEL']?.trim() || 'gemini-2.5-flash'
+      case 'openai':
+        return process.env['MEDIACLAW_OPENAI_MODEL']?.trim() || process.env['OPENAI_MODEL']?.trim() || 'gpt-4o'
+      default:
+        throw new Error(`Unsupported copy provider: ${provider}`)
     }
   }
 

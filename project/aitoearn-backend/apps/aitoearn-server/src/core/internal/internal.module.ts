@@ -2,11 +2,13 @@ import { Module } from '@nestjs/common'
 import { AccountModule } from '../account/account.module'
 import { ContentModule } from '../content/content.module'
 import { CreditsModule } from '../credits/credits.module'
+import { CopyModule } from '../mediaclaw/copy/copy.module'
 import { NotificationModule } from '../notification/notification.module'
 import { PublishModule } from '../publish-record/publish-record.module'
 import { ShortLinkModule } from '../short-link/short-link.module'
 import { UserModule } from '../user/user.module'
 import { AccountController } from './account.controller'
+import { CopyInternalController } from './copy.controller'
 import { MaterialInternalController } from './material.controller'
 import { NotificationInternalController } from './notification.controller'
 import { AccountInternalService } from './provider/account.service'
@@ -25,11 +27,13 @@ import { UserInternalController } from './user.controller'
     ContentModule,
     CreditsModule,
     ShortLinkModule,
+    CopyModule,
   ],
   providers: [AccountInternalService, PublishingInternalService],
   controllers: [
     UserInternalController,
     AccountController,
+    CopyInternalController,
     NotificationInternalController,
     PublishingController,
     MaterialInternalController,

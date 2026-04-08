@@ -13,7 +13,15 @@ export interface GenerateCopyHttpInput {
   theme?: string
   platform?: string
   style?: string
+  videoUrl?: string
+  sourceHint?: string
+  provider?: string
   count?: number
+}
+
+export interface InternalGenerateCopyInput extends GenerateCopyHttpInput {
+  orgId?: string
+  userId?: string
 }
 
 export interface RewriteCopyHttpInput {
@@ -82,13 +90,18 @@ export class CopyService {
     const resolvedBrandId = requestedBrandId
       || this.normalizeObjectIdString(task?.brandId)
       || null
+    const brand = requestedBrandId
+      ? await this.findBrandForOrg(orgId, requestedBrandId)
+      : null
+    const taskBrandId = this.normalizeObjectIdString(task?.brandId)
     if (requestedBrandId) {
-      await this.findBrandForOrg(orgId, requestedBrandId)
+      this.assertOrgAccess(orgId, brand?.orgId?.toString() || null, 'Brand')
     }
     const resolvedTaskId = this.normalizeObjectIdString(task?._id) || null
     const resolvedVideoUrl = task?.outputVideoUrl?.trim()
       || task?.sourceVideoUrl?.trim()
       || this.readString(task?.source?.url)
+      || body.videoUrl?.trim()
       || ''
     const copies: Array<GeneratedCopy & {
       copyHistoryId: string | null
@@ -104,6 +117,78 @@ export class CopyService {
           orgId: resolvedOrgId,
           userId: this.normalizeObjectIdString(userId) || userId,
           taskId: resolvedTaskId,
+          brandId: resolvedBrandId || taskBrandId || this.normalizeObjectIdString(brand?._id),
+          theme: body.theme?.trim() || this.readMetadataString(taskMetadata, 'theme'),
+          scene: body.theme?.trim()
+            || this.readMetadataString(taskMetadata, 'scene')
+            || this.readMetadataString(taskMetadata, 'campaign')
+            || this.readMetadataString(taskMetadata, 'platform')
+            || '内容分发',
+          platform: body.platform?.trim() || this.readMetadataString(taskMetadata, 'platform'),
+          style: body.style?.trim() || this.readMetadataString(taskMetadata, 'style'),
+          sourceHint: body.sourceHint?.trim() || this.readMetadataString(taskMetadata, 'sourceHint'),
+          copyProvider: body.provider?.trim().toLowerCase(),
+          variantGoal: normalizedCount > 1
+            ? `生成第 ${index + 1} 个版本，与已生成候选保持明显差异。`
+            : '',
+          avoidTitles: copies.map(item => item.title),
+          source: 'copy-generate-endpoint',
+        },
+        {
+          replaceExistingForTask: false,
+        },
+      )
+
+      copies.push(this.toCopyHistoryPayload(generated.copy, generated.copyHistoryId, index + 1))
+    }
+
+    return {
+      videoTaskId: resolvedTaskId,
+      brandId: resolvedBrandId,
+      count: copies.length,
+      primaryCopy: copies[0] || null,
+      copies,
+    }
+  }
+
+  async generateForInternal(body: InternalGenerateCopyInput) {
+    const normalizedCount = Math.min(Math.max(Math.trunc(Number(body.count) || 1), 1), 3)
+    const task = await this.findVideoTask(body.videoTaskId)
+    const taskMetadata = this.toPlainObject(task?.metadata)
+    const requestedBrandId = this.normalizeObjectIdString(body.brandId)
+    const brand = requestedBrandId
+      ? await this.findBrand(requestedBrandId)
+      : null
+    const resolvedBrandId = requestedBrandId
+      || this.normalizeObjectIdString(task?.brandId)
+      || null
+    const resolvedOrgId = this.normalizeObjectIdString(body.orgId)
+      || this.normalizeObjectIdString(task?.orgId)
+      || this.normalizeObjectIdString(brand?.orgId)
+      || null
+    const resolvedUserId = this.normalizeObjectIdString(body.userId)
+      || body.userId
+      || null
+    const resolvedTaskId = this.normalizeObjectIdString(task?._id) || null
+    const resolvedVideoUrl = task?.outputVideoUrl?.trim()
+      || task?.sourceVideoUrl?.trim()
+      || this.readString(task?.source?.url)
+      || body.videoUrl?.trim()
+      || ''
+    const copies: Array<GeneratedCopy & {
+      copyHistoryId: string | null
+      variantIndex: number
+    }> = []
+
+    for (let index = 0; index < normalizedCount; index += 1) {
+      const generated = await this.copyEngineService.generateCopyRecord(
+        resolvedBrandId,
+        resolvedVideoUrl,
+        {
+          ...taskMetadata,
+          orgId: resolvedOrgId,
+          userId: resolvedUserId,
+          taskId: resolvedTaskId,
           brandId: resolvedBrandId,
           theme: body.theme?.trim() || this.readMetadataString(taskMetadata, 'theme'),
           scene: body.theme?.trim()
@@ -113,11 +198,13 @@ export class CopyService {
             || '内容分发',
           platform: body.platform?.trim() || this.readMetadataString(taskMetadata, 'platform'),
           style: body.style?.trim() || this.readMetadataString(taskMetadata, 'style'),
+          sourceHint: body.sourceHint?.trim() || this.readMetadataString(taskMetadata, 'sourceHint'),
+          copyProvider: body.provider?.trim().toLowerCase(),
           variantGoal: normalizedCount > 1
             ? `生成第 ${index + 1} 个版本，与已生成候选保持明显差异。`
             : '',
           avoidTitles: copies.map(item => item.title),
-          source: 'copy-generate-endpoint',
+          source: 'copy-internal-endpoint',
         },
         {
           replaceExistingForTask: false,
@@ -267,15 +354,28 @@ export class CopyService {
     return task
   }
 
+  private async findVideoTask(videoTaskId?: string) {
+    if (!videoTaskId) {
+      return null
+    }
+
+    const normalizedVideoTaskId = this.requireObjectId(videoTaskId, 'videoTaskId')
+    return this.videoTaskModel.findById(new Types.ObjectId(normalizedVideoTaskId)).exec()
+  }
+
   private async findBrandForOrg(orgId: string, brandId: string) {
-    const normalizedBrandId = this.requireObjectId(brandId, 'brandId')
-    const brand = await this.brandModel.findById(new Types.ObjectId(normalizedBrandId)).exec()
+    const brand = await this.findBrand(brandId)
     if (!brand) {
       throw new NotFoundException('Brand not found')
     }
 
     this.assertOrgAccess(orgId, brand.orgId?.toString() || null, 'Brand')
     return brand
+  }
+
+  private async findBrand(brandId: string) {
+    const normalizedBrandId = this.requireObjectId(brandId, 'brandId')
+    return this.brandModel.findById(new Types.ObjectId(normalizedBrandId)).exec()
   }
 
   private serializeCopyHistory(item: Record<string, any>) {

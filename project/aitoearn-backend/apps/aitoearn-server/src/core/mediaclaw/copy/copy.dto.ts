@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer'
 import {
   IsArray,
+  IsIn,
   IsInt,
   IsMongoId,
   IsNotEmpty,
@@ -34,11 +35,34 @@ export class GenerateCopyDto {
   style?: string
 
   @IsOptional()
+  @IsString()
+  videoUrl?: string
+
+  @IsOptional()
+  @IsString()
+  sourceHint?: string
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['auto', 'deepseek', 'gemini', 'openai'])
+  provider?: string
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(3)
   count?: number
+}
+
+export class InternalGenerateCopyDto extends GenerateCopyDto {
+  @IsOptional()
+  @IsMongoId()
+  orgId?: string
+
+  @IsOptional()
+  @IsMongoId()
+  userId?: string
 }
 
 export class RewriteCopyDto {

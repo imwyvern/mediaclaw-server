@@ -163,4 +163,69 @@ describe('copyEngineService', () => {
     expect(result.hashtags.some(item => item.includes('最强') || item.includes('第一'))).toBe(false)
     expect(result.commentGuides.some(item => item.includes('最强') || item.includes('第一'))).toBe(false)
   })
+
+  it('should use source hint metadata when video url is unavailable', async () => {
+    const brandModel = {
+      findById: vi.fn().mockResolvedValue(null),
+    }
+    const copyHistoryModel = {
+      create: vi.fn().mockResolvedValue(undefined),
+      find: vi.fn().mockReturnValue(createQuery([])),
+      findOneAndUpdate: vi.fn().mockReturnValue(createQuery({})),
+    }
+
+    const service = new CopyEngineService(brandModel as any, copyHistoryModel as any)
+    const generateWithProviderSpy = vi.spyOn(service as any, 'generateWithProvider').mockResolvedValue({
+      draft: {
+        title: '图文标题',
+        subtitle: '这是一段足够长的图文字幕内容',
+        description: '这是一段足够长的图文正文内容，用于图文草稿输出。',
+        hashtags: ['#图文', '#探店', '#咖啡', '#夏日', '#种草'],
+        blueWords: ['想看菜单'],
+        commentGuides: ['留言要地址', '评论想看菜单', '点个收藏下次来'],
+      },
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        model: '',
+        cost: 0,
+      },
+      provider: 'heuristic',
+    })
+
+    await service.generateCopy(null, '', {
+      scene: '夏日图文种草',
+      sourceHint: '首图为门店外立面，后续图片包含冰咖啡与甜品近景。',
+    })
+
+    expect(generateWithProviderSpy).toHaveBeenCalledWith(expect.objectContaining({
+      sourceHint: '首图为门店外立面，后续图片包含冰咖啡与甜品近景。',
+    }))
+  })
+
+  it('should honor forced copy provider metadata before env fallback', async () => {
+    process.env['MEDIACLAW_COPY_PROVIDER'] = 'gemini'
+    process.env['MEDIACLAW_DEEPSEEK_API_KEY'] = 'deepseek-key'
+    process.env['MEDIACLAW_GEMINI_API_KEY'] = 'gemini-key'
+    process.env['DEEPSEEK_MODEL'] = 'deepseek-v3'
+
+    const brandModel = {
+      findById: vi.fn().mockResolvedValue(null),
+    }
+    const copyHistoryModel = {
+      create: vi.fn().mockResolvedValue(undefined),
+      find: vi.fn().mockReturnValue(createQuery([])),
+      findOneAndUpdate: vi.fn().mockReturnValue(createQuery({})),
+    }
+
+    const service = new CopyEngineService(brandModel as any, copyHistoryModel as any)
+    const runtime = await (service as any).resolveProviderConfig({
+      copyProvider: 'deepseek',
+    })
+
+    expect(runtime).toMatchObject({
+      provider: 'deepseek',
+      model: 'deepseek-v3',
+    })
+  })
 })

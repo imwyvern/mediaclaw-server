@@ -163,6 +163,43 @@ describe('copyService behavior', () => {
     )).rejects.toBeInstanceOf(NotFoundException)
   })
 
+  it('should forward provider, source hint, and fallback video url into copy generation', async () => {
+    const service = new CopyService(
+      copyEngineService as any,
+      copyStrategyService as any,
+      brandModel as any,
+      videoTaskModel as any,
+      copyHistoryModel as any,
+    )
+
+    await service.generateForInternal({
+      userId: '507f1f77bcf86cd799439022',
+      theme: '夏日咖啡探店',
+      platform: 'xiaohongshu',
+      style: '种草',
+      provider: 'deepseek',
+      sourceHint: '图文首图展示冰咖啡和门店外立面',
+      videoUrl: 'https://cdn.example.com/generated.mp4',
+    })
+
+    expect(copyEngineService.generateCopyRecord).toHaveBeenCalledWith(
+      null,
+      'https://cdn.example.com/generated.mp4',
+      expect.objectContaining({
+        userId: '507f1f77bcf86cd799439022',
+        scene: '夏日咖啡探店',
+        platform: 'xiaohongshu',
+        style: '种草',
+        sourceHint: '图文首图展示冰咖啡和门店外立面',
+        copyProvider: 'deepseek',
+        source: 'copy-internal-endpoint',
+      }),
+      expect.objectContaining({
+        replaceExistingForTask: false,
+      }),
+    )
+  })
+
   it('should expose normalized copy history payloads', async () => {
     const service = new CopyService(
       copyEngineService as any,

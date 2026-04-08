@@ -7,6 +7,7 @@ import { VideoUtilsMcp } from '../agent/mcp/video-utils.mcp'
 import { ChatModule } from '../ai/chat'
 import { ImageModule } from '../ai/image'
 import { VideoModule } from '../ai/video'
+import { DraftCopyClientService } from './draft-copy-client.service'
 import { DraftGenerationConsumer } from './draft-generation.consumer'
 import { DraftGenerationController } from './draft-generation.controller'
 import { DraftGenerationService } from './draft-generation.service'
@@ -22,6 +23,7 @@ import { DraftGenerationService } from './draft-generation.service'
   controllers: [DraftGenerationController],
   providers: [
     DraftGenerationService,
+    DraftCopyClientService,
     DraftGenerationConsumer,
     MediaMcp,
     UtilMcp,
