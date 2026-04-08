@@ -31,11 +31,17 @@ import {
   GetTaskMessagesQueryDtoSchema,
   ListContentGenerationTaskDto,
   ListContentGenerationTaskDtoSchema,
+  PlanAgentWorkflowDto,
+  PlanAgentWorkflowDtoSchema,
   UpdateContentGenerationTaskTitleDto,
   UpdateContentGenerationTaskTitleDtoSchema,
 } from './agent.dto'
 import { AgentService } from './agent.service'
 import {
+  AgentRoleListVo,
+  AgentRoleListVoSchema,
+  AgentWorkflowPlanVo,
+  AgentWorkflowPlanVoSchema,
   ContentGenerationTaskChunkVoSchema,
   ContentGenerationTaskListVo,
   ContentGenerationTaskVo,
@@ -77,6 +83,32 @@ export class AgentController {
     })
 
     return this.agentService.createContentGenerationTask(token.id, UserType.User, body, abortController, req, res)
+  }
+
+  @ApiDoc({
+    summary: 'List registered MediaClaw agent roles',
+    description: 'Return the role registry used by the AI orchestration layer.',
+    response: AgentRoleListVoSchema,
+  })
+  @Get('roles')
+  async listRoles() {
+    const roles = await this.agentService.listRoles()
+    return AgentRoleListVo.create(roles)
+  }
+
+  @ApiDoc({
+    summary: 'Plan agent workflow',
+    description: 'Preview the role orchestration, tool focus, and memory summary for a request.',
+    body: PlanAgentWorkflowDtoSchema,
+    response: AgentWorkflowPlanVoSchema,
+  })
+  @Post('workflow/plan')
+  async planWorkflow(
+    @GetToken() token: TokenInfo,
+    @Body() body: PlanAgentWorkflowDto,
+  ) {
+    const plan = await this.agentService.planWorkflow(token.id, body)
+    return AgentWorkflowPlanVo.create(plan)
   }
 
   @ApiDoc({

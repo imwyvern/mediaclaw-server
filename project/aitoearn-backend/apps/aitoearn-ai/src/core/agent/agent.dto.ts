@@ -1,5 +1,10 @@
 import { createZodDto, PaginationDtoSchema } from '@yikart/common'
 import { z } from 'zod'
+import {
+  AGENT_MEMORY_POLICIES,
+  AGENT_ROLE_KEYS,
+  AGENT_WORKFLOW_TYPES,
+} from './agent-orchestration.types'
 
 // 文本内容块
 const TextContentBlockSchema = z.object({
@@ -97,12 +102,29 @@ export const AllowedModelSchema = z.enum([
 ])
   .default('claude-opus-4-6')
 
+export const AgentRoleKeySchema = z.enum(AGENT_ROLE_KEYS)
+export const AgentWorkflowTypeSchema = z.enum(AGENT_WORKFLOW_TYPES)
+export const AgentMemoryPolicySchema = z.enum(AGENT_MEMORY_POLICIES).default('task')
+
+const OptionalTaskIdSchema = z.string().transform(val => val.trim() === '' ? undefined : val).optional()
+
+const AgentWorkflowPreferencesSchema = z.object({
+  workflowType: AgentWorkflowTypeSchema.optional().describe('工作流类型'),
+  preferredRoles: z.array(AgentRoleKeySchema).min(1).max(4).optional().describe('优先角色列表'),
+  memoryPolicy: AgentMemoryPolicySchema.describe('记忆策略'),
+  taskId: OptionalTaskIdSchema.describe('任务ID（恢复对话或读取记忆时使用）'),
+})
+
+export const PlanAgentWorkflowDtoSchema = AgentWorkflowPreferencesSchema.extend({
+  prompt: PromptSchema.describe('提示词（字符串或内容块数组）'),
+})
+export class PlanAgentWorkflowDto extends createZodDto(PlanAgentWorkflowDtoSchema, 'PlanAgentWorkflowDto') { }
+
 // 创建内容生成任务 DTO
-export const CreateContentGenerationTaskSchema = z.object({
+export const CreateContentGenerationTaskSchema = AgentWorkflowPreferencesSchema.extend({
   prompt: PromptSchema.describe('提示词（字符串或内容块数组）'),
   model: AllowedModelSchema.describe('使用的模型'),
   includePartialMessages: z.boolean().optional().default(false).describe('是否包含部分消息（流式）'),
-  taskId: z.string().transform(val => val.trim() === '' ? undefined : val).optional().describe('任务ID（恢复对话时使用）'),
 })
 export class CreateContentGenerationTaskDto extends createZodDto(CreateContentGenerationTaskSchema, 'CreateContentGenerationTaskDto') { }
 

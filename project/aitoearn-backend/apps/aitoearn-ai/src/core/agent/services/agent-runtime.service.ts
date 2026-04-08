@@ -44,6 +44,7 @@ import { catchError, concatMap, filter, finalize, first, map, mergeMap, share, s
 import { z } from 'zod'
 import { RedlockKey } from '../../../common/enums'
 import { config } from '../../../config'
+import { AgentWorkflowPlan } from '../agent-orchestration.types'
 import { McpServerName, POLLING_TASK_AGENT_PROMPT, SKILL_ANALYZER_AGENT_PROMPT, SYSTEM_PROMPT } from '../agent.constants'
 import { CreateContentGenerationTaskDto } from '../agent.dto'
 import { enhancePrompt, filterHeaders, normalizePrompt, sanitizeMessage, shouldFilterSyntheticMessage } from '../agent.utils'
@@ -68,6 +69,7 @@ import { AideoMcp, AideoToolName } from '../mcp/volcengine/aideo.mcp'
 import { DramaRecapMcp, DramaRecapToolName } from '../mcp/volcengine/drama-recap.mcp'
 import { StyleTransferMcp, StyleTransferToolName } from '../mcp/volcengine/style-transfer.mcp'
 import { VideoEditMcp, VideoEditToolName } from '../mcp/volcengine/video-edit.mcp'
+import { AgentOrchestrationService } from './agent-orchestration.service'
 
 export interface ClaudeQueryOptions {
   includePartialMessages?: boolean
@@ -78,6 +80,14 @@ export interface ClaudeQueryOptions {
   outputFormat?: OutputFormat
   persistSession?: boolean
   availabilityOperation?: string
+  workflowAgents?: Record<string, {
+    description: string
+    model: string
+    mcpServers: Array<Record<string, McpServerConfig>>
+    tools: string[]
+    prompt: string
+    skills: string[]
+  }>
 }
 
 type TaskResult = z.infer<typeof ContentGenerationTaskResultUnionSchema>
@@ -114,6 +124,7 @@ export class AgentRuntimeService {
     private readonly subtitleMcp: SubtitleMcp,
     private readonly storageProvider: StorageProvider,
     private readonly queueService: QueueService,
+    private readonly agentOrchestrationService: AgentOrchestrationService,
   ) {}
 
   private getTaskCwd(taskId: string): string {
@@ -289,6 +300,7 @@ export class AgentRuntimeService {
           prompt: SKILL_ANALYZER_AGENT_PROMPT,
           skills: [],
         },
+        ...(options.workflowAgents ?? {}),
       },
       canUseTool: async (name, input, options) => {
         this.logger.debug({ options, name, input }, 'Received tool request')
@@ -424,7 +436,7 @@ export class AgentRuntimeService {
     } = params
 
     return from(this.initializeTask(userId, userType, dto, abortController, req)).pipe(
-      mergeMap(({ taskId, sessionId: initialSessionId, abortController, mcpServers, maxBudgetUsd }) => {
+      mergeMap(({ taskId, sessionId: initialSessionId, historicalMessages, abortController, mcpServers, maxBudgetUsd }) => {
         let sessionId = initialSessionId
         let completionResolver: () => void
         const completionPromise = new Promise<void>((resolve) => {
@@ -452,6 +464,21 @@ export class AgentRuntimeService {
 
         const normalizedContent = normalizePrompt(dto.prompt)
         const enhancedContent = enhancePrompt(normalizedContent)
+        const workflowPlan = this.agentOrchestrationService.planWorkflow({
+          prompt: dto.prompt,
+          workflowType: dto.workflowType,
+          preferredRoles: dto.preferredRoles,
+          memoryPolicy: dto.memoryPolicy,
+          historicalMessages,
+          availableServers: Object.keys(mcpServers) as McpServerName[],
+        })
+        const scopedMcpServers = Object.fromEntries(
+          Object.entries(mcpServers).filter(([serverName]) => workflowPlan.toolSelection.selectedServers.includes(serverName as McpServerName)),
+        )
+        const workflowAgents = this.agentOrchestrationService.createRoleAgents(
+          workflowPlan,
+          scopedMcpServers,
+        )
 
         const userMessage = {
           type: 'user',
@@ -460,7 +487,7 @@ export class AgentRuntimeService {
 
         void this.contentGenerateRepository.updateMessage(taskId, userMessage)
 
-        const systemPromptContent = this.buildSystemPromptContent(null)
+        const systemPromptContent = this.buildSystemPromptContent(null, workflowPlan)
 
         let taskResult: TaskResult | undefined
 
@@ -493,10 +520,11 @@ export class AgentRuntimeService {
             model: dto.model,
             taskId,
             maxBudgetUsd,
+            workflowAgents,
           },
           {
             [McpServerName.SessionTools]: sessionToolsMcp,
-            ...mcpServers,
+            ...scopedMcpServers,
           },
           (options: SpawnOptions): SpawnedProcess => {
             const childProcess = spawn(options.command, options.args, {
@@ -906,10 +934,13 @@ export class AgentRuntimeService {
     })
   }
 
-  private buildSystemPromptContent(_brand: unknown): ContentBlockParam[] {
+  private buildSystemPromptContent(_brand: unknown, workflowPlan?: AgentWorkflowPlan): ContentBlockParam[] {
     const content: ContentBlockParam[] = []
 
     content.push({ type: 'text', text: SYSTEM_PROMPT })
+    if (workflowPlan?.systemPromptAppendix) {
+      content.push({ type: 'text', text: workflowPlan.systemPromptAppendix })
+    }
 
     return content
   }

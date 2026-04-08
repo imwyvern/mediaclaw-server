@@ -23,11 +23,13 @@ import {
 import { RedisPubSubService } from '@yikart/redis'
 import { Request, Response } from 'express'
 import { Observable } from 'rxjs'
+import { DEFAULT_AGENT_WORKFLOW_SERVER_CATALOG } from './agent-orchestration.types'
 import { AGENT_TASK_ABORT_CHANNEL } from './agent.constants'
 import {
   CreateContentGenerationTaskDto,
   CreateContentGenerationTaskRatingDto,
   ListContentGenerationTaskDto,
+  PlanAgentWorkflowDto,
   UpdateContentGenerationTaskTitleDto,
 } from './agent.dto'
 import {
@@ -35,6 +37,7 @@ import {
   AgentMessageVo,
   ContentGenerationTaskChunkVo,
 } from './agent.vo'
+import { AgentOrchestrationService } from './services/agent-orchestration.service'
 import { AgentRuntimeService } from './services/agent-runtime.service'
 
 @Injectable()
@@ -46,6 +49,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     private readonly serverClient: AitoearnServerClientService,
     private readonly agentRuntimeService: AgentRuntimeService,
     private readonly redisPubSubService: RedisPubSubService,
+    private readonly agentOrchestrationService: AgentOrchestrationService,
   ) { }
 
   /**
@@ -106,6 +110,31 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       abortController,
       req,
       res,
+    })
+  }
+
+  listRoles() {
+    return this.agentOrchestrationService.listRoles()
+  }
+
+  async planWorkflow(userId: string, dto: PlanAgentWorkflowDto) {
+    let historicalMessages: Array<Record<string, unknown>> = []
+
+    if (dto.taskId) {
+      const task = await this.contentGenerateRepository.getUserTask(userId, dto.taskId)
+      if (!task) {
+        throw new AppException(ResponseCode.AgentTaskNotFound)
+      }
+      historicalMessages = task.messages || []
+    }
+
+    return this.agentOrchestrationService.planWorkflow({
+      prompt: dto.prompt,
+      workflowType: dto.workflowType,
+      preferredRoles: dto.preferredRoles,
+      memoryPolicy: dto.memoryPolicy,
+      historicalMessages,
+      availableServers: DEFAULT_AGENT_WORKFLOW_SERVER_CATALOG,
     })
   }
 

@@ -19,7 +19,11 @@ import { AideoMcp } from './mcp/volcengine/aideo.mcp'
 import { DramaRecapMcp } from './mcp/volcengine/drama-recap.mcp'
 import { StyleTransferMcp } from './mcp/volcengine/style-transfer.mcp'
 import { VideoEditMcp } from './mcp/volcengine/video-edit.mcp'
+import { AgentMemoryService } from './services/agent-memory.service'
+import { AgentOrchestrationService } from './services/agent-orchestration.service'
+import { AgentRoleRegistryService } from './services/agent-role-registry.service'
 import { AgentRuntimeService } from './services/agent-runtime.service'
+import { AgentToolLayerService } from './services/agent-tool-layer.service'
 import { SkillInitService } from './skill-init.service'
 
 @Module({
@@ -46,6 +50,10 @@ import { SkillInitService } from './skill-init.service'
     ImageEditMcp,
     SubtitleMcp,
     SkillInitService,
+    AgentMemoryService,
+    AgentRoleRegistryService,
+    AgentToolLayerService,
+    AgentOrchestrationService,
     AgentRuntimeService,
   ],
   exports: [AgentService],

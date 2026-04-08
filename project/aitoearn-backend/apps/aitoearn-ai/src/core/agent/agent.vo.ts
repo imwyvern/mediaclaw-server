@@ -1,6 +1,12 @@
 import { AccountType, createPaginationVo, createZodDto } from '@yikart/common'
 import { ContentGenerationTaskStatus } from '@yikart/mongodb'
 import { z } from 'zod'
+import {
+  AGENT_EXECUTION_MODES,
+  AGENT_MEMORY_POLICIES,
+  AGENT_ROLE_KEYS,
+  AGENT_WORKFLOW_TYPES,
+} from './agent-orchestration.types'
 
 export enum AgentMessageType {
   Assistant = 'assistant',
@@ -455,3 +461,55 @@ export const PublicShareVoSchema = z.object({
   expiresAt: z.date(),
 })
 export class PublicShareVo extends createZodDto(PublicShareVoSchema, 'PublicShareVo') { }
+
+export const AgentRoleVoSchema = z.object({
+  key: z.enum(AGENT_ROLE_KEYS),
+  name: z.string(),
+  description: z.string(),
+  responsibilities: z.array(z.string()),
+  defaultServers: z.array(z.string()),
+  supportedWorkflows: z.array(z.enum(AGENT_WORKFLOW_TYPES)),
+  subagentType: z.string(),
+  model: z.string(),
+  prompt: z.string(),
+})
+export class AgentRoleVo extends createZodDto(AgentRoleVoSchema, 'AgentRoleVo') { }
+
+export const AgentRoleListVoSchema = z.array(AgentRoleVoSchema)
+export class AgentRoleListVo extends createZodDto(AgentRoleListVoSchema, 'AgentRoleListVo') { }
+
+export const AgentMemorySummaryVoSchema = z.object({
+  policy: z.enum(AGENT_MEMORY_POLICIES),
+  latestUserIntent: z.string(),
+  preferredPlatforms: z.array(z.string()),
+  brandKeywords: z.array(z.string()),
+  pendingActions: z.array(z.string()),
+  recentContext: z.array(z.string()),
+})
+export class AgentMemorySummaryVo extends createZodDto(AgentMemorySummaryVoSchema, 'AgentMemorySummaryVo') { }
+
+export const AgentWorkflowStageVoSchema = z.object({
+  id: z.string(),
+  role: z.enum(AGENT_ROLE_KEYS),
+  name: z.string(),
+  objective: z.string(),
+  serverNames: z.array(z.string()),
+  instructions: z.array(z.string()),
+})
+export class AgentWorkflowStageVo extends createZodDto(AgentWorkflowStageVoSchema, 'AgentWorkflowStageVo') { }
+
+export const AgentWorkflowPlanVoSchema = z.object({
+  workflowType: z.enum(AGENT_WORKFLOW_TYPES),
+  mode: z.enum(AGENT_EXECUTION_MODES),
+  roles: z.array(z.enum(AGENT_ROLE_KEYS)),
+  memory: AgentMemorySummaryVoSchema,
+  toolSelection: z.object({
+    selectedServers: z.array(z.string()),
+    roleServerMap: z.record(z.string(), z.array(z.string())),
+    toolFocus: z.array(z.string()),
+  }),
+  stages: z.array(AgentWorkflowStageVoSchema),
+  handoffNotes: z.array(z.string()),
+  systemPromptAppendix: z.string(),
+})
+export class AgentWorkflowPlanVo extends createZodDto(AgentWorkflowPlanVoSchema, 'AgentWorkflowPlanVo') { }
