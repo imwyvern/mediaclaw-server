@@ -147,6 +147,15 @@ class PipelineDispatchRules {
   @Prop({ type: [String], default: [] })
   preferredCategories: string[];
 
+  @Prop({ type: [String], default: [] })
+  templateIds: string[];
+
+  @Prop({ type: [String], default: [] })
+  accountTypes: string[];
+
+  @Prop({ type: [String], default: [] })
+  platformAccountIds: string[];
+
   @Prop({ type: String, default: "round-robin" })
   strategy: string;
 

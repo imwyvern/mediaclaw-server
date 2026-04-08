@@ -43,6 +43,15 @@ class EmployeeDistributionRules {
 
   @Prop({ type: [String], default: [] })
   preferredCategories?: string[]
+
+  @Prop({ type: [String], default: [] })
+  templateIds?: string[]
+
+  @Prop({ type: [String], default: [] })
+  accountTypes?: string[]
+
+  @Prop({ type: String, default: '' })
+  defaultPlatformAccountId?: string
 }
 
 @Schema({ _id: false })

@@ -90,6 +90,7 @@ describe('pipelineService', () => {
     const orgId = new Types.ObjectId().toString()
     const brandId = new Types.ObjectId()
     const assignmentId = new Types.ObjectId().toString()
+    const platformAccountId = new Types.ObjectId().toString()
     const brand = {
       _id: brandId,
       orgId: new Types.ObjectId(orgId),
@@ -118,6 +119,8 @@ describe('pipelineService', () => {
       },
       distributionRules: {
         preferredCategories: ['beer'],
+        templateIds: ['b7-ai-live'],
+        accountTypes: ['xiaohongshu'],
         targets: [
           {
             employeeName: '小王',
@@ -125,6 +128,9 @@ describe('pipelineService', () => {
             imChannel: 'wecom',
             imUserId: 'wecom_user_1',
             targetPlatforms: ['douyin'],
+            outputConfig: {
+              platformAccountId,
+            },
           },
         ],
       },
@@ -153,6 +159,9 @@ describe('pipelineService', () => {
           assignmentIds: [assignmentId],
           preferredPlatforms: ['douyin', 'xiaohongshu'],
           preferredCategories: ['beer'],
+          templateIds: ['b7-ai-live'],
+          accountTypes: ['xiaohongshu'],
+          platformAccountIds: [platformAccountId],
         }),
         groupBinding: expect.objectContaining({
           channel: 'wecom',
@@ -167,6 +176,7 @@ describe('pipelineService', () => {
     const orgId = new Types.ObjectId().toString()
     const pipelineId = new Types.ObjectId()
     const assignmentId = new Types.ObjectId().toString()
+    const platformAccountId = new Types.ObjectId().toString()
     const pipeline = {
       _id: pipelineId,
       orgId: new Types.ObjectId(orgId),
@@ -188,9 +198,14 @@ describe('pipelineService', () => {
           employeeName: '小王',
           assignmentId,
           targetPlatforms: ['douyin'],
+          outputConfig: {
+            platformAccountId,
+          },
         },
       ],
       preferredCategories: ['beer'],
+      templateIds: ['b7-ai-live'],
+      accountTypes: ['xiaohongshu'],
       strategy: 'priority',
     })
 
@@ -202,6 +217,9 @@ describe('pipelineService', () => {
             assignmentIds: [assignmentId],
             preferredPlatforms: ['douyin', 'xiaohongshu'],
             preferredCategories: ['beer'],
+            templateIds: ['b7-ai-live'],
+            accountTypes: ['xiaohongshu'],
+            platformAccountIds: [platformAccountId],
             strategy: 'priority',
           }),
         },

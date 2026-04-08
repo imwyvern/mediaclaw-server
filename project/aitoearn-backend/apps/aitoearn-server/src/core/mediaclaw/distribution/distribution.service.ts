@@ -384,6 +384,9 @@ export class DistributionService {
           assignmentIds: Array.isArray(distributionRules['assignmentIds']) ? distributionRules['assignmentIds'] as string[] : [],
           preferredPlatforms: Array.isArray(distributionRules['preferredPlatforms']) ? distributionRules['preferredPlatforms'] as string[] : [],
           preferredCategories: Array.isArray(distributionRules['preferredCategories']) ? distributionRules['preferredCategories'] as string[] : [],
+          templateIds: Array.isArray(distributionRules['templateIds']) ? distributionRules['templateIds'] as string[] : [],
+          accountTypes: Array.isArray(distributionRules['accountTypes']) ? distributionRules['accountTypes'] as string[] : [],
+          platformAccountIds: Array.isArray(distributionRules['platformAccountIds']) ? distributionRules['platformAccountIds'] as string[] : [],
           strategy: typeof distributionRules['strategy'] === 'string' ? distributionRules['strategy'] : undefined,
         },
         overrideRules,
@@ -852,6 +855,13 @@ export class DistributionService {
       || normalizedPrefix === 'platform'
       || action === 'platform'
     const shouldUseCategory = normalizedPrefix === 'category'
+    const shouldUseTemplate = normalizedPrefix === 'template'
+    const shouldUseAccountType = normalizedPrefix === 'account-type'
+      || normalizedPrefix === 'account_type'
+      || normalizedPrefix === 'accounttype'
+    const shouldUseAccount = normalizedPrefix === 'account'
+      || normalizedPrefix === 'platform-account'
+      || normalizedPrefix === 'platform_account'
     const shouldUseStrategy = normalizedPrefix === 'strategy' || action === 'strategy'
 
     if (shouldUseAssignment && Types.ObjectId.isValid(normalizedValue)) {
@@ -864,6 +874,18 @@ export class DistributionService {
 
     if (shouldUseCategory && normalizedValue) {
       dispatchRules['preferredCategories'] = [normalizedValue.toLowerCase()]
+    }
+
+    if (shouldUseTemplate && normalizedValue) {
+      dispatchRules['templateIds'] = [normalizedValue]
+    }
+
+    if (shouldUseAccountType && normalizedValue) {
+      dispatchRules['accountTypes'] = [normalizedValue.toLowerCase()]
+    }
+
+    if (shouldUseAccount && Types.ObjectId.isValid(normalizedValue)) {
+      dispatchRules['platformAccountIds'] = [normalizedValue]
     }
 
     if (shouldUseStrategy && normalizedValue) {
@@ -883,12 +905,21 @@ export class DistributionService {
     const overridePlatforms = this.normalizeStringList(overrideRules['preferredPlatforms']).map(platform => this.normalizePlatform(platform))
     const baseCategories = this.normalizeStringList(baseRules['preferredCategories'])
     const overrideCategories = this.normalizeStringList(overrideRules['preferredCategories'])
+    const baseTemplateIds = this.normalizeStringList(baseRules['templateIds'])
+    const overrideTemplateIds = this.normalizeStringList(overrideRules['templateIds'])
+    const baseAccountTypes = this.normalizeStringList(baseRules['accountTypes'])
+    const overrideAccountTypes = this.normalizeStringList(overrideRules['accountTypes'])
+    const basePlatformAccountIds = this.normalizeStringList(baseRules['platformAccountIds'])
+    const overridePlatformAccountIds = this.normalizeStringList(overrideRules['platformAccountIds'])
 
     return {
       pipelineId: this.normalizeOptionalString(overrideRules['pipelineId'] || baseRules['pipelineId']),
       assignmentIds: Array.from(new Set([...baseAssignments, ...overrideAssignments])),
       preferredPlatforms: Array.from(new Set([...basePlatforms.map(platform => this.normalizePlatform(platform)), ...overridePlatforms])),
       preferredCategories: Array.from(new Set([...baseCategories, ...overrideCategories])),
+      templateIds: Array.from(new Set([...baseTemplateIds, ...overrideTemplateIds])),
+      accountTypes: Array.from(new Set([...baseAccountTypes, ...overrideAccountTypes])),
+      platformAccountIds: Array.from(new Set([...basePlatformAccountIds, ...overridePlatformAccountIds])),
       strategy: this.normalizeOptionalString(overrideRules['strategy'] || baseRules['strategy']) || 'round-robin',
     }
   }

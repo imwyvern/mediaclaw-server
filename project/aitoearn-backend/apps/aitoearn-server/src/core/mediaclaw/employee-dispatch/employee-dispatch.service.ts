@@ -35,6 +35,14 @@ type DeliveryRecordDocument = Record<string, any>
 type VideoTaskRecord = Record<string, any>
 type PlatformAccountRecord = Record<string, any>
 
+interface PlatformAccountSummary {
+  id: string
+  platform: string
+  accountId: string
+  accountName: string
+  avatarUrl: string
+}
+
 interface AssignmentFilters {
   status?: string
   keyword?: string
@@ -50,6 +58,10 @@ interface DispatchRulesInput {
   assignmentIds?: string[]
   preferredPlatforms?: string[]
   preferredCategories?: string[]
+  templateIds?: string[]
+  accountTypes?: string[]
+  platformAccountIds?: string[]
+  platformAccountId?: string
   strategy?: string
 }
 
@@ -186,7 +198,7 @@ export class EmployeeDispatchService {
     ])
 
     return {
-      items: items.map(item => this.toAssignmentResponse(item)),
+      items: await this.buildAssignmentResponses(items),
       total,
       page,
       limit,
@@ -633,6 +645,12 @@ export class EmployeeDispatchService {
 
   private async dispatchTaskWithAssignment(task: VideoTaskRecord, assignment: AssignmentRecord) {
     const deliveryChannel = this.resolveDeliveryChannel(assignment)
+    const selectedPlatformAccount = this.asRecord(assignment['selectedPlatformAccount'])
+    const selectedPlatformAccountId = this.normalizeOptionalString(selectedPlatformAccount?.['id'])
+    const selectedPlatformAccountName = this.normalizeOptionalString(selectedPlatformAccount?.['accountName'])
+    const selectedPlatform = this.normalizePlatformName(selectedPlatformAccount?.['platform'])
+      || this.resolveTaskPlatform(task)
+    const taskAccountType = this.resolveTaskAccountType(task) || selectedPlatform
     const created = await this.deliveryRecordModel.create({
       orgId: assignment['orgId'],
       videoTaskId: task['_id'].toString(),
@@ -695,6 +713,18 @@ export class EmployeeDispatchService {
               employeeName: assignment['employeeName'] || '',
               employeePhone: assignment['employeePhone'] || '',
               webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+              selectedPlatformAccount: selectedPlatformAccount
+                ? {
+                    id: selectedPlatformAccountId,
+                    platform: selectedPlatform,
+                    accountId: this.normalizeOptionalString(selectedPlatformAccount['accountId']),
+                    accountName: selectedPlatformAccountName,
+                    avatarUrl: this.normalizeOptionalString(selectedPlatformAccount['avatarUrl']),
+                  }
+                : null,
+              platformAccountId: selectedPlatformAccountId,
+              platformAccountName: selectedPlatformAccountName,
+              platform: selectedPlatform,
               deliveryRecordId: created._id.toString(),
               deliveryChannel,
               assignedAt: processedAt.toISOString(),
@@ -711,6 +741,9 @@ export class EmployeeDispatchService {
             'metadata.distribution.manualPickupRequired': manualPickupRequired,
             'metadata.distribution.heartbeatPending': manualPickupRequired,
             'metadata.distribution.deliveryStatus': nextStatus,
+            'metadata.distribution.platform': selectedPlatform || this.resolveTaskPlatform(task),
+            'metadata.distribution.platformAccountId': selectedPlatformAccountId,
+            'metadata.distribution.accountType': taskAccountType,
             'metadata.distribution.pushedAt': nextStatus === DeliveryRecordStatus.PUSHED ? processedAt.toISOString() : null,
           },
           $push: {
@@ -723,6 +756,9 @@ export class EmployeeDispatchService {
                 deliveryChannel,
                 manualPickupRequired,
                 webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+                platform: selectedPlatform,
+                platformAccountId: selectedPlatformAccountId,
+                platformAccountName: selectedPlatformAccountName,
               },
             },
           },
@@ -737,6 +773,18 @@ export class EmployeeDispatchService {
             employeeName: assignment['employeeName'] || '',
             employeePhone: assignment['employeePhone'] || '',
             webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
+            selectedPlatformAccount: selectedPlatformAccount
+              ? {
+                  id: selectedPlatformAccountId,
+                  platform: selectedPlatform,
+                  accountId: this.normalizeOptionalString(selectedPlatformAccount['accountId']),
+                  accountName: selectedPlatformAccountName,
+                  avatarUrl: this.normalizeOptionalString(selectedPlatformAccount['avatarUrl']),
+                }
+              : null,
+            platformAccountId: selectedPlatformAccountId,
+            platformAccountName: selectedPlatformAccountName,
+            platform: selectedPlatform,
             deliveryRecordId: created._id.toString(),
             deliveryChannel,
             assignedAt: processedAt.toISOString(),
@@ -752,6 +800,9 @@ export class EmployeeDispatchService {
           'metadata.distribution.manualPickupRequired': false,
           'metadata.distribution.heartbeatPending': false,
           'metadata.distribution.deliveryStatus': DeliveryRecordStatus.FAILED,
+          'metadata.distribution.platform': selectedPlatform || this.resolveTaskPlatform(task),
+          'metadata.distribution.platformAccountId': selectedPlatformAccountId,
+          'metadata.distribution.accountType': taskAccountType,
         },
         $push: {
           'metadata.distribution.history': {
@@ -762,6 +813,9 @@ export class EmployeeDispatchService {
               assignmentId: assignment['_id'].toString(),
               deliveryChannel,
               failReason: reason,
+              platform: selectedPlatform,
+              platformAccountId: selectedPlatformAccountId,
+              platformAccountName: selectedPlatformAccountName,
             },
           },
         },
@@ -778,6 +832,9 @@ export class EmployeeDispatchService {
       status: nextStatus,
       reason,
       deliveryChannel,
+      platform: selectedPlatform,
+      platformAccountId: selectedPlatformAccountId,
+      platformAccountName: selectedPlatformAccountName,
     }
   }
 
@@ -805,34 +862,62 @@ export class EmployeeDispatchService {
     const taskCategories = this.resolveTaskCategories(task)
     const requestedPlatforms = new Set(rules.preferredPlatforms)
     const requestedCategories = new Set(rules.preferredCategories)
-    const platformLookup = await this.buildAssignmentPlatformLookup(assignments)
+    const accountLookup = await this.buildAssignmentAccountLookup(assignments)
+    const taskTemplateId = this.resolveTaskTemplateId(task)
+    const taskAccountType = this.resolveTaskAccountType(task)
 
-    return assignments.filter((assignment) => {
+    return assignments.flatMap((assignment) => {
       if (!this.isWithinDailyLimit(assignment)) {
-        return false
+        return []
       }
 
       if (requestedPlatforms.size > 0 && taskPlatform && !requestedPlatforms.has(taskPlatform)) {
-        return false
+        return []
       }
 
+      const platformAccounts = accountLookup.get(assignment['_id'].toString()) || []
       const assignmentPlatforms = new Set([
         ...this.normalizeStringList(assignment['distributionRules']?.['preferredPlatforms']),
-        ...(platformLookup.get(assignment['_id'].toString()) || []),
+        ...platformAccounts.map(account => account.platform),
       ])
-      if (taskPlatform && assignmentPlatforms.size > 0 && !assignmentPlatforms.has(taskPlatform)) {
-        return false
+      const shouldEnforcePlatformMatch = rules.platformAccountIds.length === 0
+      if (taskPlatform && shouldEnforcePlatformMatch && assignmentPlatforms.size > 0 && !assignmentPlatforms.has(taskPlatform)) {
+        return []
       }
 
       const categoryFilters = new Set([
         ...this.normalizeStringList(assignment['distributionRules']?.['preferredCategories']),
         ...requestedCategories,
       ])
-      if (categoryFilters.size === 0 || taskCategories.length === 0) {
-        return true
+      if (categoryFilters.size > 0 && taskCategories.length > 0 && !taskCategories.some(category => categoryFilters.has(category))) {
+        return []
       }
 
-      return taskCategories.some(category => categoryFilters.has(category))
+      if (!this.matchesTemplateRouting(taskTemplateId, assignment, rules)) {
+        return []
+      }
+
+      if (!this.matchesAccountTypeRouting(taskAccountType, assignment, rules)) {
+        return []
+      }
+
+      const selectedPlatformAccount = this.selectPlatformAccount(
+        assignment,
+        platformAccounts,
+        taskPlatform,
+        rules,
+      )
+      if (!selectedPlatformAccount) {
+        return []
+      }
+
+      return [
+        {
+          ...assignment,
+          selectedPlatformAccount,
+          platformAccounts,
+        },
+      ]
     })
   }
 
@@ -941,23 +1026,28 @@ export class EmployeeDispatchService {
     return DeliveryChannel.MANUAL
   }
 
-  private async buildAssignmentPlatformLookup(assignments: AssignmentRecord[]) {
+  private async buildAssignmentAccountLookup(assignments: AssignmentRecord[]) {
     const accountIds = Array.from(new Set(assignments.flatMap((assignment) => {
-      const ids = Array.isArray(assignment['platformAccountIds']) ? assignment['platformAccountIds'] : []
+      const ids = this.normalizeIdList(assignment['platformAccountIds'])
       return ids.filter((id: string) => Types.ObjectId.isValid(id)).map((id: string) => new Types.ObjectId(id))
     })))
 
     if (accountIds.length === 0) {
-      return new Map<string, string[]>()
+      return new Map<string, PlatformAccountSummary[]>()
     }
 
     const accounts = await this.platformAccountModel.find({ _id: { $in: accountIds } }).lean().exec() as PlatformAccountRecord[]
-    const accountPlatformMap = new Map(accounts.map(account => [account['_id'].toString(), String(account['platform'] || '').toLowerCase()]))
-    const assignmentPlatforms = new Map<string, string[]>()
+    const accountSummaryMap = new Map(accounts.map(account => [
+      account['_id'].toString(),
+      this.toPlatformAccountSummary(account),
+    ]))
+    const assignmentPlatforms = new Map<string, PlatformAccountSummary[]>()
 
     for (const assignment of assignments) {
-      const platforms = this.normalizeStringList((assignment['platformAccountIds'] || []).map((id: string) => accountPlatformMap.get(id) || ''))
-      assignmentPlatforms.set(assignment['_id'].toString(), platforms)
+      const platformAccounts = this.normalizeIdList(assignment['platformAccountIds'])
+        .map((id: string) => accountSummaryMap.get(id))
+        .filter(Boolean) as PlatformAccountSummary[]
+      assignmentPlatforms.set(assignment['_id'].toString(), platformAccounts)
     }
 
     return assignmentPlatforms
@@ -969,7 +1059,10 @@ export class EmployeeDispatchService {
     const employeeUserId = this.normalizeOptionalString(data['employeeUserId'] ?? existing?.['employeeUserId'])
     const platformAccountIds = await this.normalizePlatformAccountIds(orgId, data['platformAccountIds'] ?? existing?.['platformAccountIds'] ?? [])
     const status = this.normalizeStatus(data['status'], existing?.['status']) || EmployeeAssignmentStatus.ACTIVE
-    const distributionRules = this.normalizeDistributionRules(data['distributionRules'] ?? existing?.['distributionRules'])
+    const distributionRules = this.normalizeDistributionRules(
+      data['distributionRules'] ?? existing?.['distributionRules'],
+      platformAccountIds,
+    )
     const imBinding = this.normalizeImBindingPayload(data['imBinding'] ?? existing?.['imBinding'])
     const webhookUrl = this.normalizeWebhookUrl(
       this.hasOwn(data, 'webhookUrl') ? data['webhookUrl'] : existing?.['webhookUrl'],
@@ -997,12 +1090,20 @@ export class EmployeeDispatchService {
     }
   }
 
-  private normalizeDistributionRules(value: unknown) {
+  private normalizeDistributionRules(value: unknown, platformAccountIds: string[] = []) {
     const source = this.asRecord(value)
+    const defaultPlatformAccountId = this.normalizeOptionalString(source?.['defaultPlatformAccountId'])
+    if (defaultPlatformAccountId && !platformAccountIds.includes(defaultPlatformAccountId)) {
+      throw new BadRequestException('defaultPlatformAccountId must belong to platformAccountIds')
+    }
+
     return {
       maxDailyVideos: this.toPositiveInt(source?.['maxDailyVideos']),
       preferredPlatforms: this.normalizeStringList(source?.['preferredPlatforms']),
       preferredCategories: this.normalizeStringList(source?.['preferredCategories']),
+      templateIds: this.normalizeStringList(source?.['templateIds']),
+      accountTypes: this.normalizeStringList(source?.['accountTypes']),
+      defaultPlatformAccountId,
     }
   }
 
@@ -1012,6 +1113,13 @@ export class EmployeeDispatchService {
       assignmentIds: this.normalizeStringList(value.assignmentIds),
       preferredPlatforms: this.normalizeStringList(value.preferredPlatforms),
       preferredCategories: this.normalizeStringList(value.preferredCategories),
+      templateIds: this.normalizeStringList(value.templateIds),
+      accountTypes: this.normalizeStringList(value.accountTypes),
+      platformAccountIds: this.normalizeStringList([
+        ...(Array.isArray(value.platformAccountIds) ? value.platformAccountIds : []),
+        this.normalizeOptionalString(value.platformAccountId),
+      ]),
+      platformAccountId: this.normalizeOptionalString(value.platformAccountId),
       strategy: this.normalizeStrategy(value.strategy),
     }
   }
@@ -1044,7 +1152,7 @@ export class EmployeeDispatchService {
   }
 
   private async normalizePlatformAccountIds(orgId: string, value: unknown) {
-    const accountIds = this.normalizeStringList(value)
+    const accountIds = this.normalizeIdList(value)
     if (accountIds.length === 0) {
       return []
     }
@@ -1079,6 +1187,137 @@ export class EmployeeDispatchService {
     return this.normalizeStringList(accounts.map(account => String(account['platform'] || '')))
   }
 
+  private resolveTaskTemplateId(task: VideoTaskRecord) {
+    const candidates = [
+      task['metadata']?.['templateId'],
+      task['metadata']?.['distribution']?.['templateId'],
+      task['metadata']?.['productionBatch']?.['templateId'],
+      task['metadata']?.['subtitlePreferences']?.['templateId'],
+      task['templateId'],
+    ]
+
+    for (const candidate of candidates) {
+      const normalized = this.normalizeOptionalString(candidate).toLowerCase()
+      if (normalized) {
+        return normalized
+      }
+    }
+
+    return ''
+  }
+
+  private resolveTaskAccountType(task: VideoTaskRecord) {
+    const candidates = [
+      task['metadata']?.['accountType'],
+      task['metadata']?.['distribution']?.['accountType'],
+      task['metadata']?.['publishInfo']?.['accountType'],
+      task['metadata']?.['platformType'],
+    ]
+
+    for (const candidate of candidates) {
+      const normalized = this.normalizePlatformName(candidate)
+      if (normalized) {
+        return normalized
+      }
+    }
+
+    return this.resolveTaskPlatform(task)
+  }
+
+  private matchesTemplateRouting(
+    taskTemplateId: string,
+    assignment: AssignmentRecord,
+    rules: Required<DispatchRulesInput>,
+  ) {
+    const requestedTemplateIds = new Set(rules.templateIds)
+    if (requestedTemplateIds.size > 0 && (!taskTemplateId || !requestedTemplateIds.has(taskTemplateId))) {
+      return false
+    }
+
+    const assignmentTemplateIds = new Set(
+      this.normalizeStringList(assignment['distributionRules']?.['templateIds']),
+    )
+    if (assignmentTemplateIds.size > 0 && (!taskTemplateId || !assignmentTemplateIds.has(taskTemplateId))) {
+      return false
+    }
+
+    return true
+  }
+
+  private matchesAccountTypeRouting(
+    taskAccountType: string,
+    assignment: AssignmentRecord,
+    rules: Required<DispatchRulesInput>,
+  ) {
+    const requestedAccountTypes = new Set(rules.accountTypes)
+    if (requestedAccountTypes.size > 0 && (!taskAccountType || !requestedAccountTypes.has(taskAccountType))) {
+      return false
+    }
+
+    const assignmentAccountTypes = new Set(
+      this.normalizeStringList(assignment['distributionRules']?.['accountTypes']),
+    )
+    if (assignmentAccountTypes.size > 0 && (!taskAccountType || !assignmentAccountTypes.has(taskAccountType))) {
+      return false
+    }
+
+    return true
+  }
+
+  private selectPlatformAccount(
+    assignment: AssignmentRecord,
+    platformAccounts: PlatformAccountSummary[],
+    taskPlatform: string,
+    rules: Required<DispatchRulesInput>,
+  ) {
+    const requestedPlatformAccountIds = new Set(rules.platformAccountIds)
+    const defaultPlatformAccountId = this.normalizeOptionalString(
+      assignment['distributionRules']?.['defaultPlatformAccountId'],
+    )
+    const candidates = requestedPlatformAccountIds.size > 0
+      ? platformAccounts.filter(account => requestedPlatformAccountIds.has(account.id))
+      : [...platformAccounts]
+
+    if (requestedPlatformAccountIds.size > 0 && candidates.length === 0) {
+      return null
+    }
+
+    if (taskPlatform) {
+      const taskMatchedCandidates = candidates.filter(account => account.platform === taskPlatform)
+      const taskDefaultCandidate = defaultPlatformAccountId
+        ? taskMatchedCandidates.find(account => account.id === defaultPlatformAccountId)
+        : null
+      if (taskDefaultCandidate) {
+        return taskDefaultCandidate
+      }
+      if (taskMatchedCandidates.length > 0) {
+        return taskMatchedCandidates[0]
+      }
+      if (requestedPlatformAccountIds.size === 0 && platformAccounts.length > 0) {
+        return null
+      }
+    }
+
+    if (defaultPlatformAccountId) {
+      const defaultCandidate = candidates.find(account => account.id === defaultPlatformAccountId)
+      if (defaultCandidate) {
+        return defaultCandidate
+      }
+    }
+
+    if (candidates.length > 0) {
+      return candidates[0]
+    }
+
+    if (requestedPlatformAccountIds.size > 0) {
+      return null
+    }
+
+    return this.buildFallbackPlatformAccountSummary(
+      taskPlatform || this.normalizeStringList(assignment['distributionRules']?.['preferredPlatforms'])[0] || '',
+    )
+  }
+
   private isWithinDailyLimit(assignment: AssignmentRecord) {
     const dailyLimit = Number(assignment['distributionRules']?.['maxDailyVideos'] || assignment['dailyQuota'] || 0)
     if (dailyLimit <= 0) {
@@ -1102,7 +1341,8 @@ export class EmployeeDispatchService {
     const subtitle = this.normalizeOptionalString(task['copy']?.['subtitle'])
     const hashtags = this.normalizeStringList(task['copy']?.['hashtags']).map(tag => `#${tag}`)
     const publishGuide = this.resolvePublishGuide(task)
-    const primaryPlatform = this.resolveTaskPlatform(task)
+    const selectedPlatformAccount = this.asRecord(task['metadata']?.['distribution']?.['employeeDispatch']?.['selectedPlatformAccount'])
+    const primaryPlatform = this.normalizePlatformName(selectedPlatformAccount?.['platform']) || this.resolveTaskPlatform(task)
 
     return {
       videoTaskId: task['_id'].toString(),
@@ -1129,12 +1369,9 @@ export class EmployeeDispatchService {
     ]
 
     for (const candidate of candidates) {
-      const normalized = this.normalizeOptionalString(candidate).toLowerCase()
+      const normalized = this.normalizePlatformName(candidate)
       if (!normalized) {
         continue
-      }
-      if (normalized === 'xhs' || normalized === 'rednote') {
-        return 'xiaohongshu'
       }
       return normalized
     }
@@ -1296,6 +1533,33 @@ export class EmployeeDispatchService {
       .filter(Boolean)))
   }
 
+  private normalizeIdList(value: unknown) {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return Array.from(new Set(value
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item.trim().toLowerCase()
+        }
+        if (item && typeof (item as { toString?: () => string }).toString === 'function') {
+          const normalized = String(item).trim().toLowerCase()
+          return normalized && normalized !== '[object object]' ? normalized : ''
+        }
+        return ''
+      })
+      .filter(Boolean)))
+  }
+
+  private normalizePlatformName(value: unknown) {
+    const normalized = this.normalizeOptionalString(value).toLowerCase()
+    if (normalized === 'xhs' || normalized === 'rednote') {
+      return 'xiaohongshu'
+    }
+    return normalized
+  }
+
   private normalizeWebhookUrl(value: unknown) {
     const normalized = this.normalizeOptionalString(value)
     if (!normalized) {
@@ -1351,6 +1615,26 @@ export class EmployeeDispatchService {
 
   private toObjectIdIfValid(value: string) {
     return Types.ObjectId.isValid(value) ? new Types.ObjectId(value) : null
+  }
+
+  private toPlatformAccountSummary(account: PlatformAccountRecord): PlatformAccountSummary {
+    return {
+      id: account['_id'].toString(),
+      platform: this.normalizePlatformName(account['platform']),
+      accountId: this.normalizeOptionalString(account['accountId']),
+      accountName: this.normalizeOptionalString(account['accountName']),
+      avatarUrl: this.normalizeOptionalString(account['avatarUrl']),
+    }
+  }
+
+  private buildFallbackPlatformAccountSummary(platform: string): PlatformAccountSummary {
+    return {
+      id: '',
+      platform: this.normalizePlatformName(platform),
+      accountId: '',
+      accountName: '',
+      avatarUrl: '',
+    }
   }
 
   private buildDispatchTarget(assignment: AssignmentRecord): DispatchEmployeeTarget {
@@ -1452,10 +1736,31 @@ export class EmployeeDispatchService {
     return record
   }
 
-  private toAssignmentResponse(assignment: AssignmentRecord | null) {
+  private async buildAssignmentResponses(assignments: AssignmentRecord[]) {
+    const accountLookup = await this.buildAssignmentAccountLookup(assignments)
+    return assignments.map(assignment => this.serializeAssignmentResponse(
+      assignment,
+      accountLookup.get(assignment['_id'].toString()) || [],
+    ))
+  }
+
+  private async toAssignmentResponse(assignment: AssignmentRecord | null) {
     if (!assignment) {
       throw new NotFoundException('Employee assignment not found')
     }
+
+    const accountLookup = await this.buildAssignmentAccountLookup([assignment])
+    return this.serializeAssignmentResponse(
+      assignment,
+      accountLookup.get(assignment['_id'].toString()) || [],
+    )
+  }
+
+  private serializeAssignmentResponse(assignment: AssignmentRecord, platformAccounts: PlatformAccountSummary[]) {
+    const platformAccountIds = this.normalizeIdList(assignment['platformAccountIds'])
+    const defaultPlatformAccountId = this.normalizeOptionalString(
+      assignment['distributionRules']?.['defaultPlatformAccountId'],
+    )
 
     return {
       id: assignment['_id'].toString(),
@@ -1463,11 +1768,16 @@ export class EmployeeDispatchService {
       employeeName: assignment['employeeName'] || '',
       employeePhone: assignment['employeePhone'] || '',
       employeeUserId: assignment['employeeUserId'] || '',
-      platformAccountIds: assignment['platformAccountIds'] || [],
+      platformAccountIds,
+      platformAccounts,
+      defaultPlatformAccount: defaultPlatformAccountId
+        ? platformAccounts.find(account => account.id === defaultPlatformAccountId) || null
+        : null,
       imBinding: assignment['imBinding'] || {},
       webhookUrl: assignment['webhookUrl'] || '',
       status: assignment['status'] || EmployeeAssignmentStatus.ACTIVE,
       distributionRules: assignment['distributionRules'] || {},
+      platforms: this.normalizeStringList(assignment['platforms']),
       stats: assignment['stats'] || {
         totalAssigned: 0,
         totalPublished: 0,

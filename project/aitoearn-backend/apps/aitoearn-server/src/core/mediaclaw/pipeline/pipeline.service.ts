@@ -521,6 +521,9 @@ export class PipelineService {
       .map(target => target.assignmentId)
       .filter(Boolean)
     const targetPlatforms = targets.flatMap(target => target.targetPlatforms || [])
+    const targetPlatformAccountIds = targets
+      .map(target => this.normalizeOptionalString(this.asRecord(target.outputConfig)?.['platformAccountId']))
+      .filter(Boolean)
 
     return {
       assignmentIds: this.normalizeStringList([
@@ -537,6 +540,19 @@ export class PipelineService {
       preferredCategories: this.normalizeStringList(
         Array.isArray(source['preferredCategories']) ? source['preferredCategories'] : previous['preferredCategories'],
       ),
+      templateIds: this.normalizeStringList([
+        ...(Array.isArray(previous['templateIds']) ? previous['templateIds'] : []),
+        ...(Array.isArray(source['templateIds']) ? source['templateIds'] : []),
+      ]),
+      accountTypes: this.normalizeStringList([
+        ...(Array.isArray(previous['accountTypes']) ? previous['accountTypes'] : []),
+        ...(Array.isArray(source['accountTypes']) ? source['accountTypes'] : []),
+      ]),
+      platformAccountIds: this.normalizeStringList([
+        ...(Array.isArray(previous['platformAccountIds']) ? previous['platformAccountIds'] : []),
+        ...(Array.isArray(source['platformAccountIds']) ? source['platformAccountIds'] : []),
+        ...targetPlatformAccountIds,
+      ]),
       strategy: this.normalizeOptionalString(source['strategy'])
         || this.normalizeOptionalString(previous['strategy'])
         || 'round-robin',

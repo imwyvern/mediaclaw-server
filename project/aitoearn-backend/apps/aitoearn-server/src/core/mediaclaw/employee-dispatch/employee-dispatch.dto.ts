@@ -30,6 +30,20 @@ export class EmployeeDistributionRulesDto {
   @IsArray()
   @IsString({ each: true })
   preferredCategories?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  templateIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  accountTypes?: string[]
+
+  @IsOptional()
+  @IsMongoId()
+  defaultPlatformAccountId?: string
 }
 
 export class EmployeeImChannelBindingDto {
@@ -202,6 +216,25 @@ export class BatchDispatchRulesDto {
   @IsArray()
   @IsString({ each: true })
   preferredCategories?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  templateIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  accountTypes?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  platformAccountIds?: string[]
+
+  @IsOptional()
+  @IsMongoId()
+  platformAccountId?: string
 
   @IsOptional()
   @IsString()

@@ -180,6 +180,55 @@ describe('distributionService', () => {
     expect(result.assignment?.assignmentId).toBe(assignmentId)
   })
 
+  it('应在按管线分发时透传模板绑定与账号覆盖规则', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const pipelineId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId().toString()
+    const assignmentId = new Types.ObjectId().toString()
+    const platformAccountId = new Types.ObjectId().toString()
+    const overridePlatformAccountId = new Types.ObjectId().toString()
+
+    pipelineModel.findOne.mockReturnValue(createQuery({
+      _id: new Types.ObjectId(pipelineId),
+      orgId: new Types.ObjectId(orgId),
+      distributionRules: {
+        assignmentIds: [assignmentId],
+        preferredPlatforms: ['xiaohongshu'],
+        preferredCategories: ['beer'],
+        templateIds: ['b7-ai-live'],
+        accountTypes: ['xiaohongshu'],
+        platformAccountIds: [platformAccountId],
+        strategy: 'load-balance',
+      },
+    }))
+    employeeDispatchService.batchDispatch.mockResolvedValue({
+      total: 1,
+      dispatched: 1,
+      failed: 0,
+      pending: 0,
+      strategy: 'load-balance',
+      results: [],
+    })
+
+    await service.dispatchByPipelineRules(orgId, pipelineId, [taskId], {
+      platformAccountIds: [overridePlatformAccountId],
+    })
+
+    expect(employeeDispatchService.batchDispatch).toHaveBeenCalledWith(
+      orgId,
+      [taskId],
+      expect.objectContaining({
+        assignmentIds: [assignmentId],
+        preferredPlatforms: ['xiaohongshu'],
+        preferredCategories: ['beer'],
+        templateIds: ['b7-ai-live'],
+        accountTypes: ['xiaohongshu'],
+        platformAccountIds: expect.arrayContaining([platformAccountId, overridePlatformAccountId]),
+        strategy: 'load-balance',
+      }),
+    )
+  })
+
   it('应在48小时未确认发布后将任务标记为 expired', async () => {
     const orgId = new Types.ObjectId().toString()
     const taskId = new Types.ObjectId()

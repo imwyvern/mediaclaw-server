@@ -138,6 +138,21 @@ export class PipelineDistributionRulesDto {
   preferredCategories?: string[]
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  templateIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  accountTypes?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  platformAccountIds?: string[]
+
+  @IsOptional()
   @IsString()
   strategy?: string
 
