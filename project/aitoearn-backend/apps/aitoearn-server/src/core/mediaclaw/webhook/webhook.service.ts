@@ -1,9 +1,17 @@
-import { createHmac, randomBytes } from 'node:crypto'
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { randomBytes } from 'node:crypto'
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Webhook } from '@yikart/mongodb'
 import axios from 'axios'
 import { Model, Types } from 'mongoose'
+import {
+  buildWebhookRequest,
+  canonicalizeWebhookEvent,
+  detectWebhookProvider,
+  expandWebhookEvents,
+  normalizeWebhookEvents,
+  verifyGenericWebhookSignature,
+} from './webhook-delivery.util'
 
 interface RegisterWebhookOptions {
   name?: string
@@ -35,9 +43,20 @@ interface WebhookUpdateInput {
   secret?: string
 }
 
+interface WebhookTriggerResult {
+  id: string
+  provider: string
+  success: boolean
+  attempts: number
+  statusCode?: number
+  error?: string
+}
+
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name)
+  private readonly maxRetryAttempts = 5
+  private readonly baseRetryDelayMs = 500
 
   constructor(
     @InjectModel(Webhook.name) private readonly webhookModel: Model<Webhook>,
@@ -49,12 +68,13 @@ export class WebhookService {
     events: string[],
     options: RegisterWebhookOptions = {},
   ) {
+    const normalizedUrl = this.normalizeUrl(url)
     const webhook = await this.webhookModel.create({
       orgId: new Types.ObjectId(orgId),
-      name: options.name?.trim() || this.buildDefaultName(url),
-      url,
+      name: options.name?.trim() || this.buildDefaultName(normalizedUrl),
+      url: normalizedUrl,
       secret: options.secret || randomBytes(24).toString('hex'),
-      events: this.normalizeEvents(events),
+      events: normalizeWebhookEvents(events),
       isActive: options.isActive ?? true,
       lastTriggeredAt: null,
       failCount: 0,
@@ -88,11 +108,11 @@ export class WebhookService {
     }
 
     if ('url' in data && typeof data.url === 'string') {
-      payload['url'] = data.url
+      payload['url'] = this.normalizeUrl(data.url)
     }
 
     if ('events' in data) {
-      payload['events'] = this.normalizeEvents(data.events || [])
+      payload['events'] = normalizeWebhookEvents(data.events || [])
     }
 
     if ('isActive' in data && typeof data.isActive === 'boolean') {
@@ -127,77 +147,63 @@ export class WebhookService {
   }
 
   async trigger(event: string, payload: WebhookPayload) {
+    const normalizedEvent = canonicalizeWebhookEvent(event)
+    if (!normalizedEvent) {
+      throw new BadRequestException('event is required')
+    }
+
     const resolvedOrgId = this.resolveOrgId(payload)
     const query: Record<string, unknown> = {
       isActive: true,
-      events: event,
+      events: {
+        $in: [...expandWebhookEvents(normalizedEvent), '*'],
+      },
     }
 
     if (resolvedOrgId) {
       query['orgId'] = new Types.ObjectId(resolvedOrgId)
     }
 
-    const webhooks = await this.webhookModel.find(query).exec()
-    const timestamp = new Date().toISOString()
-    const delivery = {
-      event,
-      timestamp,
-      payload,
-    }
-    const rawBody = JSON.stringify(delivery)
-
-    const results = await Promise.all(webhooks.map(async (webhook) => {
-      const signature = createHmac('sha256', webhook.secret).update(rawBody).digest('hex')
-
-      try {
-        await axios.post(webhook.url, delivery, {
-          headers: {
-            'content-type': 'application/json',
-            'x-mediaclaw-event': event,
-            'x-mediaclaw-signature': signature,
-            'x-mediaclaw-timestamp': timestamp,
-          },
-          timeout: 5000,
-        })
-
-        await this.webhookModel.findByIdAndUpdate(webhook._id, {
-          lastTriggeredAt: new Date(),
-          failCount: 0,
-        }).exec()
-
-        return {
-          id: webhook._id.toString(),
-          success: true,
-        }
-      }
-      catch (error) {
-        await this.webhookModel.findByIdAndUpdate(webhook._id, {
-          $inc: { failCount: 1 },
-        }).exec()
-
-        const message = error instanceof Error ? error.message : String(error)
-        this.logger.warn({
-          message: 'Webhook delivery failed',
-          webhookId: webhook._id.toString(),
-          event,
-          error: message,
-        })
-
-        return {
-          id: webhook._id.toString(),
-          success: false,
-          error: message,
-        }
-      }
-    }))
+    const webhooks = await this.webhookModel.find(query).lean().exec()
+    const results = await Promise.all(
+      webhooks.map((webhook: WebhookRecord) => this.deliverWebhook(webhook, normalizedEvent, payload)),
+    )
 
     return {
-      event,
+      event: normalizedEvent,
       total: results.length,
-      successCount: results.filter(result => result.success).length,
-      failureCount: results.filter(result => !result.success).length,
+      successCount: results.filter((result: WebhookTriggerResult) => result.success).length,
+      failureCount: results.filter((result: WebhookTriggerResult) => !result.success).length,
       results,
     }
+  }
+
+  async testDelivery(orgId: string, id: string, event: string, payload: WebhookPayload = {}) {
+    const webhook = await this.webhookModel.findOne(this.buildOwnedQuery(orgId, id)).lean().exec()
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found')
+    }
+
+    const normalizedEvent = canonicalizeWebhookEvent(event)
+    if (!normalizedEvent) {
+      throw new BadRequestException('event is required')
+    }
+
+    const result = await this.deliverWebhook(
+      webhook as WebhookRecord,
+      normalizedEvent,
+      payload,
+      true,
+    )
+
+    return {
+      event: normalizedEvent,
+      ...result,
+    }
+  }
+
+  verifySignature(rawBody: string, timestamp: string, signature: string, secret: string) {
+    return verifyGenericWebhookSignature(rawBody, timestamp, secret, signature)
   }
 
   private buildDefaultName(url: string) {
@@ -210,8 +216,102 @@ export class WebhookService {
     }
   }
 
-  private normalizeEvents(events: string[]) {
-    return [...new Set((events || []).map(event => event.trim()).filter(Boolean))]
+  private async deliverWebhook(
+    webhook: WebhookRecord,
+    event: string,
+    payload: WebhookPayload,
+    isTest = false,
+  ): Promise<WebhookTriggerResult> {
+    const occurredAt = new Date().toISOString()
+    const provider = detectWebhookProvider(webhook.url)
+    let lastError = ''
+    let lastStatusCode: number | undefined
+
+    for (let attempt = 1; attempt <= this.maxRetryAttempts; attempt += 1) {
+      const request = buildWebhookRequest(webhook.url, webhook.secret, {
+        event,
+        timestamp: occurredAt,
+        payload,
+        isTest,
+      })
+
+      try {
+        const response = await axios.post(request.url, request.body, {
+          headers: request.headers,
+          timeout: 5000,
+        })
+
+        await this.webhookModel.findByIdAndUpdate(webhook._id, {
+          lastTriggeredAt: new Date(),
+          failCount: 0,
+        }).exec()
+
+        return {
+          id: this.toObjectIdString(webhook._id) || '',
+          provider,
+          success: true,
+          attempts: attempt,
+          statusCode: response.status,
+        }
+      }
+      catch (error) {
+        lastError = error instanceof Error ? error.message : String(error)
+        lastStatusCode = this.resolveStatusCode(error)
+
+        this.logger.warn({
+          message: 'Webhook delivery failed',
+          webhookId: this.toObjectIdString(webhook._id) || '',
+          event,
+          provider,
+          attempt,
+          error: lastError,
+          statusCode: lastStatusCode,
+        })
+
+        if (attempt < this.maxRetryAttempts) {
+          await this.sleep(this.resolveRetryDelayMs(attempt))
+        }
+      }
+    }
+
+    await this.webhookModel.findByIdAndUpdate(webhook._id, {
+      $inc: { failCount: 1 },
+    }).exec()
+
+    return {
+      id: this.toObjectIdString(webhook._id) || '',
+      provider,
+      success: false,
+      attempts: this.maxRetryAttempts,
+      statusCode: lastStatusCode,
+      error: lastError || 'Webhook delivery failed',
+    }
+  }
+
+  private resolveRetryDelayMs(attempt: number) {
+    return this.baseRetryDelayMs * (2 ** Math.max(0, attempt - 1))
+  }
+
+  private async sleep(delayMs: number) {
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+
+  private resolveStatusCode(error: unknown) {
+    if (axios.isAxiosError(error)) {
+      return error.response?.status
+    }
+
+    return undefined
+  }
+
+  private normalizeUrl(value: string) {
+    const normalized = value.trim()
+    try {
+      return new URL(normalized).toString()
+    }
+    catch {
+      throw new BadRequestException('url must be a valid URL')
+    }
   }
 
   private resolveOrgId(payload: WebhookPayload) {
@@ -269,10 +369,11 @@ export class WebhookService {
       orgId,
       name: webhook.name,
       url: webhook.url,
+      provider: detectWebhookProvider(webhook.url),
       secret: options.includeSecret ? webhook.secret : undefined,
       hasSecret: Boolean(webhook.secret),
       secretPreview: webhook.secret ? `${String(webhook.secret).slice(0, 4)}...` : null,
-      events: webhook.events || [],
+      events: normalizeWebhookEvents(webhook.events || []),
       isActive: webhook.isActive ?? true,
       lastTriggeredAt: webhook.lastTriggeredAt || null,
       failCount: webhook.failCount || 0,

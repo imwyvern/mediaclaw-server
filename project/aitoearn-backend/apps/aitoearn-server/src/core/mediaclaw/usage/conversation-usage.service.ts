@@ -5,14 +5,15 @@ import {
   ConversationIntent,
   ConversationUsage,
   NotificationEvent,
-  OrgType,
   Organization,
+  OrgType,
   Subscription,
   SubscriptionPlan,
   SubscriptionStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { NotificationService } from '../notification/notification.service'
+import { WebhookService } from '../webhook/webhook.service'
 
 interface ConversationUsageScope {
   userId: string
@@ -91,6 +92,8 @@ export class ConversationUsageService {
     private readonly subscriptionModel: Model<Subscription>,
     @Optional()
     private readonly notificationService?: NotificationService,
+    @Optional()
+    private readonly webhookService?: WebhookService,
   ) {}
 
   async track(scope: ConversationUsageScope, input: TrackConversationInput) {
@@ -403,16 +406,22 @@ export class ConversationUsageService {
       },
     }).exec()
 
-    await this.notificationService.sendNotification(
-      organization._id.toString(),
-      nextEvent,
-      {
-        relatedId: organization._id.toString(),
-        totalTokens: summary.quota.total,
-        usedTokens: summary.quota.used,
-        usageRate: summary.quota.usageRate,
-      },
-    )
+    const webhookPayload = {
+      orgId: organization._id.toString(),
+      relatedId: organization._id.toString(),
+      totalTokens: summary.quota.total,
+      usedTokens: summary.quota.used,
+      usageRate: summary.quota.usageRate,
+    }
+
+    await Promise.allSettled([
+      this.notificationService.sendNotification(
+        organization._id.toString(),
+        nextEvent,
+        webhookPayload,
+      ),
+      this.webhookService?.trigger(nextEvent, webhookPayload),
+    ])
   }
 
   private resolvePlanQuota(input: {

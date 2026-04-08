@@ -8,5 +8,5 @@ describeModuleSpec<WebhookService>({
   module: WebhookModule,
   service: WebhookService,
   controller: WebhookController,
-  keyMethods: ['register', 'listByOrg', 'trigger'],
+  keyMethods: ['register', 'listByOrg', 'trigger', 'testDelivery'],
 })

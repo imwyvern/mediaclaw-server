@@ -20,11 +20,12 @@ import {
 } from '@yikart/mongodb'
 import { MediaClawApiKeyModule } from '../apikey/apikey.module'
 import { NotificationModule } from '../notification/notification.module'
+import { WebhookModule } from '../webhook/webhook.module'
 import { ConversationUsageService } from './conversation-usage.service'
-import { UsageApiController } from './usage-api.controller'
-import { UsageController } from './usage.controller'
 import { UsageReconciliationService } from './reconciliation.service'
+import { UsageApiController } from './usage-api.controller'
 import { UsageTrackingInterceptor } from './usage-tracking.interceptor'
+import { UsageController } from './usage.controller'
 import { UsageService } from './usage.service'
 
 @Global()
@@ -42,6 +43,7 @@ import { UsageService } from './usage.service'
     ]),
     MediaClawApiKeyModule,
     NotificationModule,
+    WebhookModule,
   ],
   controllers: [UsageController, UsageApiController],
   providers: [

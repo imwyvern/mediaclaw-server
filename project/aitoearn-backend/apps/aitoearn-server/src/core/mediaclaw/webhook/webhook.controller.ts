@@ -12,6 +12,11 @@ interface WebhookUpdateBody {
   isActive?: boolean
 }
 
+interface WebhookTestBody {
+  event: string
+  payload?: Record<string, unknown>
+}
+
 @MediaClawApiController('api/v1/webhook')
 export class WebhookController {
   constructor(private readonly webhookService: WebhookService) {}
@@ -61,5 +66,19 @@ export class WebhookController {
   @Delete(':id')
   async remove(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.webhookService.delete(user.orgId || user.id, id)
+  }
+
+  @Post(':id/test')
+  async test(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: WebhookTestBody,
+  ) {
+    return this.webhookService.testDelivery(
+      user.orgId || user.id,
+      id,
+      body.event,
+      body.payload || {},
+    )
   }
 }
