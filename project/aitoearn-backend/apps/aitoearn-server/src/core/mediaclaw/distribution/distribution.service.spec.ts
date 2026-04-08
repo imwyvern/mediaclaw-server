@@ -113,6 +113,10 @@ describe('distributionService', () => {
       _id: new Types.ObjectId(taskId),
       orgId: new Types.ObjectId(orgId),
       status: VideoTaskStatus.COMPLETED,
+      outputVideoUrl: 'https://cdn.example.com/task.mp4',
+      dedup: {
+        status: 'passed',
+      },
       metadata: {
         platform: 'xiaohongshu',
         contentTags: ['beauty'],
@@ -188,6 +192,16 @@ describe('distributionService', () => {
     const platformAccountId = new Types.ObjectId().toString()
     const overridePlatformAccountId = new Types.ObjectId().toString()
 
+    videoTaskModel.find.mockReturnValue(createQuery([
+      {
+        _id: new Types.ObjectId(taskId),
+        orgId: new Types.ObjectId(orgId),
+        outputVideoUrl: 'https://cdn.example.com/task.mp4',
+        dedup: {
+          status: 'passed',
+        },
+      },
+    ]))
     pipelineModel.findOne.mockReturnValue(createQuery({
       _id: new Types.ObjectId(pipelineId),
       orgId: new Types.ObjectId(orgId),
@@ -226,6 +240,30 @@ describe('distributionService', () => {
         platformAccountIds: expect.arrayContaining([platformAccountId, overridePlatformAccountId]),
         strategy: 'load-balance',
       }),
+    )
+  })
+
+  it('应在内容去重未通过时阻止按规则分发', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId().toString()
+    const task = {
+      _id: new Types.ObjectId(taskId),
+      orgId: new Types.ObjectId(orgId),
+      status: VideoTaskStatus.COMPLETED,
+      outputVideoUrl: 'https://cdn.example.com/task.mp4',
+      dedup: {
+        status: 'pending',
+      },
+      metadata: {},
+      toObject() {
+        return this
+      },
+    }
+
+    videoTaskModel.findOne.mockReturnValue(createQuery(task))
+
+    await expect(service.assignByRule(orgId, taskId)).rejects.toThrow(
+      'Content dedup has not passed yet',
     )
   })
 

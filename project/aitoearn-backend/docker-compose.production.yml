@@ -11,6 +11,7 @@ services:
       MONGODB_PORT: 27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      MILVUS_ADDRESS: ${MILVUS_ADDRESS:-milvus:19530}
     command:
       - sh
       - -lc
@@ -52,6 +53,7 @@ services:
       MONGODB_PORT: 27017
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      MILVUS_ADDRESS: ${MILVUS_ADDRESS:-milvus:19530}
     command:
       - sh
       - -lc
@@ -164,6 +166,76 @@ services:
     networks:
       - mediaclaw-net
 
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    profiles:
+      - vector
+    command:
+      - /usr/local/bin/etcd
+      - --data-dir
+      - /etcd
+      - --advertise-client-urls
+      - http://0.0.0.0:2379
+      - --listen-client-urls
+      - http://0.0.0.0:2379
+    restart: unless-stopped
+    volumes:
+      - milvus-etcd-data:/etcd
+    mem_limit: ${ETCD_MEM_LIMIT:-256m}
+    cpus: ${ETCD_CPUS:-0.50}
+    networks:
+      - mediaclaw-net
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    profiles:
+      - vector
+    command:
+      - minio
+      - server
+      - /minio_data
+      - --console-address
+      - :9001
+    environment:
+      MINIO_ROOT_USER: ${MILVUS_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MILVUS_MINIO_SECRET_KEY:-minioadmin}
+    restart: unless-stopped
+    volumes:
+      - milvus-minio-data:/minio_data
+    mem_limit: ${MILVUS_MINIO_MEM_LIMIT:-512m}
+    cpus: ${MILVUS_MINIO_CPUS:-0.50}
+    networks:
+      - mediaclaw-net
+
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    profiles:
+      - vector
+    command:
+      - milvus
+      - run
+      - standalone
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      COMMON_STORAGETYPE: minio
+      MINIO_ACCESS_KEY: ${MILVUS_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MILVUS_MINIO_SECRET_KEY:-minioadmin}
+    restart: unless-stopped
+    depends_on:
+      etcd:
+        condition: service_started
+      milvus-minio:
+        condition: service_started
+    ports:
+      - 127.0.0.1:${MILVUS_HOST_PORT:-19530}:19530
+    volumes:
+      - milvus-data:/var/lib/milvus
+    mem_limit: ${MILVUS_MEM_LIMIT:-2048m}
+    cpus: ${MILVUS_CPUS:-2.00}
+    networks:
+      - mediaclaw-net
+
   nginx:
     image: nginx:1.29-alpine
     env_file:
@@ -200,6 +272,9 @@ volumes:
   mongodb-data:
   redis-data:
   rustfs-data:
+  milvus-etcd-data:
+  milvus-minio-data:
+  milvus-data:
   api-logs:
   worker-logs:
   nginx-logs:

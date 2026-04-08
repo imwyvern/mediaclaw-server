@@ -191,6 +191,8 @@ export class DistributionService {
       throw new BadRequestException('Only completed or approved content can be distributed')
     }
 
+    this.assertDedupPassed(task)
+
     const normalizedTargets = this.normalizeTargets(targets)
     const timestamp = new Date().toISOString()
     const pushRecords: DistributionTargetRecord[] = normalizedTargets.map(target => ({
@@ -362,6 +364,8 @@ export class DistributionService {
       throw new BadRequestException('videoTaskIds is required')
     }
 
+    await this.assertTaskListDedupPassed(orgId, normalizedTaskIds)
+
     if (!Types.ObjectId.isValid(pipelineId)) {
       throw new BadRequestException('pipelineId is invalid')
     }
@@ -396,6 +400,7 @@ export class DistributionService {
 
   async assignByRule(orgId: string, contentId: string) {
     const task = await this.getTaskOrFail(orgId, contentId)
+    this.assertDedupPassed(task)
     const taskId = task._id.toString()
     const ruleResult = await this.evaluateRules(
       orgId,
@@ -577,7 +582,8 @@ export class DistributionService {
     const taskId = task._id?.toString()
     const orgId = task.orgId?.toString() || null
     const pipelineId = task.pipelineId?.toString() || null
-    const employeeDispatch = this.employeeDispatchService && taskId
+    const autoDispatchEnabled = this.hasDedupPassed(task)
+    const employeeDispatch = this.employeeDispatchService && taskId && autoDispatchEnabled
       ? await (pipelineId && orgId
           ? this.dispatchByPipelineRules(orgId, pipelineId, [taskId])
           : orgId
@@ -606,6 +612,18 @@ export class DistributionService {
       quality: task.quality,
       metadata: task.metadata,
       employeeDispatch,
+      dedupGate: {
+        passed: autoDispatchEnabled,
+        status: task.dedup?.status || '',
+      },
+    }
+
+    if (!autoDispatchEnabled && taskId) {
+      this.logger.log({
+        message: 'Skip auto distribution until dedup passes',
+        taskId,
+        dedupStatus: task.dedup?.status || 'pending',
+      })
     }
 
     this.logger.log({
@@ -1080,6 +1098,42 @@ export class DistributionService {
     }
 
     return null
+  }
+
+  private async assertTaskListDedupPassed(orgId: string, taskIds: string[]) {
+    const normalizedIds = taskIds.map(id => this.toDocumentId(id))
+    const tasks = await this.videoTaskModel.find({
+      _id: { $in: normalizedIds },
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }).lean().exec() as Array<Record<string, any>>
+
+    if (tasks.length !== normalizedIds.length) {
+      throw new NotFoundException('Content not found')
+    }
+
+    tasks.forEach(task => this.assertDedupPassed(task))
+  }
+
+  private assertDedupPassed(task: VideoTask | Record<string, any>) {
+    const outputUrl = this.normalizeOptionalString(
+      task.outputVideoUrl
+      || task.output?.url
+      || task.metadata?.outputVideoUrl,
+    )
+
+    if (!outputUrl) {
+      return
+    }
+
+    if (this.hasDedupPassed(task)) {
+      return
+    }
+
+    throw new BadRequestException('Content dedup has not passed yet')
+  }
+
+  private hasDedupPassed(task: VideoTask | Record<string, any>) {
+    return this.normalizeOptionalString(task.dedup?.status) === 'passed'
   }
 
   private resolvePublishStatus(task: VideoTask | Record<string, any>): DistributionPublishStatus {

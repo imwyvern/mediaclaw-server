@@ -12,6 +12,9 @@ export class ContentHash extends WithTimestampSchema {
   @Prop({ required: true, type: MongooseSchema.Types.ObjectId, index: true })
   orgId: MongooseSchema.Types.ObjectId
 
+  @Prop({ type: String, default: null, index: true })
+  projectId: string | null
+
   @Prop({ required: true, type: String, index: true })
   hash: string
 
@@ -20,7 +23,17 @@ export class ContentHash extends WithTimestampSchema {
 
   @Prop({ type: String, default: 'video_task' })
   contentType: string
+
+  @Prop({ type: String, default: '' })
+  url: string
+
+  @Prop({ type: String, default: '' })
+  imageUrl: string
+
+  @Prop({ type: Object, default: {} })
+  metadata: Record<string, any>
 }
 
 export const ContentHashSchema = SchemaFactory.createForClass(ContentHash)
-ContentHashSchema.index({ orgId: 1, hash: 1 }, { unique: true })
+ContentHashSchema.index({ orgId: 1, projectId: 1, hash: 1 }, { unique: true })
+ContentHashSchema.index({ orgId: 1, projectId: 1, url: 1 })

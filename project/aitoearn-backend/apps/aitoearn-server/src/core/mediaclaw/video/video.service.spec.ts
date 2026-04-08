@@ -1,5 +1,8 @@
+import { ProductionBatchStatus, VideoTaskStatus } from '@yikart/mongodb'
 import { Types } from 'mongoose'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { VideoService } from './video.service'
 
 vi.mock('@yikart/mongodb', () => {
   class Brand {}
@@ -38,9 +41,6 @@ vi.mock('@yikart/mongodb', () => {
   }
 })
 
-import { ProductionBatchStatus, VideoTaskStatus } from '@yikart/mongodb'
-import { VideoService } from './video.service'
-
 function createQuery<T>(value: T) {
   const query = {
     lean: vi.fn(),
@@ -56,7 +56,7 @@ function createQuery<T>(value: T) {
   return query
 }
 
-describe('VideoService batch status', () => {
+describe('videoService batch status', () => {
   const batchId = new Types.ObjectId().toString()
   const taskId = new Types.ObjectId().toString()
 
@@ -206,6 +206,49 @@ describe('VideoService batch status', () => {
           }),
         }),
       }),
+    )
+  })
+
+  it('应在任务产出完成时将 dedup 状态置为 pending', async () => {
+    const completedTaskId = new Types.ObjectId().toString()
+
+    videoTaskModel.findById.mockReturnValue(createQuery({
+      _id: new Types.ObjectId(completedTaskId),
+      userId: new Types.ObjectId().toString(),
+      orgId: new Types.ObjectId(),
+      status: VideoTaskStatus.QUALITY_CHECK,
+      metadata: {
+        coverUrl: 'https://cdn.test/cover.jpg',
+      },
+    }))
+    videoTaskModel.findByIdAndUpdate.mockReturnValue(createQuery({
+      _id: new Types.ObjectId(completedTaskId),
+      status: VideoTaskStatus.COMPLETED,
+    }))
+
+    await service.updateStatus(completedTaskId, VideoTaskStatus.COMPLETED, {
+      outputVideoUrl: 'https://cdn.test/final.mp4',
+      metadata: {
+        coverUrl: 'https://cdn.test/cover.jpg',
+      },
+    })
+
+    expect(videoTaskModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      completedTaskId,
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          'dedup.status': 'pending',
+          'dedup.score': 0,
+          'dedup.matchedTaskIds': [],
+          'dedup.metadata': expect.objectContaining({
+            phase: 'pending',
+            reason: 'awaiting_batch_dedup',
+            contentUrl: 'https://cdn.test/final.mp4',
+            imageUrl: 'https://cdn.test/cover.jpg',
+          }),
+        }),
+      }),
+      { new: true },
     )
   })
 })

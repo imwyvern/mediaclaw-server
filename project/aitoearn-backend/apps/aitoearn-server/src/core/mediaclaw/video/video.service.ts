@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { InjectQueue } from "@nestjs/bullmq";
 import {
   BadRequestException,
@@ -572,6 +573,31 @@ export class VideoService {
     if (data?.metadata) {
       for (const [key, value] of Object.entries(data.metadata)) {
         updateSet[`metadata.${key}`] = value;
+      }
+    }
+
+    if (status === VideoTaskStatus.COMPLETED) {
+      const completedContentUrl = this.resolveCompletedContentUrl(task, data);
+      if (completedContentUrl) {
+        const dedupImageUrl = this.resolveDedupImageUrl(task, data);
+        updateSet["dedup.hash"] = this.createContentHash(
+          completedContentUrl.toLowerCase(),
+        );
+        updateSet["dedup.status"] = "pending";
+        updateSet["dedup.score"] = 0;
+        updateSet["dedup.matchedTaskIds"] = [];
+        updateSet["dedup.metadata"] = {
+          phase: "pending",
+          reason: "awaiting_batch_dedup",
+          pendingAt: transitionedAt.toISOString(),
+          contentUrl: completedContentUrl,
+          imageUrl: dedupImageUrl,
+          projectId:
+            task.pipelineId?.toString?.() ||
+            task.brandId?.toString?.() ||
+            task.orgId?.toString?.() ||
+            "",
+        };
       }
     }
 
@@ -1399,6 +1425,58 @@ export class VideoService {
     ]
       .filter(Boolean)
       .join(" | ");
+  }
+
+  private resolveCompletedContentUrl(
+    task: Record<string, any>,
+    data?: UpdateTaskStatusInput,
+  ) {
+    const candidates = [
+      data?.outputVideoUrl,
+      task["outputVideoUrl"],
+      task["output"]?.["url"],
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+
+    return "";
+  }
+
+  private resolveDedupImageUrl(
+    task: Record<string, any>,
+    data?: UpdateTaskStatusInput,
+  ) {
+    const candidates = [
+      data?.metadata?.["coverUrl"],
+      data?.metadata?.["thumbnailUrl"],
+      data?.metadata?.["posterUrl"],
+      data?.metadata?.["coverImageUrl"],
+      data?.metadata?.["imageUrl"],
+      task["output"]?.["metadata"]?.["coverUrl"],
+      task["output"]?.["metadata"]?.["thumbnailUrl"],
+      task["output"]?.["metadata"]?.["posterUrl"],
+      task["metadata"]?.["coverUrl"],
+      task["metadata"]?.["thumbnailUrl"],
+      task["metadata"]?.["posterUrl"],
+      task["metadata"]?.["coverImageUrl"],
+      task["metadata"]?.["imageUrl"],
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+
+    return "";
+  }
+
+  private createContentHash(content: string) {
+    return createHash("sha256").update(content).digest("hex");
   }
 
   private buildResolution(quality: Record<string, any>) {
