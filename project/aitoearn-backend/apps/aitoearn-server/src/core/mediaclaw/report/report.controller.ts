@@ -18,9 +18,19 @@ export class ReportController {
         start: string
         end: string
       }
+      formats?: string[]
+      waitForCompletion?: boolean
     },
   ) {
-    return this.reportService.generateReport(user.orgId || user.id, body.type, body.period)
+    return this.reportService.generateReport(
+      user.orgId || user.id,
+      body.type,
+      body.period,
+      {
+        formats: body.formats,
+        waitForCompletion: body.waitForCompletion,
+      },
+    )
   }
 
   @Post('schedule')
@@ -48,6 +58,15 @@ export class ReportController {
   @Get(':id')
   async detail(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.reportService.getReport(user.orgId || user.id, id)
+  }
+
+  @Get(':id/files/:format')
+  async file(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Param('format') format: string,
+  ) {
+    return this.reportService.getReportFile(user.orgId || user.id, id, format)
   }
 
   @Delete(':id')

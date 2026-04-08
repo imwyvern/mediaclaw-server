@@ -119,9 +119,10 @@ export class DataDashboardService {
     @InjectModel(Subscription.name) private readonly subscriptionModel: Model<Subscription>,
   ) {}
 
-  async getOverview(orgId: string) {
-    const health = await this.getContentHealth(orgId)
-    const activity = await this.buildOverviewActivity(orgId)
+  async getOverview(orgId: string, period = 30) {
+    const windowDays = this.normalizePresetWindow(period, 30)
+    const health = await this.getContentHealth(orgId, windowDays)
+    const activity = await this.buildOverviewActivity(orgId, windowDays)
     const recentVideos = await this.videoTaskModel.find(
       this.buildOrgMatch(orgId),
       {
@@ -152,7 +153,9 @@ export class DataDashboardService {
       orgId,
       source: health.source,
       dashboardTier: health.dashboardTier,
-      windowDays: health.windowDays,
+      windowDays,
+      selectedWindow: windowDays,
+      supportedWindows: [7, 30, 90],
       summary: {
         totalVideos,
         completedVideos,
@@ -170,32 +173,35 @@ export class DataDashboardService {
     }
   }
 
-  async getContentHealth(orgId: string) {
+  async getContentHealth(orgId: string, period = 30) {
+    const windowDays = this.normalizePresetWindow(period, 30)
     const [tier, payload] = await Promise.all([
       this.getDashboardTier(orgId),
-      this.buildContentHealthPayload(orgId),
+      this.buildContentHealthPayload(orgId, windowDays),
     ])
 
     return this.applyTierVisibility(tier, payload)
   }
 
-  async getCompetitorBenchmark(orgId: string, industry: string) {
-    const last30Days = this.buildDaysAgo(30)
+  async getCompetitorBenchmark(orgId: string, industry: string, period = 30) {
+    const windowDays = this.normalizePresetWindow(period, 30)
+    const since = this.buildDaysAgo(windowDays)
 
     const [tier, resolvedIndustry, health, benchmark] = await Promise.all([
       this.getDashboardTier(orgId),
       this.getResolvedIndustry(orgId, industry),
-      this.buildContentHealthPayload(orgId),
-      this.getIndustryBenchmark(industry, last30Days),
+      this.buildContentHealthPayload(orgId, windowDays),
+      this.getIndustryBenchmark(industry, since, windowDays),
     ])
 
-    const industryAverage = benchmark ?? await this.getIndustryBenchmark('generic', last30Days)
+    const industryAverage = benchmark ?? await this.getIndustryBenchmark('generic', since, windowDays)
 
     return this.applyTierVisibility(tier, {
       orgId,
       industry: resolvedIndustry,
       source: benchmark ? 'mongodb' : (industryAverage ? 'fallback' : 'empty'),
       dashboardTier: tier,
+      windowDays,
       orgMetrics: {
         engagementRate: health.engagementRate,
         completionRate: health.completionRate,
@@ -205,26 +211,30 @@ export class DataDashboardService {
         abnormalEngagementRatio: health.abnormalEngagementRatio,
         firstDayDecayRate: health.firstDayDecayRate,
       },
-      industryAverage: industryAverage ? {
-        engagementRate: industryAverage.engagementRate,
-        completionRate: industryAverage.completionRate,
-        publishingConsistency: industryAverage.publishingConsistency,
-        averageViewsPerVideo: industryAverage.averageViewsPerVideo,
-        lowPlayRatio: industryAverage.lowPlayRatio,
-        abnormalEngagementRatio: industryAverage.abnormalEngagementRatio,
-        firstDayDecayRate: industryAverage.firstDayDecayRate,
-        trackedVideos: industryAverage.trackedVideos,
-        taskCount: industryAverage.taskCount,
-      } : null,
-      delta: industryAverage ? {
-        engagementRate: this.round(health.engagementRate - industryAverage.engagementRate),
-        completionRate: this.round(health.completionRate - industryAverage.completionRate),
-        publishingConsistency: this.round(health.publishingConsistency - industryAverage.publishingConsistency),
-        averageViewsPerVideo: this.round(health.averageViewsPerVideo - industryAverage.averageViewsPerVideo),
-        lowPlayRatio: this.round(health.lowPlayRatio - industryAverage.lowPlayRatio),
-        abnormalEngagementRatio: this.round(health.abnormalEngagementRatio - industryAverage.abnormalEngagementRatio),
-        firstDayDecayRate: this.round(health.firstDayDecayRate - industryAverage.firstDayDecayRate),
-      } : null,
+      industryAverage: industryAverage
+        ? {
+            engagementRate: industryAverage.engagementRate,
+            completionRate: industryAverage.completionRate,
+            publishingConsistency: industryAverage.publishingConsistency,
+            averageViewsPerVideo: industryAverage.averageViewsPerVideo,
+            lowPlayRatio: industryAverage.lowPlayRatio,
+            abnormalEngagementRatio: industryAverage.abnormalEngagementRatio,
+            firstDayDecayRate: industryAverage.firstDayDecayRate,
+            trackedVideos: industryAverage.trackedVideos,
+            taskCount: industryAverage.taskCount,
+          }
+        : null,
+      delta: industryAverage
+        ? {
+            engagementRate: this.round(health.engagementRate - industryAverage.engagementRate),
+            completionRate: this.round(health.completionRate - industryAverage.completionRate),
+            publishingConsistency: this.round(health.publishingConsistency - industryAverage.publishingConsistency),
+            averageViewsPerVideo: this.round(health.averageViewsPerVideo - industryAverage.averageViewsPerVideo),
+            lowPlayRatio: this.round(health.lowPlayRatio - industryAverage.lowPlayRatio),
+            abnormalEngagementRatio: this.round(health.abnormalEngagementRatio - industryAverage.abnormalEngagementRatio),
+            firstDayDecayRate: this.round(health.firstDayDecayRate - industryAverage.firstDayDecayRate),
+          }
+        : null,
     })
   }
 
@@ -320,18 +330,23 @@ export class DataDashboardService {
     }
   }
 
-  async exportReport(orgId: string, format: string, dateRange: DateRangeInput) {
+  async exportReport(orgId: string, format: string, dateRange: DateRangeInput, period = 30) {
     const normalizedFormat = format.trim().toLowerCase()
     if (!['csv', 'json'].includes(normalizedFormat)) {
       throw new BadRequestException('format must be csv or json')
     }
 
-    const normalizedRange = this.normalizeDateRange(dateRange)
+    const normalizedWindow = this.normalizePresetWindow(period, 30)
+    const normalizedRange = this.normalizeDateRange(dateRange, normalizedWindow)
     const industry = await this.getOrgIndustry(orgId)
+    const rangeDays = Math.max(
+      1,
+      Math.ceil((normalizedRange.endDate.getTime() - normalizedRange.startDate.getTime()) / (24 * 60 * 60 * 1000)),
+    )
 
     const [health, benchmark, coldStart, tasks] = await Promise.all([
-      this.getContentHealth(orgId),
-      this.getCompetitorBenchmark(orgId, industry),
+      this.getContentHealth(orgId, rangeDays),
+      this.getCompetitorBenchmark(orgId, industry, rangeDays),
       this.getColdStartRecommendations(orgId),
       this.getTasksForExport(orgId, normalizedRange),
     ])
@@ -360,8 +375,8 @@ export class DataDashboardService {
     }
   }
 
-  private async buildContentHealthPayload(orgId: string): Promise<ContentHealthPayload> {
-    const last30Days = this.buildDaysAgo(30)
+  private async buildContentHealthPayload(orgId: string, windowDays = 30): Promise<ContentHealthPayload> {
+    const lastWindowDays = this.buildDaysAgo(windowDays)
     const [tier, [overview], healthSignals] = await Promise.all([
       this.getDashboardTier(orgId),
       this.videoTaskModel.aggregate<{
@@ -379,10 +394,10 @@ export class DataDashboardService {
         {
           $match: {
             ...this.buildOrgMatch(orgId),
-            createdAt: { $gte: last30Days },
+            createdAt: { $gte: lastWindowDays },
           },
         },
-        ...this.buildTaskMetricStages(last30Days),
+        ...this.buildTaskMetricStages(lastWindowDays),
         {
           $group: {
             _id: null,
@@ -430,7 +445,7 @@ export class DataDashboardService {
           },
         },
       ]).exec(),
-      this.getHealthSignalSummary(orgId, last30Days),
+      this.getHealthSignalSummary(orgId, lastWindowDays),
     ])
 
     const totalVideos = overview?.totalVideos || 0
@@ -445,7 +460,7 @@ export class DataDashboardService {
       orgId,
       source: overview?.analyticsBackfilledVideos ? 'mongodb' : 'task_snapshot',
       dashboardTier: tier,
-      windowDays: 30,
+      windowDays,
       engagementRate: totalViews > 0
         ? this.round(((totalLikes + totalComments + totalShares) / totalViews) * 100)
         : 0,
@@ -455,7 +470,7 @@ export class DataDashboardService {
           ? overview.avgCompletionMetric
           : fallbackCompletionRate,
       ),
-      publishingConsistency: this.round(((overview?.publishedDaysCount || 0) / 30) * 100),
+      publishingConsistency: this.round(((overview?.publishedDaysCount || 0) / windowDays) * 100),
       averageViewsPerVideo: totalVideos > 0 ? this.round(totalViews / totalVideos) : 0,
       trackedVideos: healthSignals.trackedVideos,
       lowPlayRatio: healthSignals.lowPlayRatio,
@@ -498,9 +513,9 @@ export class DataDashboardService {
         : Promise.resolve(null),
       orgObjectId
         ? this.subscriptionModel.findOne(
-          { orgId: orgObjectId, status: SubscriptionStatus.ACTIVE },
-          { plan: 1 },
-        ).sort({ createdAt: -1 }).lean().exec()
+            { orgId: orgObjectId, status: SubscriptionStatus.ACTIVE },
+            { plan: 1 },
+          ).sort({ createdAt: -1 }).lean().exec()
         : Promise.resolve(null),
     ])
 
@@ -658,27 +673,27 @@ export class DataDashboardService {
     }
   }
 
-  private async getIndustryBenchmark(industry: string, startDate: Date): Promise<BenchmarkPayload | null> {
+  private async getIndustryBenchmark(industry: string, startDate: Date, windowDays = 30): Promise<BenchmarkPayload | null> {
     const normalizedIndustry = industry.trim().toLowerCase()
     const industryMatch = normalizedIndustry !== 'generic'
       ? [{
-        $match: {
-          $expr: {
-            $eq: [
-              {
-                $trim: {
-                  input: {
-                    $toLower: {
-                      $ifNull: ['$organization.settings.industry', 'generic'],
+          $match: {
+            $expr: {
+              $eq: [
+                {
+                  $trim: {
+                    input: {
+                      $toLower: {
+                        $ifNull: ['$organization.settings.industry', 'generic'],
+                      },
                     },
                   },
                 },
-              },
-              normalizedIndustry,
-            ],
+                normalizedIndustry,
+              ],
+            },
           },
-        },
-      }]
+        }]
       : []
 
     const [benchmark] = await this.videoTaskModel.aggregate<BenchmarkPayload>([
@@ -802,7 +817,7 @@ export class DataDashboardService {
                           },
                         },
                       },
-                      30,
+                      windowDays,
                     ],
                   },
                   100,
@@ -865,8 +880,8 @@ export class DataDashboardService {
     return tasks
   }
 
-  private async buildOverviewActivity(orgId: string) {
-    const startDate = this.buildDaysAgo(13)
+  private async buildOverviewActivity(orgId: string, windowDays: number) {
+    const startDate = this.buildDaysAgo(windowDays - 1)
     const items = await this.videoTaskModel.aggregate<OverviewActivityPoint>([
       {
         $match: {
@@ -907,7 +922,7 @@ export class DataDashboardService {
     const itemMap = new Map(items.map(item => [item.date, item]))
     const activity: OverviewActivityPoint[] = []
 
-    for (let offset = 13; offset >= 0; offset -= 1) {
+    for (let offset = windowDays - 1; offset >= 0; offset -= 1) {
       const current = this.buildDaysAgo(offset)
       const key = current.toISOString().slice(0, 10)
       activity.push(itemMap.get(key) || {
@@ -1118,7 +1133,7 @@ export class DataDashboardService {
   private prefixKeys(prefix: string, query: Record<string, unknown>): Record<string, unknown> {
     if ('$or' in query && Array.isArray(query['$or'])) {
       return {
-        $or: query['$or'].map((item) => this.prefixKeys(prefix, item as Record<string, unknown>)),
+        $or: query['$or'].map(item => this.prefixKeys(prefix, item as Record<string, unknown>)),
       }
     }
 
@@ -1204,12 +1219,12 @@ export class DataDashboardService {
     return result as T
   }
 
-  private normalizeDateRange(input: DateRangeInput) {
+  private normalizeDateRange(input: DateRangeInput, windowDays = 30) {
     const endDate = input.endDate ? new Date(input.endDate) : new Date()
     const startDate = input.startDate ? new Date(input.startDate) : new Date(endDate)
 
     if (!input.startDate) {
-      startDate.setDate(endDate.getDate() - 30)
+      startDate.setDate(endDate.getDate() - windowDays)
     }
 
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
@@ -1246,6 +1261,15 @@ export class DataDashboardService {
     const date = new Date()
     date.setDate(date.getDate() - days)
     return date
+  }
+
+  private normalizePresetWindow(value: unknown, fallback: number) {
+    const normalized = Number(value || fallback)
+    if (normalized === 7 || normalized === 90) {
+      return normalized
+    }
+
+    return 30
   }
 
   private escapeCsv(value: string) {

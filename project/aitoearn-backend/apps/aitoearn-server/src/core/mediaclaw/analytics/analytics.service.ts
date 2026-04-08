@@ -7,7 +7,16 @@ import { MEDIACLAW_SUCCESS_STATUSES } from '../video-task-status.utils'
 import { AnalyticsCollectorService } from './analytics-collector.service'
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly'
-type AnalyticsMetricKey = 'views' | 'likes' | 'comments' | 'shares' | 'saves' | 'followers' | 'engagementRate'
+type AnalyticsMetricKey
+  = | 'views'
+    | 'likes'
+    | 'comments'
+    | 'shares'
+    | 'saves'
+    | 'followers'
+    | 'engagementRate'
+    | 'engagement'
+    | 'conversion'
 type AnalyticsRecord = Record<string, any>
 type VideoTaskRecord = Record<string, any>
 type PrefixedAnalyticsQuery = Record<string, unknown>
@@ -21,6 +30,8 @@ interface OverviewWindowSummary {
   totalComments: number
   totalShares: number
   totalSaves: number
+  totalFollowers: number
+  totalEngagement: number
   avgViewsPerVideo: number
   avgEngagementRate: number
   latestRecordedAt: Date | null
@@ -70,19 +81,30 @@ export class AnalyticsService {
   ) {}
 
   async getOverview(orgId: string, period = 30) {
-    const requestedWindowDays = Math.max(1, Math.min(Number(period) || 30, 365))
-    const [summary, last7Days, last30Days, requestedWindow] = await Promise.all([
+    const requestedWindowDays = this.normalizePresetWindow(period, 30)
+    const [summary, last7Days, last30Days, last90Days, flywheel] = await Promise.all([
       this.getTaskOverviewSummary(orgId, requestedWindowDays),
       this.getOverviewWindow(orgId, 7),
       this.getOverviewWindow(orgId, 30),
-      this.getOverviewWindow(orgId, requestedWindowDays),
+      this.getOverviewWindow(orgId, 90),
+      this.buildOptimizationLoop(orgId, requestedWindowDays),
     ])
+
+    const requestedWindow = requestedWindowDays === 7
+      ? last7Days
+      : requestedWindowDays === 90
+        ? last90Days
+        : last30Days
 
     return {
       summary,
       last7Days,
       last30Days,
+      last90Days,
       requestedWindow,
+      selectedWindow: requestedWindowDays,
+      supportedWindows: [7, 30, 90],
+      flywheel,
       source: 'video_analytics',
     }
   }
@@ -107,6 +129,8 @@ export class AnalyticsService {
         shares: metrics.shares,
         saves: metrics.saves,
         followers: metrics.followers,
+        engagement: metrics.likes + metrics.comments + metrics.shares + metrics.saves,
+        conversion: this.readConversionValue(task, latest),
         engagementScore: metrics.likes + metrics.comments * 2 + metrics.shares * 3,
         engagementRate: this.round(engagementRate),
       },
@@ -216,6 +240,7 @@ export class AnalyticsService {
       },
       { $unwind: '$task' },
       { $match: this.prefixKeys('task', this.buildOrgMatch(orgId)) },
+      ...this.buildTaskContextMetricStages('task'),
       { $sort: { recordedAt: 1 } },
       {
         $group: {
@@ -294,6 +319,7 @@ export class AnalyticsService {
       },
       { $unwind: '$task' },
       { $match: this.prefixKeys('task', this.buildOrgMatch(orgId)) },
+      ...this.buildTaskContextMetricStages('task'),
       {
         $project: {
           _id: 0,
@@ -312,6 +338,8 @@ export class AnalyticsService {
           shares: '$shares',
           saves: '$saves',
           followers: '$followers',
+          engagement: '$engagement',
+          conversion: '$conversion',
           engagementRate: '$engagementRate',
         },
       },
@@ -333,6 +361,8 @@ export class AnalyticsService {
         shares: this.toMetric(item['shares']),
         saves: this.toMetric(item['saves']),
         followers: this.toMetric(item['followers']),
+        engagement: this.toMetric(item['engagement']),
+        conversion: this.toMetric(item['conversion']),
         engagementRate: this.round(item['engagementRate']),
         completedAt: item['completedAt'] || null,
         publishedAt: item['publishedAt'] || null,
@@ -359,13 +389,14 @@ export class AnalyticsService {
   }
 
   async getSeoInsights(orgId: string, windowDays = 30, limit = 10) {
-    const normalizedWindowDays = Math.max(1, Math.min(Number(windowDays) || 30, 365))
+    const normalizedWindowDays = this.normalizePresetWindow(windowDays, 30)
     const normalizedLimit = Math.max(1, Math.min(Number(limit) || 10, 50))
-    const since = this.daysAgo(normalizedWindowDays)
+    const currentSince = this.daysAgo(normalizedWindowDays)
+    const previousSince = this.daysAgo(normalizedWindowDays * 2)
 
     const tasks = await this.videoTaskModel.find({
       ...this.buildOrgMatch(orgId),
-      createdAt: { $gte: since },
+      'createdAt': { $gte: previousSince },
       'metadata.isDeleted': { $ne: true },
     })
       .select({
@@ -378,10 +409,14 @@ export class AnalyticsService {
       .lean()
       .exec()
 
-    const hashtagCounts = new Map<string, number>()
-    const keywordCounts = new Map<string, number>()
+    const currentHashtagCounts = new Map<string, number>()
+    const currentKeywordCounts = new Map<string, number>()
+    const previousHashtagCounts = new Map<string, number>()
+    const previousKeywordCounts = new Map<string, number>()
     let totalHashtags = 0
     let tasksWithSeoSignals = 0
+    let videosAnalyzed = 0
+    let previousVideosAnalyzed = 0
 
     for (const task of tasks) {
       const hashtags = this.normalizeStringList(task['copy']?.['hashtags'])
@@ -389,18 +424,40 @@ export class AnalyticsService {
         ...(this.normalizeStringList(task['copy']?.['blueWords'])),
         ...(this.normalizeStringList(task['metadata']?.['keywords'])),
       ])
+      const taskDate = this.resolveSeoSignalDate(task)
+      const isCurrentWindow = taskDate >= currentSince
 
       if (hashtags.length > 0 || keywords.length > 0) {
-        tasksWithSeoSignals += 1
+        if (isCurrentWindow) {
+          tasksWithSeoSignals += 1
+        }
       }
 
-      totalHashtags += hashtags.length
-      this.countTerms(hashtagCounts, hashtags.map(tag => tag.startsWith('#') ? tag : `#${tag}`))
-      this.countTerms(keywordCounts, keywords)
+      if (isCurrentWindow) {
+        videosAnalyzed += 1
+        totalHashtags += hashtags.length
+        this.countTerms(currentHashtagCounts, hashtags.map(tag => tag.startsWith('#') ? tag : `#${tag}`))
+        this.countTerms(currentKeywordCounts, keywords)
+        continue
+      }
+
+      previousVideosAnalyzed += 1
+      this.countTerms(previousHashtagCounts, hashtags.map(tag => tag.startsWith('#') ? tag : `#${tag}`))
+      this.countTerms(previousKeywordCounts, keywords)
     }
 
-    const topHashtags = this.toTopTerms(hashtagCounts, normalizedLimit, 'hashtag')
-    const topKeywords = this.toTopTerms(keywordCounts, normalizedLimit, 'keyword')
+    const topHashtags = this.toRankedTerms(
+      currentHashtagCounts,
+      previousHashtagCounts,
+      normalizedLimit,
+      'hashtag',
+    )
+    const topKeywords = this.toRankedTerms(
+      currentKeywordCounts,
+      previousKeywordCounts,
+      normalizedLimit,
+      'keyword',
+    )
     const latestUpdatedAt = tasks.reduce<string | null>((latest, task) => {
       const candidate = task['publishedAt'] || task['completedAt'] || task['createdAt']
       if (!candidate) {
@@ -417,9 +474,11 @@ export class AnalyticsService {
     return {
       source: 'task_copy',
       windowDays: normalizedWindowDays,
-      videosAnalyzed: tasks.length,
+      comparisonWindowDays: normalizedWindowDays,
+      videosAnalyzed,
+      previousVideosAnalyzed,
       videosWithSeoSignals: tasksWithSeoSignals,
-      avgHashtagsPerVideo: tasks.length > 0 ? this.round(totalHashtags / tasks.length) : 0,
+      avgHashtagsPerVideo: videosAnalyzed > 0 ? this.round(totalHashtags / videosAnalyzed) : 0,
       latestUpdatedAt,
       topHashtags,
       topKeywords,
@@ -468,6 +527,8 @@ export class AnalyticsService {
         comments: performance.totalComments,
         shares: performance.totalShares,
         saves: performance.totalSaves,
+        followers: performance.totalFollowers,
+        engagement: performance.totalEngagement,
         avgViewsPerVideo: performance.avgViewsPerVideo,
         avgEngagementRate: performance.avgEngagementRate,
         latestRecordedAt: performance.latestRecordedAt,
@@ -503,6 +564,8 @@ export class AnalyticsService {
           totalComments: { $sum: '$comments' },
           totalShares: { $sum: '$shares' },
           totalSaves: { $sum: '$saves' },
+          totalFollowers: { $sum: '$followers' },
+          totalEngagement: { $sum: '$engagement' },
           avgViewsPerVideo: { $avg: '$views' },
           avgEngagementRate: { $avg: '$engagementRate' },
           latestRecordedAt: { $max: '$recordedAt' },
@@ -519,6 +582,8 @@ export class AnalyticsService {
           totalComments: 1,
           totalShares: 1,
           totalSaves: 1,
+          totalFollowers: 1,
+          totalEngagement: 1,
           avgViewsPerVideo: 1,
           avgEngagementRate: 1,
           latestRecordedAt: 1,
@@ -536,6 +601,8 @@ export class AnalyticsService {
       totalComments: Number(summary['totalComments'] || 0),
       totalShares: Number(summary['totalShares'] || 0),
       totalSaves: Number(summary['totalSaves'] || 0),
+      totalFollowers: Number(summary['totalFollowers'] || 0),
+      totalEngagement: Number(summary['totalEngagement'] || 0),
       avgViewsPerVideo: this.round(summary['avgViewsPerVideo']),
       avgEngagementRate: this.round(summary['avgEngagementRate']),
       latestRecordedAt: summary['latestRecordedAt'] || null,
@@ -779,7 +846,7 @@ export class AnalyticsService {
 
   private buildMilestones(history: VideoHistoryItem[]) {
     const checkpoints = [1, 3, 7, 30, 90]
-    return checkpoints.map(day => {
+    return checkpoints.map((day) => {
       const matched = history.find(item => item.dayOffset >= day) || null
       return {
         checkpoint: `T+${day}`,
@@ -851,6 +918,8 @@ export class AnalyticsService {
       || metric === 'saves'
       || metric === 'followers'
       || metric === 'engagementRate'
+      || metric === 'engagement'
+      || metric === 'conversion'
     ) {
       return metric
     }
@@ -1009,6 +1078,19 @@ export class AnalyticsService {
               0,
             ],
           },
+          engagement: {
+            $add: ['$likes', '$comments', '$shares', '$saves'],
+          },
+          conversion: this.buildMetricExpression([
+            'analyticsSnapshot.conversions',
+            'metadata.analyticsSnapshot.conversions',
+            'metadata.analytics.conversions',
+            'metadata.conversions',
+            'metadata.conversionCount',
+            'metadata.performance.conversions',
+            'metadata.performance.clicks',
+            'metadata.clicks',
+          ]),
         },
       },
     ]
@@ -1051,6 +1133,28 @@ export class AnalyticsService {
               0,
             ],
           },
+          engagement: {
+            $add: ['$likes', '$comments', '$shares', '$saves'],
+          },
+        },
+      },
+    ]
+  }
+
+  private buildTaskContextMetricStages(prefix: string): PipelineStage[] {
+    return [
+      {
+        $addFields: {
+          conversion: this.buildMetricExpression([
+            `${prefix}.analyticsSnapshot.conversions`,
+            `${prefix}.metadata.analyticsSnapshot.conversions`,
+            `${prefix}.metadata.analytics.conversions`,
+            `${prefix}.metadata.conversions`,
+            `${prefix}.metadata.conversionCount`,
+            `${prefix}.metadata.performance.conversions`,
+            `${prefix}.metadata.performance.clicks`,
+            `${prefix}.metadata.clicks`,
+          ]),
         },
       },
     ]
@@ -1156,6 +1260,8 @@ export class AnalyticsService {
           shares: 1,
           saves: 1,
           followers: 1,
+          engagement: 1,
+          conversion: 1,
           engagementRate: 1,
         },
       },
@@ -1174,6 +1280,8 @@ export class AnalyticsService {
       shares: this.toMetric(item['shares']),
       saves: this.toMetric(item['saves']),
       followers: this.toMetric(item['followers']),
+      engagement: this.toMetric(item['engagement']),
+      conversion: this.toMetric(item['conversion']),
       engagementRate: this.round(item['engagementRate']),
       completedAt: item['completedAt'] || null,
       publishedAt: item['publishedAt'] || null,
@@ -1289,6 +1397,179 @@ export class AnalyticsService {
         [key]: value,
         count,
       }))
+  }
+
+  private toRankedTerms(
+    currentCounter: Map<string, number>,
+    previousCounter: Map<string, number>,
+    limit: number,
+    key: 'hashtag' | 'keyword',
+  ) {
+    const currentRanks = this.sortRankEntries(currentCounter)
+    const previousRanks = this.sortRankEntries(previousCounter)
+    const previousRankMap = new Map(previousRanks.map((entry, index) => [entry[0], index + 1]))
+    const previousCountMap = new Map(previousRanks)
+
+    return currentRanks.slice(0, limit).map(([value, count], index) => {
+      const currentRank = index + 1
+      const previousRank = previousRankMap.get(value) || null
+      const previousCount = previousCountMap.get(value) || 0
+      const rankChange = previousRank ? previousRank - currentRank : null
+      const trend = previousRank === null
+        ? 'new'
+        : rankChange === 0
+          ? 'steady'
+          : (rankChange || 0) > 0
+              ? 'up'
+              : 'down'
+
+      return {
+        [key]: value,
+        count,
+        previousCount,
+        currentRank,
+        previousRank,
+        rankChange,
+        trend,
+      }
+    })
+  }
+
+  private sortRankEntries(counter: Map<string, number>) {
+    return [...counter.entries()].sort((left, right) => {
+      if (right[1] !== left[1]) {
+        return right[1] - left[1]
+      }
+
+      return left[0].localeCompare(right[0], 'zh-CN')
+    })
+  }
+
+  private resolveSeoSignalDate(task: AnalyticsRecord) {
+    return this.toDate(task['publishedAt'])
+      || this.toDate(task['completedAt'])
+      || this.toDate(task['createdAt'])
+      || new Date()
+  }
+
+  private readConversionValue(task: VideoTaskRecord, latest?: AnalyticsRecord) {
+    const candidates = [
+      latest?.['conversions'],
+      latest?.['raw']?.['conversions'],
+      task['analyticsSnapshot']?.['conversions'],
+      task['metadata']?.['analyticsSnapshot']?.['conversions'],
+      task['metadata']?.['analytics']?.['conversions'],
+      task['metadata']?.['conversions'],
+      task['metadata']?.['conversionCount'],
+      task['metadata']?.['performance']?.['conversions'],
+      task['metadata']?.['performance']?.['clicks'],
+      task['metadata']?.['clicks'],
+    ]
+
+    for (const candidate of candidates) {
+      const normalized = this.toMetric(candidate)
+      if (normalized > 0) {
+        return normalized
+      }
+    }
+
+    return 0
+  }
+
+  private async buildOptimizationLoop(orgId: string, windowDays: number) {
+    const since = this.daysAgo(windowDays)
+    const topContent = await this.videoTaskModel.aggregate<Record<string, any>>([
+      {
+        $match: {
+          ...this.buildOrgMatch(orgId),
+          createdAt: { $gte: since },
+          status: { $in: MEDIACLAW_SUCCESS_STATUSES },
+        },
+      },
+      ...this.buildTaskMetricStages(since),
+      {
+        $project: {
+          _id: 0,
+          publishedAt: 1,
+          createdAt: 1,
+          views: 1,
+          engagementRate: 1,
+          conversion: 1,
+          hashtags: '$copy.hashtags',
+          blueWords: '$copy.blueWords',
+          scene: '$metadata.scene',
+          campaign: '$metadata.campaign',
+        },
+      },
+      { $sort: { views: -1, engagementRate: -1, conversion: -1 } },
+      { $limit: 20 },
+    ]).exec()
+
+    const keywordCounter = new Map<string, number>()
+    const hashtagCounter = new Map<string, number>()
+    const postingWindowCounter = new Map<string, number>()
+    const contentTypeCounter = new Map<string, number>()
+
+    for (const item of topContent) {
+      const blueWords = this.normalizeStringList(item['blueWords'])
+      const hashtags = this.normalizeStringList(item['hashtags'])
+      const postingDate = this.toDate(item['publishedAt']) || this.toDate(item['createdAt'])
+      const postingWindow = postingDate
+        ? `${String(postingDate.getHours()).padStart(2, '0')}:00`
+        : ''
+      const contentType = this.readString(item['scene'] || item['campaign']).trim()
+
+      this.countTerms(keywordCounter, blueWords)
+      this.countTerms(hashtagCounter, hashtags)
+      if (postingWindow) {
+        this.countTerms(postingWindowCounter, [postingWindow])
+      }
+      if (contentType) {
+        this.countTerms(contentTypeCounter, [contentType])
+      }
+    }
+
+    const trackedVideos = topContent.length
+    const learningStage = trackedVideos >= 100
+      ? 'self_optimized'
+      : trackedVideos >= 50
+        ? 'hybrid'
+        : 'benchmark'
+
+    const topKeywords = this.sortRankEntries(keywordCounter).slice(0, 3).map(([value]) => value)
+    const topHashtags = this.sortRankEntries(hashtagCounter).slice(0, 3).map(([value]) => value)
+    const topPostingWindows = this.sortRankEntries(postingWindowCounter).slice(0, 3).map(([value]) => value)
+    const topContentTypes = this.sortRankEntries(contentTypeCounter).slice(0, 3).map(([value]) => value)
+
+    return {
+      trackedVideos,
+      learningStage,
+      weightStrategy: learningStage === 'self_optimized'
+        ? { organizationData: 0.7, industryBenchmark: 0.3 }
+        : learningStage === 'hybrid'
+          ? { organizationData: 0.5, industryBenchmark: 0.5 }
+          : { organizationData: 0.3, industryBenchmark: 0.7 },
+      nextRoundPreferences: {
+        postingWindows: topPostingWindows,
+        prioritizedKeywords: topKeywords,
+        prioritizedHashtags: topHashtags,
+        contentTypes: topContentTypes,
+      },
+      recommendations: [
+        topKeywords.length > 0 ? `优先保留高表现蓝词：${topKeywords.join(' / ')}` : '优先沿用行业 benchmark 的高表现蓝词',
+        topPostingWindows.length > 0 ? `下一轮优先投放时段：${topPostingWindows.join('、')}` : '继续采集发布时间数据以建立最佳发布时间模型',
+        topContentTypes.length > 0 ? `优先复用高表现内容类型：${topContentTypes.join(' / ')}` : '补充内容类型标签，提升偏好学习准确度',
+      ],
+    }
+  }
+
+  private normalizePresetWindow(value: unknown, fallback: number) {
+    const normalized = Number(value || fallback)
+    if (normalized === 7 || normalized === 90) {
+      return normalized
+    }
+
+    return 30
   }
 
   private toMetric(value: unknown) {

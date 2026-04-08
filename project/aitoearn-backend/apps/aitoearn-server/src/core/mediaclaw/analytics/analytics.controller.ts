@@ -101,7 +101,16 @@ export class AnalyticsController {
   async getTrends(
     @GetToken() user: { orgId?: string, id?: string },
     @Query('period') period: 'daily' | 'weekly' | 'monthly' = 'daily',
-    @Query('metric') metric: 'views' | 'likes' | 'comments' | 'shares' | 'saves' | 'followers' | 'engagementRate' = 'views',
+    @Query('metric') metric:
+      | 'views'
+      | 'likes'
+      | 'comments'
+      | 'shares'
+      | 'saves'
+      | 'followers'
+      | 'engagementRate'
+      | 'engagement'
+      | 'conversion' = 'views',
     @Query('windowDays') windowDays?: string,
   ) {
     return this.analyticsService.getTrends(
@@ -116,7 +125,16 @@ export class AnalyticsController {
   async getTopContent(
     @GetToken() user: { orgId?: string, id?: string },
     @Query('limit') limit = '10',
-    @Query('metric') metric: 'views' | 'likes' | 'comments' | 'shares' | 'saves' | 'followers' | 'engagementRate' = 'views',
+    @Query('metric') metric:
+      | 'views'
+      | 'likes'
+      | 'comments'
+      | 'shares'
+      | 'saves'
+      | 'followers'
+      | 'engagementRate'
+      | 'engagement'
+      | 'conversion' = 'views',
     @Query('period') period?: string,
   ) {
     return this.analyticsService.getTopContent(
@@ -150,6 +168,8 @@ export class AnalyticsController {
         start?: string
         end?: string
       }
+      formats?: string[]
+      waitForCompletion?: boolean
       startDate?: string
       endDate?: string
     },
@@ -165,6 +185,10 @@ export class AnalyticsController {
       {
         start: periodStart,
         end: periodEnd,
+      },
+      {
+        formats: body.formats,
+        waitForCompletion: body.waitForCompletion,
       },
     )
   }
