@@ -15,6 +15,7 @@ import {
   PipelineJobContext,
   PipelineQualityReport,
   PipelineResolvedModels,
+  PipelineStyleRewriteConfig,
   PipelineSubtitleVariant,
 } from './pipeline.types'
 import { buildPublicFileUrl, ensureDirectory, resolveRenderSize } from './pipeline.utils'
@@ -25,6 +26,15 @@ import { VideoGenService } from './video-gen.service'
 @Injectable()
 export class PipelineService {
   private readonly logger = new Logger(PipelineService.name)
+  private readonly defaultStyleRewriteMutationDomains = [
+    'table surface material',
+    'tableware',
+    'flowers',
+    'ornaments',
+    'lighting direction',
+    'color temperature',
+    'background elements',
+  ]
 
   constructor(
     @InjectModel(Pipeline.name) private readonly pipelineModel: Model<Pipeline>,
@@ -168,6 +178,8 @@ export class PipelineService {
     const brand = await this.loadBrandProfile(task.brandId?.toString() || null)
     const pipeline = await this.loadPipelineDocument(task.pipelineId?.toString() || null)
     const models = await this.resolveModels(task.orgId?.toString() || null, pipeline?._id?.toString?.() || null)
+    const templateId = this.resolveTemplateId(task.metadata, pipeline)
+    const styleRewrite = this.resolveStyleRewriteConfig(task.metadata, pipeline, templateId)
     const targetDurationSeconds = this.resolveTargetDuration(
       task.metadata,
       brand.preferredDuration,
@@ -190,12 +202,14 @@ export class PipelineService {
       taskId: task._id.toString(),
       orgId: task.orgId?.toString() || null,
       workspaceDir,
+      templateId,
       sourceVideoPath,
       sourceMetadata,
       targetDurationSeconds,
       renderWidth: renderSize.width,
       renderHeight: renderSize.height,
       brand,
+      styleRewrite,
       frameArtifacts,
       segmentVideoPaths: [],
       subtitles: this.buildSubtitleVariants(task, brand, targetDurationSeconds),
@@ -290,9 +304,11 @@ export class PipelineService {
     existing?: Pipeline | null,
   ) {
     const existingRecord = existing ? ((existing as any)?.toObject?.() || (existing as Record<string, any>)) : null
+    const templateId = this.normalizeOptionalString(data['templateId']) || existingRecord?.['templateId'] || ''
     const styleConfig = this.normalizeStyleConfig(
       this.asRecord(data['styleConfig']),
       brand,
+      templateId,
       this.asRecord(existingRecord?.['styleConfig']),
     )
     const groupBinding = this.normalizeGroupBinding(
@@ -331,7 +347,7 @@ export class PipelineService {
       type: this.normalizeOptionalString(data['type']) || existingRecord?.['type'] || 'seeding',
       status: this.normalizeOptionalString(data['status']) || existingRecord?.['status'] || PipelineStatus.ACTIVE,
       description: this.normalizeOptionalString(data['description']) || existingRecord?.['description'] || '',
-      templateId: this.normalizeOptionalString(data['templateId']) || existingRecord?.['templateId'] || '',
+      templateId,
       routingConfigId: this.toObjectIdOrNull(this.normalizeOptionalString(data['routingConfigId']))
         || existingRecord?.['routingConfigId']
         || null,
@@ -357,12 +373,16 @@ export class PipelineService {
   private normalizeStyleConfig(
     incoming: Record<string, any> | null,
     brand: Brand,
+    templateId: string,
     existing?: Record<string, any> | null,
   ) {
     const source = incoming || {}
     const previous = existing || {}
     const brandAssets = brand.assets || {}
     const brandVideoStyle = brand.videoStyle || {}
+    const styleRewriteSource = this.asRecord(source['styleRewrite'])
+    const previousStyleRewrite = this.asRecord(previous['styleRewrite'])
+    const defaultStyleRewrite = this.buildDefaultStyleRewriteConfig(templateId)
 
     return {
       duration: this.normalizePositiveNumber(
@@ -396,6 +416,41 @@ export class PipelineService {
           Array.isArray(this.asRecord(source['brandAssets'])?.['fonts'])
             ? this.asRecord(source['brandAssets'])?.['fonts']
             : this.asRecord(previous['brandAssets'])?.['fonts'] || brandAssets.fonts || [],
+        ),
+      },
+      styleRewrite: {
+        enabled: this.resolveBooleanValue(
+          [
+            styleRewriteSource?.['enabled'],
+            previousStyleRewrite?.['enabled'],
+          ],
+          defaultStyleRewrite.enabled,
+        ),
+        scope: this.normalizeStyleRewriteScope(
+          this.normalizeOptionalString(styleRewriteSource?.['scope'])
+          || this.normalizeOptionalString(previousStyleRewrite?.['scope'])
+          || defaultStyleRewrite.scope,
+        ),
+        preserveComposition: this.resolveBooleanValue(
+          [
+            styleRewriteSource?.['preserveComposition'],
+            previousStyleRewrite?.['preserveComposition'],
+          ],
+          true,
+        ),
+        preserveProductPlacement: this.resolveBooleanValue(
+          [
+            styleRewriteSource?.['preserveProductPlacement'],
+            previousStyleRewrite?.['preserveProductPlacement'],
+          ],
+          true,
+        ),
+        mutationDomains: this.normalizeStringList(
+          Array.isArray(styleRewriteSource?.['mutationDomains'])
+            ? styleRewriteSource?.['mutationDomains']
+            : Array.isArray(previousStyleRewrite?.['mutationDomains'])
+              ? previousStyleRewrite?.['mutationDomains']
+              : defaultStyleRewrite.mutationDomains,
         ),
       },
     }
@@ -639,6 +694,78 @@ export class PipelineService {
     }
   }
 
+  private resolveTemplateId(metadata: Record<string, any>, pipeline?: Pipeline | null) {
+    const productionBatch = this.asRecord(metadata['productionBatch'])
+
+    return this.normalizeOptionalString(metadata['templateId'])
+      || this.normalizeOptionalString(productionBatch?.['templateId'])
+      || this.normalizeOptionalString(pipeline?.templateId)
+      || ''
+  }
+
+  private resolveStyleRewriteConfig(
+    metadata: Record<string, any>,
+    pipeline: Pipeline | null,
+    templateId: string,
+  ): PipelineStyleRewriteConfig {
+    const productionBatch = this.asRecord(metadata['productionBatch'])
+    const styleOverrides = this.asRecord(productionBatch?.['styleOverrides'])
+    const styleConfig = this.asRecord(pipeline?.styleConfig)
+    const styleRewrite = this.asRecord(styleConfig?.['styleRewrite'])
+    const subtitlePreferences = this.asRecord(this.asRecord(pipeline?.preferences)?.['subtitlePreferences'])
+    const defaults = this.buildDefaultStyleRewriteConfig(templateId)
+    const enabled = this.resolveBooleanValue(
+      [
+        metadata['styleRewrite'],
+        metadata['styleRewriteEnabled'],
+        styleOverrides?.['styleRewrite'],
+        styleOverrides?.['styleRewriteEnabled'],
+        styleRewrite?.['enabled'],
+        subtitlePreferences?.['styleRewrite'],
+        subtitlePreferences?.['styleRewriteEnabled'],
+      ],
+      defaults.enabled,
+    )
+    const scope = this.normalizeStyleRewriteScope(
+      this.normalizeOptionalString(metadata['styleRewriteScope'])
+      || this.normalizeOptionalString(styleOverrides?.['styleRewriteScope'])
+      || this.normalizeOptionalString(styleRewrite?.['scope'])
+      || defaults.scope,
+    )
+
+    return {
+      enabled,
+      scope,
+      preserveComposition: this.resolveBooleanValue(
+        [styleRewrite?.['preserveComposition']],
+        true,
+      ),
+      preserveProductPlacement: this.resolveBooleanValue(
+        [styleRewrite?.['preserveProductPlacement']],
+        true,
+      ),
+      mutationDomains: this.normalizeStringList(
+        Array.isArray(styleRewrite?.['mutationDomains'])
+          ? styleRewrite?.['mutationDomains']
+          : defaults.mutationDomains,
+      ),
+    }
+  }
+
+  private buildDefaultStyleRewriteConfig(templateId: string): PipelineStyleRewriteConfig {
+    const normalizedTemplateId = this.normalizeOptionalString(templateId)
+    const enabled = normalizedTemplateId === 'b7-ai-live' || normalizedTemplateId === 'b9-product-showcase'
+    const scope = normalizedTemplateId === 'b9-product-showcase' ? 'per_scene' : 'shared'
+
+    return {
+      enabled,
+      scope,
+      preserveComposition: true,
+      preserveProductPlacement: true,
+      mutationDomains: [...this.defaultStyleRewriteMutationDomains],
+    }
+  }
+
   private async resolveModels(orgId: string | null, pipelineId: string | null): Promise<PipelineResolvedModels> {
     if (!orgId || !Types.ObjectId.isValid(orgId)) {
       return {
@@ -812,6 +939,30 @@ export class PipelineService {
 
   private normalizeBoolean(value: unknown, fallback: boolean) {
     return typeof value === 'boolean' ? value : fallback
+  }
+
+  private normalizeStyleRewriteScope(value: string) {
+    return value === 'per_scene' ? 'per_scene' as const : 'shared' as const
+  }
+
+  private resolveBooleanValue(values: unknown[], fallback: boolean) {
+    for (const value of values) {
+      if (typeof value === 'boolean') {
+        return value
+      }
+
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase()
+        if (normalized === 'true') {
+          return true
+        }
+        if (normalized === 'false') {
+          return false
+        }
+      }
+    }
+
+    return fallback
   }
 
   private toObjectIdOrNull(value: string) {

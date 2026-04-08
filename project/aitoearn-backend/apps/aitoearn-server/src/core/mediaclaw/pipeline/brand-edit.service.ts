@@ -1,15 +1,16 @@
-import { Injectable, Logger, Optional } from '@nestjs/common'
-import { OrgApiKeyProvider } from '@yikart/mongodb'
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { Injectable, Logger, Optional } from '@nestjs/common'
+import { OrgApiKeyProvider } from '@yikart/mongodb'
+import { MediaclawConfigService } from '../mediaclaw-config.service'
+import { ByokService } from '../settings/byok.service'
+import { PipelineStyleRewriteService } from './pipeline-style-rewrite.service'
 import {
   PipelineFrameArtifact,
   PipelineJobContext,
   PipelineStepExecutionResult,
 } from './pipeline.types'
 import { downloadFile, requestJson } from './pipeline.utils'
-import { MediaclawConfigService } from '../mediaclaw-config.service'
-import { ByokService } from '../settings/byok.service'
 
 interface VectorEngineImageResponse {
   data?: Array<Record<string, unknown>>
@@ -35,6 +36,7 @@ export class BrandEditService {
 
   constructor(
     private readonly configService: MediaclawConfigService,
+    private readonly pipelineStyleRewriteService: PipelineStyleRewriteService,
     @Optional() private readonly byokService?: ByokService,
   ) {}
 
@@ -57,9 +59,11 @@ export class BrandEditService {
 
     for (const frame of context.frameArtifacts) {
       const editedPath = join(context.workspaceDir, `edited-frame-${frame.index + 1}.png`)
+      const preparedFrame = this.pipelineStyleRewriteService.prepareFrame(context, frame)
+      frame.styleRewritePlan = preparedFrame.plan
 
       try {
-        await this.applyVectorEngineEdit(context, frame, editedPath, runtime)
+        await this.applyVectorEngineEdit(frame, editedPath, runtime, preparedFrame.prompt)
       }
       catch (error) {
         fallbackReason = fallbackReason || 'request_failed'
@@ -67,9 +71,11 @@ export class BrandEditService {
         await copyFile(frame.sourcePath, editedPath)
       }
 
+      context.prompts[preparedFrame.promptKey] = preparedFrame.prompt
       artifacts.push({
         ...frame,
         editedPath,
+        styleRewritePlan: preparedFrame.plan,
       })
     }
 
@@ -93,10 +99,14 @@ export class BrandEditService {
 
     for (const frame of context.frameArtifacts) {
       const editedPath = join(context.workspaceDir, `edited-frame-${frame.index + 1}.png`)
+      const preparedFrame = this.pipelineStyleRewriteService.prepareFrame(context, frame)
+      frame.styleRewritePlan = preparedFrame.plan
       await copyFile(frame.sourcePath, editedPath)
+      context.prompts[preparedFrame.promptKey] = preparedFrame.prompt
       artifacts.push({
         ...frame,
         editedPath,
+        styleRewritePlan: preparedFrame.plan,
       })
     }
 
@@ -141,13 +151,11 @@ export class BrandEditService {
   }
 
   private async applyVectorEngineEdit(
-    context: PipelineJobContext,
     frame: PipelineFrameArtifact,
     editedPath: string,
     runtime: BrandEditRuntimeConfig,
+    prompt: string,
   ) {
-    const prompt = context.prompts['edit-frames'] || this.buildPrompt(context, frame)
-    context.prompts['edit-frames'] = prompt
     const imageBase64 = (await readFile(frame.sourcePath)).toString('base64')
 
     let lastError: Error | null = null
@@ -158,7 +166,7 @@ export class BrandEditService {
           {
             method: 'POST',
             headers: {
-              Authorization: `Bearer ${runtime.apiKey}`,
+              'Authorization': `Bearer ${runtime.apiKey}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -194,23 +202,6 @@ export class BrandEditService {
       'VCE_GEMINI_API_KEY',
       'MEDIACLAW_VCE_API_KEY',
     ])
-  }
-
-  private buildPrompt(context: PipelineJobContext, frame: PipelineFrameArtifact) {
-    const colors = context.brand.colors.slice(0, 3).join(', ') || 'brand primary palette'
-    const slogans = context.brand.slogans.slice(0, 2).join(' / ')
-    const keywords = context.brand.keywords.slice(0, 4).join(', ')
-    const prohibited = context.brand.prohibitedWords.slice(0, 4).join(', ')
-
-    return [
-      `Edit the frame for brand ${context.brand.name}.`,
-      `Keep the original composition and motion clue for the ${frame.label} shot.`,
-      `Use brand colors: ${colors}.`,
-      slogans ? `Reflect slogans: ${slogans}.` : '',
-      keywords ? `Highlight keywords: ${keywords}.` : '',
-      prohibited ? `Avoid words or visual claims: ${prohibited}.` : '',
-      'No mask is required in phase 1. The logo area should remain clean for post subtitle brand text.',
-    ].filter(Boolean).join(' ')
   }
 
   private async persistEditedFrame(response: VectorEngineImageResponse, editedPath: string) {

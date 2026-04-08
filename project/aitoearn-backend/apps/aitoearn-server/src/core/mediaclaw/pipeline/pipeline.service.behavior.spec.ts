@@ -36,6 +36,9 @@ describe('pipelineService', () => {
   let service: PipelineService
   let pipelineModel: Record<string, any>
   let brandModel: Record<string, any>
+  let frameExtractService: Record<string, any>
+  let dedupService: Record<string, any>
+  let modelResolverService: Record<string, any>
 
   beforeEach(() => {
     pipelineModel = {
@@ -50,18 +53,36 @@ describe('pipelineService', () => {
       findOne: vi.fn(),
       findById: vi.fn().mockReturnValue(createQuery(null)),
     }
+    frameExtractService = {
+      ensureLocalVideo: vi.fn(),
+      probeVideoMetadata: vi.fn(),
+      extractKeyFrames: vi.fn(),
+    }
+    dedupService = {
+      createStrategy: vi.fn(),
+    }
+    modelResolverService = {
+      validatePipelineOverrides: vi.fn().mockResolvedValue({}),
+      resolveCapability: vi.fn().mockResolvedValue({
+        id: 'runtime-model',
+        label: 'Runtime Model',
+        provider: 'test',
+        runtimeModel: 'test-runtime',
+        source: 'default',
+      }),
+    }
 
     service = new PipelineService(
       pipelineModel as any,
       brandModel as any,
+      frameExtractService as any,
       {} as any,
       {} as any,
       {} as any,
       {} as any,
+      dedupService as any,
       {} as any,
-      {} as any,
-      {} as any,
-      { validatePipelineOverrides: vi.fn().mockResolvedValue({}) } as any,
+      modelResolverService as any,
     )
   })
 
@@ -228,5 +249,120 @@ describe('pipelineService', () => {
       },
       { new: true },
     )
+  })
+
+  it('应为 b7 模板自动落库 style rewrite 默认配置', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const brandId = new Types.ObjectId()
+    const brand = {
+      _id: brandId,
+      orgId: new Types.ObjectId(orgId),
+      isActive: true,
+      name: '越小啤',
+      assets: {},
+      videoStyle: {},
+    }
+
+    brandModel.findOne.mockReturnValue(createQuery(brand))
+
+    await service.create(orgId, brandId.toString(), {
+      name: 'AI 微动效线',
+      templateId: 'b7-ai-live',
+    } as any)
+
+    expect(pipelineModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        templateId: 'b7-ai-live',
+        styleConfig: expect.objectContaining({
+          styleRewrite: expect.objectContaining({
+            enabled: true,
+            scope: 'shared',
+            preserveComposition: true,
+            preserveProductPlacement: true,
+          }),
+        }),
+      }),
+    )
+  })
+
+  it('应在分析源视频时遵循模板默认值并允许 metadata 关闭 style rewrite', async () => {
+    const orgId = new Types.ObjectId()
+    const brandId = new Types.ObjectId()
+    const pipelineId = new Types.ObjectId()
+    const taskId = new Types.ObjectId()
+
+    pipelineModel.findById.mockReturnValue(createQuery({
+      _id: pipelineId,
+      templateId: 'b9-product-showcase',
+      styleConfig: {
+        styleRewrite: {
+          enabled: true,
+          scope: 'per_scene',
+        },
+      },
+      preferences: {},
+    }))
+    brandModel.findById.mockReturnValue(createQuery({
+      _id: brandId,
+      name: '测试品牌',
+      assets: {
+        colors: ['#111111'],
+        fonts: ['PingFang SC'],
+        slogans: ['好喝不贵'],
+        keywords: ['精酿'],
+        prohibitedWords: [],
+      },
+      videoStyle: {
+        preferredDuration: 18,
+        aspectRatio: '9:16',
+        subtitleStyle: {},
+        referenceVideoUrl: '',
+      },
+    }))
+    frameExtractService.ensureLocalVideo.mockResolvedValue('/tmp/source.mp4')
+    frameExtractService.probeVideoMetadata.mockResolvedValue({
+      durationSeconds: 12,
+      width: 1080,
+      height: 1920,
+      frameRate: 30,
+      hasAudio: true,
+    })
+    frameExtractService.extractKeyFrames.mockResolvedValue([])
+    dedupService.createStrategy.mockReturnValue({
+      cropScale: 1,
+      cropXRatio: 0,
+      cropYRatio: 0,
+      hueShift: 0,
+      saturation: 1,
+      contrast: 1,
+      brightness: 0,
+      noise: 0,
+      speedFactor: 1,
+      metadataFingerprint: 'fp-1',
+    })
+
+    const context = await service.analyzeSource({
+      _id: taskId,
+      orgId,
+      brandId,
+      pipelineId,
+      sourceVideoUrl: 'https://cdn.example.com/source.mp4',
+      metadata: {
+        productionBatch: {
+          templateId: 'b9-product-showcase',
+          styleOverrides: {
+            styleRewriteEnabled: false,
+          },
+        },
+      },
+    } as any)
+
+    expect(context.templateId).toBe('b9-product-showcase')
+    expect(context.styleRewrite).toEqual(expect.objectContaining({
+      enabled: false,
+      scope: 'per_scene',
+      preserveComposition: true,
+      preserveProductPlacement: true,
+    }))
   })
 })

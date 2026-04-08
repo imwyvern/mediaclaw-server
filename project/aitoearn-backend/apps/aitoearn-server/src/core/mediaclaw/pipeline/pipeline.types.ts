@@ -4,6 +4,35 @@ export interface PipelineFrameArtifact {
   timestampSeconds: number
   sourcePath: string
   editedPath?: string
+  styleRewritePlan?: PipelineStyleRewritePlan | null
+}
+
+export type PipelineStyleRewriteScope = 'shared' | 'per_scene'
+
+export interface PipelineStyleRewriteConfig {
+  enabled: boolean
+  scope: PipelineStyleRewriteScope
+  preserveComposition: boolean
+  preserveProductPlacement: boolean
+  mutationDomains: string[]
+}
+
+export interface PipelineStyleRewritePlan {
+  enabled: boolean
+  promptKey: string
+  seed: number
+  templateId: string
+  scope: PipelineStyleRewriteScope
+  preserveComposition: boolean
+  preserveProductPlacement: boolean
+  mutationDomains: string[]
+  tableSurfaceMaterial: string
+  tableware: string
+  flowers: string
+  ornaments: string
+  lightingDirection: string
+  colorTemperature: string
+  backgroundElement: string
 }
 
 export interface PipelineSubtitleVariant {
@@ -108,12 +137,14 @@ export interface PipelineJobContext {
   taskId: string
   orgId?: string | null
   workspaceDir: string
+  templateId: string
   sourceVideoPath: string
   sourceMetadata: PipelineVideoMetadata
   targetDurationSeconds: number
   renderWidth: number
   renderHeight: number
   brand: PipelineBrandProfile
+  styleRewrite: PipelineStyleRewriteConfig
   frameArtifacts: PipelineFrameArtifact[]
   segmentVideoPaths: string[]
   subtitles: PipelineSubtitleVariant[]

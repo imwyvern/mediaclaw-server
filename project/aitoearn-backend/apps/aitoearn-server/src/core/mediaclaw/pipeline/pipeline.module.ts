@@ -4,9 +4,10 @@ import { Brand, BrandSchema, Pipeline, PipelineSchema, VideoTask, VideoTaskSchem
 import { MediaclawConfigModule } from '../mediaclaw-config.module'
 import { ModelResolverModule } from '../model-resolver/model-resolver.module'
 import { BrandEditService } from './brand-edit.service'
-import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { DedupService } from './dedup.service'
+import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { FrameExtractService } from './frame-extract.service'
+import { PipelineStyleRewriteService } from './pipeline-style-rewrite.service'
 import { PipelineController } from './pipeline.controller'
 import { PipelineService } from './pipeline.service'
 import { QualityCheckService } from './quality-check.service'
@@ -27,6 +28,7 @@ import { VideoGenService } from './video-gen.service'
   providers: [
     PipelineService,
     FrameExtractService,
+    PipelineStyleRewriteService,
     BrandEditService,
     DeepSynthesisMarkerService,
     VideoGenService,

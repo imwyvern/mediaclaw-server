@@ -32,6 +32,24 @@ class PipelineBrandAssets {
 }
 
 @Schema({ _id: false })
+class PipelineStyleRewriteConfig {
+  @Prop({ type: Boolean, default: false })
+  enabled: boolean;
+
+  @Prop({ type: String, default: "shared" })
+  scope: string;
+
+  @Prop({ type: Boolean, default: true })
+  preserveComposition: boolean;
+
+  @Prop({ type: Boolean, default: true })
+  preserveProductPlacement: boolean;
+
+  @Prop({ type: [String], default: [] })
+  mutationDomains: string[];
+}
+
+@Schema({ _id: false })
 class PipelineStyleConfig {
   @Prop({ type: Number, default: 15 })
   duration: number;
@@ -50,6 +68,9 @@ class PipelineStyleConfig {
 
   @Prop({ type: PipelineBrandAssets, default: () => ({}) })
   brandAssets: PipelineBrandAssets;
+
+  @Prop({ type: PipelineStyleRewriteConfig, default: () => ({}) })
+  styleRewrite: PipelineStyleRewriteConfig;
 }
 
 @Schema({ _id: false })

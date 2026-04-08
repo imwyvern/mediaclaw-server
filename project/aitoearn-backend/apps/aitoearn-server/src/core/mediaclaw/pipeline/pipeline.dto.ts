@@ -29,6 +29,32 @@ export class PipelineBrandAssetsDto {
   fonts?: string[]
 }
 
+export class PipelineStyleRewriteConfigDto {
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  enabled?: boolean
+
+  @IsOptional()
+  @IsString()
+  scope?: string
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  preserveComposition?: boolean
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  preserveProductPlacement?: boolean
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  mutationDomains?: string[]
+}
+
 export class PipelineStyleConfigDto {
   @IsOptional()
   @Type(() => Number)
@@ -57,6 +83,11 @@ export class PipelineStyleConfigDto {
   @ValidateNested()
   @Type(() => PipelineBrandAssetsDto)
   brandAssets?: PipelineBrandAssetsDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PipelineStyleRewriteConfigDto)
+  styleRewrite?: PipelineStyleRewriteConfigDto
 }
 
 export class PipelineDistributionTargetDto {
