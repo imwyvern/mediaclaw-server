@@ -1,0 +1,48 @@
+{
+  "templateId": "b7-ai-live",
+  "name": "AI 微动视频",
+  "description": "专属首帧 -> Style Rewrite -> Kling V3 Omni 5s 微动 -> Seedream 封面 -> FFmpeg 拼接 -> 文案 -> 向量查重",
+  "version": "1.0",
+  "category": "fast_batch",
+  "type": "seeding",
+  "estimatedTimeSec": 300,
+  "estimatedCost": 15.1,
+  "qualityStars": 3,
+  "categories": [
+    "fast_batch",
+    "matrix"
+  ],
+  "styles": [
+    "micro-motion",
+    "photorealistic",
+    "daily-refresh"
+  ],
+  "defaultParams": {
+    "duration": 5,
+    "aspectRatio": "9:16",
+    "subtitleStyle": {
+      "coverStyle": "black_bg_white_text"
+    },
+    "musicStyle": "micro-motion",
+    "extra": {
+      "styleRewrite": true,
+      "coverStyle": "black_bg_white_text",
+      "dedupOnComplete": true
+    }
+  },
+  "requiredInputs": [
+    "brand_assets"
+  ],
+  "optionalInputs": [
+    "first_frame_url",
+    "reference_video_url",
+    "subtitle_text"
+  ],
+  "limitations": [
+    "首帧质量不足时成片波动较大",
+    "更适合 100 账号级别的日更矩阵"
+  ],
+  "verifiedClients": [
+    "双跃"
+  ]
+}

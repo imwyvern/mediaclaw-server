@@ -10,6 +10,7 @@ import {
   Pipeline,
   PipelineStatus,
   PipelineTemplate,
+  PipelineTemplateStatus,
   PipelineType,
   VideoTask,
   VideoTaskStatus,
@@ -19,6 +20,8 @@ import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import { PipelineService } from '../pipeline/pipeline.service'
 import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData } from '../worker/worker.constants'
+import { TemplateRuntimeService } from './template-runtime.service'
+import { TemplateRuntimeConfig } from './template-runtime.types'
 
 interface PipelineTemplateStepInput {
   name: string
@@ -207,10 +210,12 @@ export class PipelineSystemService implements OnModuleInit {
     @InjectQueue(VIDEO_WORKER_QUEUE)
     private readonly videoWorkerQueue: Queue<VideoWorkerJobData>,
     private readonly pipelineService: PipelineService,
+    private readonly templateRuntimeService: TemplateRuntimeService,
   ) {}
 
   async onModuleInit() {
     await this.ensurePresetTemplates()
+    await this.ensureRuntimeTemplates()
   }
 
   async createTemplate(data: CreateTemplateInput) {
@@ -242,53 +247,31 @@ export class PipelineSystemService implements OnModuleInit {
 
   async listTemplates(filters: ListTemplateFilters) {
     const query = this.buildTemplateQuery(filters)
-    const items = await this.pipelineTemplateModel
-      .find(query)
-      .sort({ usageCount: -1, createdAt: -1 })
-      .lean()
-      .exec()
+    const [items, runtimeTemplates] = await Promise.all([
+      this.pipelineTemplateModel
+        .find(query)
+        .sort({ usageCount: -1, createdAt: -1 })
+        .lean()
+        .exec(),
+      this.templateRuntimeService.listTemplates(),
+    ])
 
-    return items.map(item => ({
-      id: item._id.toString(),
-      templateId: item.templateId || item._id.toString(),
-      name: item.name,
-      description: item.description || '',
-      categories: item.categories || [],
-      styles: item.styles || [],
-      type: item.type,
-      steps: item.steps,
-      defaultParams: item.defaultParams,
-      isPublic: item.isPublic,
-      createdBy: item.createdBy,
-      usageCount: item.usageCount,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    }))
+    const runtimeMap = new Map(runtimeTemplates.map(item => [item.templateId, item]))
+    return items.map(item => this.serializeTemplate(item, runtimeMap.get(item.templateId || '')))
   }
 
   async getTemplate(id: string, requestedBy?: string) {
-    const template = await this.findAccessibleTemplate(id, requestedBy)
+    const [template, runtimeTemplates] = await Promise.all([
+      this.findAccessibleTemplate(id, requestedBy),
+      this.templateRuntimeService.listTemplates(),
+    ])
 
     if (!template) {
       throw new NotFoundException('Pipeline template not found')
     }
 
-    return {
-      id: template._id.toString(),
-      templateId: template.templateId || template._id.toString(),
-      name: template.name,
-      description: template.description || '',
-      categories: template.categories || [],
-      styles: template.styles || [],
-      type: template.type,
-      steps: template.steps,
-      defaultParams: template.defaultParams,
-      isPublic: template.isPublic,
-      createdBy: template.createdBy,
-      usageCount: template.usageCount,
-      createdAt: template.createdAt,
-      updatedAt: template.updatedAt,
-    }
+    const runtimeMap = new Map(runtimeTemplates.map(item => [item.templateId, item]))
+    return this.serializeTemplate(template, runtimeMap.get(template.templateId || ''))
   }
 
   async applyTemplate(
@@ -619,6 +602,111 @@ export class PipelineSystemService implements OnModuleInit {
         ).exec(),
       ),
     )
+  }
+
+  private async ensureRuntimeTemplates() {
+    const runtimeTemplates = await this.templateRuntimeService.listTemplates()
+    if (runtimeTemplates.length === 0) {
+      return
+    }
+
+    await Promise.all(
+      runtimeTemplates.map(template =>
+        this.pipelineTemplateModel.findOneAndUpdate(
+          { templateId: template.templateId },
+          {
+            $set: {
+              name: template.name,
+              description: template.description,
+              version: template.version,
+              category: template.category,
+              categories: template.categories,
+              styles: template.styles,
+              type: template.type,
+              steps: this.buildRuntimeTemplateSteps(template),
+              defaultParams: this.normalizeDefaultParams(template.defaultParams),
+              costPerVideo: template.estimatedCost,
+              estimatedTimeSec: template.estimatedTimeSec,
+              qualityStars: template.qualityStars,
+              limitations: template.limitations,
+              verifiedClients: template.verifiedClients,
+              requiredInputs: template.requiredInputs,
+              optionalInputs: template.optionalInputs,
+              runtime: template.runtime,
+              isPublic: true,
+              createdBy: 'system',
+              status: PipelineTemplateStatus.ACTIVE,
+            },
+            $setOnInsert: {
+              templateId: template.templateId,
+              usageCount: 0,
+            },
+          },
+          {
+            upsert: true,
+            new: true,
+          },
+        ).exec(),
+      ),
+    )
+  }
+
+  private buildRuntimeTemplateSteps(template: TemplateRuntimeConfig) {
+    const runtimeSteps: PipelineTemplateStepInput[] = []
+
+    if (template.templateId === 'b7-ai-live') {
+      runtimeSteps.push(
+        { name: 'style_rewrite', order: 1, config: { required: true } },
+        { name: 'micro_motion_render', order: 2, config: { engine: 'kling_v3_omni' } },
+        { name: 'cover_generation', order: 3, config: { style: 'black_bg_white_text' } },
+        { name: 'dedup_validation', order: 4, config: { mode: 'vector_postcheck' } },
+      )
+    }
+    else if (template.templateId === 'b9-product-showcase') {
+      runtimeSteps.push(
+        { name: 'storyboard_analysis', order: 1, config: { source: 'reference_video' } },
+        { name: 'style_rewrite', order: 2, config: { required: true, scope: 'per_scene' } },
+        { name: 'chain_render', order: 3, config: { engine: 'kling_v3_omni' } },
+        { name: 'subtitle_overlay', order: 4, config: { source: 'reference_audio' } },
+        { name: 'dedup_validation', order: 5, config: { mode: 'vector_postcheck' } },
+      )
+    }
+
+    if (runtimeSteps.length === 0) {
+      runtimeSteps.push({ name: 'render', order: 1, config: { source: 'runtime_template' } })
+    }
+
+    return this.normalizeTemplateSteps(runtimeSteps)
+  }
+
+  private serializeTemplate(template: Record<string, any>, runtime?: TemplateRuntimeConfig | null) {
+    return {
+      id: template['_id'].toString(),
+      templateId: template['templateId'] || template['_id'].toString(),
+      name: template['name'],
+      description: template['description'] || '',
+      version: template['version'] || runtime?.version || '1.0',
+      category: template['category'] || runtime?.category || 'custom',
+      categories: template['categories'] || [],
+      styles: template['styles'] || [],
+      type: template['type'],
+      steps: template['steps'],
+      defaultParams: template['defaultParams'],
+      estimatedTimeSec: Number(template['estimatedTimeSec'] || runtime?.estimatedTimeSec || 0),
+      estimatedCost: Number(template['costPerVideo'] || runtime?.estimatedCost || 0),
+      qualityStars: Number(template['qualityStars'] || runtime?.qualityStars || 0),
+      limitations: template['limitations'] || runtime?.limitations || [],
+      verifiedClients: template['verifiedClients'] || runtime?.verifiedClients || [],
+      requiredInputs: template['requiredInputs'] || runtime?.requiredInputs || [],
+      optionalInputs: template['optionalInputs'] || runtime?.optionalInputs || [],
+      runtime: template['runtime'] || runtime?.runtime || null,
+      isPublic: template['isPublic'],
+      createdBy: template['createdBy'],
+      status: template['status'] || PipelineTemplateStatus.ACTIVE,
+      usageCount: template['usageCount'],
+      createdAt: template['createdAt'],
+      updatedAt: template['updatedAt'],
+    }
   }
 
   private normalizeTrainingPreferences(values: unknown) {

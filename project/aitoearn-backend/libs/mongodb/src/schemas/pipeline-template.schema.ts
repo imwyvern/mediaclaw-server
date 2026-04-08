@@ -41,6 +41,18 @@ class PipelineTemplateDefaultParams {
   extra: Record<string, any>
 }
 
+@Schema({ _id: false })
+class PipelineTemplateRuntime {
+  @Prop({ type: String, default: '' })
+  entrypoint: string
+
+  @Prop({ type: String, default: '' })
+  configPath: string
+
+  @Prop({ type: String, default: '' })
+  readmePath: string
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'pipeline_templates' })
 export class PipelineTemplate extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -55,6 +67,12 @@ export class PipelineTemplate extends WithTimestampSchema {
   @Prop({ type: String, default: '' })
   description?: string
 
+  @Prop({ type: String, default: '1.0' })
+  version: string
+
+  @Prop({ type: String, default: 'custom' })
+  category: string
+
   @Prop({ type: [String], default: [] })
   categories: string[]
 
@@ -66,6 +84,9 @@ export class PipelineTemplate extends WithTimestampSchema {
 
   @Prop({ type: Number, default: 0 })
   costPerVideo?: number
+
+  @Prop({ type: Number, default: 0 })
+  estimatedTimeSec: number
 
   @Prop({ type: Number, default: 0 })
   qualityStars?: number
@@ -84,6 +105,15 @@ export class PipelineTemplate extends WithTimestampSchema {
 
   @Prop({ type: PipelineTemplateDefaultParams, default: () => ({}) })
   defaultParams: PipelineTemplateDefaultParams
+
+  @Prop({ type: [String], default: [] })
+  requiredInputs: string[]
+
+  @Prop({ type: [String], default: [] })
+  optionalInputs: string[]
+
+  @Prop({ type: PipelineTemplateRuntime, default: () => ({}) })
+  runtime: PipelineTemplateRuntime
 
   @Prop({ type: Boolean, default: false, index: true })
   isPublic: boolean

@@ -12,6 +12,7 @@ import { PipelineModule } from '../pipeline/pipeline.module'
 import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { PipelineSystemController } from './pipeline-system.controller'
 import { PipelineSystemService } from './pipeline-system.service'
+import { TemplateRuntimeService } from './template-runtime.service'
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { PipelineSystemService } from './pipeline-system.service'
     VideoWorkerQueueModule,
   ],
   controllers: [PipelineSystemController],
-  providers: [PipelineSystemService],
-  exports: [PipelineSystemService],
+  providers: [PipelineSystemService, TemplateRuntimeService],
+  exports: [PipelineSystemService, TemplateRuntimeService],
 })
 export class PipelineSystemModule {}

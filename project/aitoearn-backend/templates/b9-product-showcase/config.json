@@ -1,0 +1,49 @@
+{
+  "templateId": "b9-product-showcase",
+  "name": "对标复刻展示",
+  "description": "对标参考视频 -> 分镜拆解 -> 逐镜换品首帧 + Style Rewrite -> Kling 链式生成 -> 音频字幕复用 -> FFmpeg 拼接",
+  "version": "1.0",
+  "category": "high_quality",
+  "type": "new_product",
+  "estimatedTimeSec": 1200,
+  "estimatedCost": 28.6,
+  "qualityStars": 5,
+  "categories": [
+    "high_quality",
+    "showcase"
+  ],
+  "styles": [
+    "product-showcase",
+    "reference-remix",
+    "premium"
+  ],
+  "defaultParams": {
+    "duration": 20,
+    "aspectRatio": "9:16",
+    "subtitleStyle": {
+      "mode": "reference_overlay"
+    },
+    "musicStyle": "product-showcase",
+    "extra": {
+      "styleRewrite": true,
+      "storyboardMode": "auto",
+      "dedupOnComplete": true
+    }
+  },
+  "requiredInputs": [
+    "brand_assets",
+    "reference_video_url"
+  ],
+  "optionalInputs": [
+    "first_frame_url",
+    "subtitle_text"
+  ],
+  "limitations": [
+    "依赖高质量参考视频和可拆解分镜",
+    "逐镜生成耗时明显高于 b7"
+  ],
+  "verifiedClients": [
+    "双跃",
+    "越小啤"
+  ]
+}

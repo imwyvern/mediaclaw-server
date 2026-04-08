@@ -1,0 +1,26 @@
+{
+  "templateId": "template-id",
+  "name": "模板名称",
+  "description": "在此描述模板的生产流程和适用场景。",
+  "version": "1.0",
+  "category": "custom",
+  "type": "custom",
+  "estimatedTimeSec": 600,
+  "estimatedCost": 0,
+  "qualityStars": 3,
+  "categories": [
+    "custom"
+  ],
+  "styles": [],
+  "defaultParams": {
+    "duration": 15,
+    "aspectRatio": "9:16",
+    "subtitleStyle": {},
+    "musicStyle": "",
+    "extra": {}
+  },
+  "requiredInputs": [],
+  "optionalInputs": [],
+  "limitations": [],
+  "verifiedClients": []
+}

@@ -11,6 +11,11 @@ vi.mock('@yikart/mongodb', () => {
     Pipeline,
     PipelineTemplate,
     VideoTask,
+    PipelineTemplateStatus: {
+      ACTIVE: 'active',
+      DRAFT: 'draft',
+      DEPRECATED: 'deprecated',
+    },
     PipelineStatus: {
       ACTIVE: 'active',
       PAUSED: 'paused',
@@ -53,6 +58,7 @@ describe('pipelineSystemService', () => {
   let videoTaskModel: Record<string, any>
   let videoWorkerQueue: Record<string, any>
   let pipelineService: Record<string, any>
+  let templateRuntimeService: Record<string, any>
 
   beforeEach(() => {
     pipelineTemplateModel = {
@@ -75,6 +81,68 @@ describe('pipelineSystemService', () => {
     pipelineService = {
       create: vi.fn().mockResolvedValue({ _id: new Types.ObjectId(), name: '种草线' }),
     }
+    templateRuntimeService = {
+      listTemplates: vi.fn().mockResolvedValue([
+        {
+          templateId: 'b7-ai-live',
+          name: 'AI 微动视频',
+          description: '专属首帧 → Style Rewrite → Kling V3 Omni 5s 微动',
+          version: '1.0',
+          category: 'fast_batch',
+          type: 'seeding',
+          estimatedTimeSec: 300,
+          estimatedCost: 15.1,
+          qualityStars: 3,
+          categories: ['fast_batch'],
+          styles: ['micro-motion'],
+          defaultParams: {
+            duration: 5,
+            aspectRatio: '9:16',
+            subtitleStyle: {},
+            musicStyle: 'micro-motion',
+            extra: { styleRewrite: true },
+          },
+          requiredInputs: ['brand_assets'],
+          optionalInputs: ['first_frame_url', 'reference_video_url'],
+          limitations: ['requires first frame'],
+          verifiedClients: ['双跃'],
+          runtime: {
+            entrypoint: '/tmp/templates/b7-ai-live/run.py',
+            configPath: '/tmp/templates/b7-ai-live/config.json',
+            readmePath: '/tmp/templates/b7-ai-live/README.md',
+          },
+        },
+        {
+          templateId: 'b9-product-showcase',
+          name: '对标复刻展示',
+          description: '对标参考视频 → 分镜拆解 → 逐镜生成',
+          version: '1.0',
+          category: 'high_quality',
+          type: 'new_product',
+          estimatedTimeSec: 1200,
+          estimatedCost: 28.6,
+          qualityStars: 5,
+          categories: ['high_quality'],
+          styles: ['showcase'],
+          defaultParams: {
+            duration: 20,
+            aspectRatio: '9:16',
+            subtitleStyle: {},
+            musicStyle: 'product-showcase',
+            extra: { styleRewrite: true },
+          },
+          requiredInputs: ['brand_assets', 'reference_video_url'],
+          optionalInputs: ['subtitle_text'],
+          limitations: ['requires reference video'],
+          verifiedClients: ['双跃', '越小啤'],
+          runtime: {
+            entrypoint: '/tmp/templates/b9-product-showcase/run.py',
+            configPath: '/tmp/templates/b9-product-showcase/config.json',
+            readmePath: '/tmp/templates/b9-product-showcase/README.md',
+          },
+        },
+      ]),
+    }
 
     service = new PipelineSystemService(
       pipelineTemplateModel as any,
@@ -82,13 +150,14 @@ describe('pipelineSystemService', () => {
       videoTaskModel as any,
       videoWorkerQueue as any,
       pipelineService as any,
+      templateRuntimeService as any,
     )
   })
 
-  it('应在模块初始化时写入 5 个预置模板', async () => {
+  it('应在模块初始化时写入 5 个预置模板和 2 个运行时模板', async () => {
     await service.onModuleInit()
 
-    expect(pipelineTemplateModel.findOneAndUpdate).toHaveBeenCalledTimes(5)
+    expect(pipelineTemplateModel.findOneAndUpdate).toHaveBeenCalledTimes(7)
     expect(pipelineTemplateModel.findOneAndUpdate).toHaveBeenCalledWith(
       { templateId: 'preset-seeding-line' },
       expect.any(Object),
@@ -97,6 +166,20 @@ describe('pipelineSystemService', () => {
     expect(pipelineTemplateModel.findOneAndUpdate).toHaveBeenCalledWith(
       { templateId: 'preset-promo-line' },
       expect.any(Object),
+      expect.objectContaining({ upsert: true }),
+    )
+    expect(pipelineTemplateModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { templateId: 'b7-ai-live' },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          version: '1.0',
+          category: 'fast_batch',
+          requiredInputs: ['brand_assets'],
+          runtime: expect.objectContaining({
+            entrypoint: '/tmp/templates/b7-ai-live/run.py',
+          }),
+        }),
+      }),
       expect.objectContaining({ upsert: true }),
     )
   })
