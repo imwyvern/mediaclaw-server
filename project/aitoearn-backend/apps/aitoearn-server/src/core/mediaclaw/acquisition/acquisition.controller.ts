@@ -1,10 +1,10 @@
 import { Body, Get, Param, Post, Query } from '@nestjs/common'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
-import { TikHubService } from './tikhub.service'
+import { AcquisitionService } from './acquisition.service'
 
 @MediaClawApiController('api/v1/acquisition')
 export class AcquisitionController {
-  constructor(private readonly tikHubService: TikHubService) {}
+  constructor(private readonly acquisitionService: AcquisitionService) {}
 
   @Get('search')
   async searchVideos(
@@ -12,7 +12,7 @@ export class AcquisitionController {
     @Query('keyword') keyword: string,
     @Query('limit') limit?: string,
   ) {
-    return this.tikHubService.searchVideos(platform, keyword, limit ? Number(limit) : undefined)
+    return this.acquisitionService.searchVideos(platform, keyword, limit ? Number(limit) : undefined)
   }
 
   @Get('detail/:id')
@@ -20,16 +20,16 @@ export class AcquisitionController {
     @Param('id') id: string,
     @Query('platform') platform: string,
   ) {
-    return this.tikHubService.getVideoDetail(platform, id)
+    return this.acquisitionService.getVideoDetail(platform, id)
   }
 
   @Get('track/:id')
   async trackPerformance(@Param('id') id: string) {
-    return this.tikHubService.trackPerformance(id)
+    return this.acquisitionService.trackPerformance(id)
   }
 
   @Post('source')
   async getSourceVideo(@Body() body: { videoUrl?: string }) {
-    return this.tikHubService.getSourceVideo(body.videoUrl || '')
+    return this.acquisitionService.getSourceVideo(body.videoUrl || '')
   }
 }

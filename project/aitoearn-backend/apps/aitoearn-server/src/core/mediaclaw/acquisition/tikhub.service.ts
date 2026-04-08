@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
+import { ContentProvider } from './content-provider.interface'
 
 const SUPPORTED_TIKHUB_PLATFORMS = ['douyin', 'xhs', 'kuaishou', 'bilibili'] as const
 
@@ -16,7 +17,7 @@ interface TikHubRequestContract {
 }
 
 export interface SearchVideoSummary {
-  platform: TikHubPlatform
+  platform: string
   videoId: string
   title: string
   author: string
@@ -63,11 +64,13 @@ interface PlatformContract {
 }
 
 @Injectable()
-export class TikHubService {
+export class TikHubService implements ContentProvider {
   private readonly logger = new Logger(TikHubService.name)
   private readonly defaultBaseUrl = 'https://api.tikhub.io'
   private readonly requestTimeoutMs = 5000
   private readonly maxAttempts = 2
+  readonly providerName = 'tikhub'
+  readonly priority = 10
 
   /**
    * TikHub contract notes:
@@ -93,6 +96,7 @@ export class TikHubService {
     if (!this.hasApiKey()) {
       this.warnUnavailable('searchVideos')
       return {
+        provider: this.providerName,
         source: 'unavailable',
         reason: 'TIKHUB_API_KEY not configured',
         platform: normalizedPlatform,
@@ -107,6 +111,7 @@ export class TikHubService {
     const items = this.parseSearchResponse(normalizedPlatform, response, safeLimit)
 
     return {
+      provider: this.providerName,
       source: 'tikhub',
       platform: normalizedPlatform,
       keyword: safeKeyword,
@@ -130,6 +135,7 @@ export class TikHubService {
     if (!this.hasApiKey()) {
       this.warnUnavailable('getVideoDetail')
       return {
+        provider: this.providerName,
         source: 'unavailable',
         reason: 'TIKHUB_API_KEY not configured',
         platform: normalizedPlatform,
@@ -142,6 +148,7 @@ export class TikHubService {
     const response = await this.requestWithRetry<Record<string, unknown>>(contract.detail)
 
     return {
+      provider: this.providerName,
       source: 'tikhub',
       platform: normalizedPlatform,
       videoId: safeVideoId,
@@ -159,6 +166,7 @@ export class TikHubService {
     if (!this.hasApiKey()) {
       this.warnUnavailable('trackPerformance')
       return {
+        provider: this.providerName,
         source: 'unavailable',
         reason: 'TIKHUB_API_KEY not configured',
         videoId: safeVideoId,
@@ -175,18 +183,21 @@ export class TikHubService {
         const data = this.parseDetailResponse(platform, response, safeVideoId)
         if (data) {
           return {
+            provider: this.providerName,
             source: 'tikhub',
             platform,
             videoId: safeVideoId,
             data,
           }
         }
-      } catch {
+      }
+      catch {
         continue
       }
     }
 
     return {
+      provider: this.providerName,
       source: 'unavailable',
       reason: 'Could not resolve platform for videoId',
       videoId: safeVideoId,
@@ -211,6 +222,7 @@ export class TikHubService {
     if (!this.hasApiKey()) {
       this.warnUnavailable('getSourceVideo')
       return {
+        provider: this.providerName,
         source: 'unavailable',
         reason: 'TIKHUB_API_KEY not configured',
         platform,
@@ -226,11 +238,22 @@ export class TikHubService {
       : this.parseSourceResponse(platform, response, normalizedShareUrl)
 
     return {
+      provider: this.providerName,
       source: 'tikhub',
       platform,
       videoUrl: normalizedShareUrl,
       request: contract.sourceByShareUrl,
       data,
+    }
+  }
+
+  supportsPlatform(platform: string) {
+    try {
+      this.assertPlatform(platform)
+      return true
+    }
+    catch {
+      return false
     }
   }
 
@@ -479,7 +502,7 @@ export class TikHubService {
       payload['items'],
     )
 
-    return items.slice(0, limit).map(item => {
+    return items.slice(0, limit).map((item) => {
       const author = this.asRecord(item['author'])
       const statistics = this.asRecord(item['statistics'])
       const video = this.asRecord(item['video'])
@@ -513,7 +536,7 @@ export class TikHubService {
       payload['data'],
     )
 
-    return items.slice(0, limit).map(item => {
+    return items.slice(0, limit).map((item) => {
       const note = this.pickFirstRecord(item['note'], item['note_card'], item)
       const user = this.pickFirstRecord(note?.['user'], item['user'])
       const interactInfo = this.pickFirstRecord(note?.['interact_info'], item['interact_info'])
@@ -552,7 +575,7 @@ export class TikHubService {
       payload['data'],
     )
 
-    return items.slice(0, limit).map(item => {
+    return items.slice(0, limit).map((item) => {
       const author = this.pickFirstRecord(item['author'], item['user'])
       const stats = this.pickFirstRecord(item['stats'], item['statistics'])
 
@@ -793,11 +816,21 @@ export class TikHubService {
   }
 
   private assertPlatform(platform: string): TikHubPlatform {
-    if ((SUPPORTED_TIKHUB_PLATFORMS as readonly string[]).includes(platform)) {
-      return platform as TikHubPlatform
+    const normalizedPlatform = this.normalizePlatformInput(platform)
+    if ((SUPPORTED_TIKHUB_PLATFORMS as readonly string[]).includes(normalizedPlatform)) {
+      return normalizedPlatform as TikHubPlatform
     }
 
     throw new BadRequestException(`platform must be one of: ${SUPPORTED_TIKHUB_PLATFORMS.join(', ')}`)
+  }
+
+  private normalizePlatformInput(platform: string) {
+    const normalized = platform.trim().toLowerCase()
+    if (normalized === 'xiaohongshu' || normalized === 'rednote') {
+      return 'xhs'
+    }
+
+    return normalized
   }
 
   private normalizeLimit(limit: number) {
@@ -871,7 +904,7 @@ export class TikHubService {
   }
 
   private extractBilibiliVideoId(url: string): string {
-    const match = url.match(/BV[a-zA-Z0-9]+/i)
+    const match = url.match(/BV[a-z0-9]+/i)
     return match?.[0] || ''
   }
 

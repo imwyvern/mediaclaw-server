@@ -1,12 +1,12 @@
 import { describeModuleSpec } from '../testing/module-spec.factory'
 import { AcquisitionController } from './acquisition.controller'
 import { AcquisitionModule } from './acquisition.module'
-import { TikHubService } from './tikhub.service'
+import { AcquisitionService } from './acquisition.service'
 
-describeModuleSpec<TikHubService>({
+describeModuleSpec<AcquisitionService>({
   suiteName: 'AcquisitionModule',
   module: AcquisitionModule,
-  service: TikHubService,
+  service: AcquisitionService,
   controller: AcquisitionController,
   keyMethods: ['searchVideos', 'getVideoDetail', 'getSourceVideo'],
 })

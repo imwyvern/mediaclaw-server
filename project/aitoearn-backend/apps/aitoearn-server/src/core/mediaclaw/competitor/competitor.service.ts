@@ -6,9 +6,9 @@ import {
 import { InjectModel } from '@nestjs/mongoose'
 import { Brand, Competitor, Organization, ViralContent } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { AcquisitionService } from '../acquisition/acquisition.service'
 import {
   SearchVideoSummary,
-  TikHubService,
 } from '../acquisition/tikhub.service'
 import { DiscoveryService } from '../discovery/discovery.service'
 
@@ -49,7 +49,7 @@ export class CompetitorService {
     private readonly brandModel: Model<Brand>,
     @InjectModel(Organization.name)
     private readonly organizationModel: Model<Organization>,
-    private readonly tikHubService: TikHubService,
+    private readonly acquisitionService: AcquisitionService,
     private readonly discoveryService: DiscoveryService,
   ) {}
 
@@ -341,7 +341,7 @@ export class CompetitorService {
     let scannedCount = 0
 
     for (const term of context.searchTerms) {
-      const response = await this.tikHubService.searchVideos(
+      const response = await this.acquisitionService.searchVideos(
         competitor.platform,
         term,
         10,

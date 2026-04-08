@@ -1,7 +1,7 @@
 import { InjectQueue } from '@nestjs/bullmq'
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { Job, Queue } from 'bullmq'
-import { TikHubService } from '../acquisition/tikhub.service'
+import { AcquisitionService } from '../acquisition/acquisition.service'
 
 export const MEDIACLAW_CRAWL_QUEUE = 'mediaclaw_crawl'
 
@@ -36,7 +36,7 @@ export interface CrawlRouteDecision {
   reason: string
   tikhubResultCount: number
   requestedDepth: number
-  tikhubResponse: Awaited<ReturnType<TikHubService['searchVideos']>>
+  tikhubResponse: Awaited<ReturnType<AcquisitionService['searchVideos']>>
   mediaCrawlerPro?: {
     source: 'MediaCrawlerPro'
     request: {
@@ -69,7 +69,7 @@ export class CrawlerService {
   constructor(
     @InjectQueue(MEDIACLAW_CRAWL_QUEUE)
     private readonly crawlQueue: Queue<CrawlJobData>,
-    private readonly tikHubService: TikHubService,
+    private readonly acquisitionService: AcquisitionService,
   ) {}
 
   async enqueueCrawl(
@@ -187,7 +187,7 @@ export class CrawlerService {
   }
 
   async dualLayerRoute(query: CrawlQuery): Promise<CrawlRouteDecision> {
-    const tikhubResponse = await this.tikHubService.searchVideos(
+    const tikhubResponse = await this.acquisitionService.searchVideos(
       query.platform,
       query.keyword,
       Math.max(5, query.depth * 3),

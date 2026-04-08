@@ -9,7 +9,7 @@ import {
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
-import { TikHubPlatform, TikHubService } from '../acquisition/tikhub.service'
+import { AcquisitionService } from '../acquisition/acquisition.service'
 
 interface AnalyticsMetricsInput {
   views?: number
@@ -56,7 +56,7 @@ export class AnalyticsCollectorService {
     private readonly videoTaskModel: Model<VideoTask>,
     @InjectModel(VideoAnalytics.name)
     private readonly videoAnalyticsModel: Model<VideoAnalytics>,
-    private readonly tikHubService: TikHubService,
+    private readonly acquisitionService: AcquisitionService,
   ) {}
 
   @Cron('0 3 * * *')
@@ -327,15 +327,15 @@ export class AnalyticsCollectorService {
 
     await this.videoTaskModel.findByIdAndUpdate(task['_id'], {
       $set: {
-        analyticsSnapshot: {
+        'analyticsSnapshot': {
           views: metrics.views,
           likes: metrics.likes,
           comments: metrics.comments,
           shares: metrics.shares,
           engagementRate: snapshotPayload.engagementRate,
         },
-        platformPostId: task['platformPostId'] || snapshotPayload.publishPostId,
-        platformPostUrl: task['platformPostUrl'] || snapshotPayload.publishPostUrl,
+        'platformPostId': task['platformPostId'] || snapshotPayload.publishPostId,
+        'platformPostUrl': task['platformPostUrl'] || snapshotPayload.publishPostUrl,
         'metadata.analytics': snapshotPayload,
         'metadata.analyticsSnapshot': snapshotPayload,
         'metadata.analytics_snapshot': snapshotPayload,
@@ -536,7 +536,7 @@ export class AnalyticsCollectorService {
   }
 
   private async resolveCollectionMetrics(task: VideoTaskRecord): Promise<ResolvedCollectionMetrics> {
-    const platform = this.toTikHubPlatform(this.readPlatform(task))
+    const platform = this.toSupportedPlatform(this.readPlatform(task))
     const publishPostId = this.readPublishPostId(task)
     const publishPostUrl = this.readPublishPostUrl(task)
 
@@ -547,10 +547,10 @@ export class AnalyticsCollectorService {
     }
 
     if (publishPostId) {
-      const detail = await this.tikHubService.getVideoDetail(platform, publishPostId)
-      if (detail.source === 'tikhub' && detail.data) {
+      const detail = await this.acquisitionService.getVideoDetail(platform, publishPostId)
+      if (detail.source !== 'unavailable' && detail.data) {
         return {
-          source: 'tikhub',
+          source: this.normalizeCollectionSource(detail.source),
           metrics: {
             ...detail.data.metrics,
             publishPostId: detail.data.videoId || publishPostId,
@@ -558,9 +558,10 @@ export class AnalyticsCollectorService {
           },
           publishPostId: detail.data.videoId || publishPostId,
           publishPostUrl: detail.data.contentUrl || publishPostUrl,
-          dataSource: VideoAnalyticsDataSource.TIKHUB,
+          dataSource: this.resolveAnalyticsDataSource(detail.source),
           raw: {
             collector: 'analytics-collector',
+            provider: detail.provider,
             request: detail.request,
             response: detail.data,
             collectedAt: new Date().toISOString(),
@@ -570,10 +571,10 @@ export class AnalyticsCollectorService {
     }
 
     if (publishPostId) {
-      const performance = await this.tikHubService.trackPerformance(publishPostId)
-      if (performance.source === 'tikhub' && performance.data) {
+      const performance = await this.acquisitionService.trackPerformance(publishPostId)
+      if (performance.source !== 'unavailable' && performance.data) {
         return {
-          source: 'tikhub',
+          source: this.normalizeCollectionSource(performance.source),
           metrics: {
             ...performance.data.metrics,
             publishPostId: performance.data.videoId || publishPostId,
@@ -581,9 +582,10 @@ export class AnalyticsCollectorService {
           },
           publishPostId: performance.data.videoId || publishPostId,
           publishPostUrl: performance.data.contentUrl || publishPostUrl,
-          dataSource: VideoAnalyticsDataSource.TIKHUB,
+          dataSource: this.resolveAnalyticsDataSource(performance.source),
           raw: {
             collector: 'analytics-collector',
+            provider: performance.provider,
             response: performance.data,
             collectedAt: new Date().toISOString(),
           },
@@ -623,7 +625,7 @@ export class AnalyticsCollectorService {
     }
   }
 
-  private toTikHubPlatform(platform: string): TikHubPlatform | null {
+  private toSupportedPlatform(platform: string): string | null {
     switch (platform.trim().toLowerCase()) {
       case 'douyin':
         return 'douyin'
@@ -638,6 +640,25 @@ export class AnalyticsCollectorService {
       default:
         return null
     }
+  }
+
+  private resolveAnalyticsDataSource(source: string) {
+    switch (source) {
+      case VideoAnalyticsDataSource.MEDIACRAWLER:
+        return VideoAnalyticsDataSource.MEDIACRAWLER
+      case VideoAnalyticsDataSource.TIKHUB:
+        return VideoAnalyticsDataSource.TIKHUB
+      default:
+        return VideoAnalyticsDataSource.MANUAL
+    }
+  }
+
+  private normalizeCollectionSource(source: string): ResolvedCollectionMetrics['source'] {
+    return source === VideoAnalyticsDataSource.MEDIACRAWLER
+      ? 'mediacrawler'
+      : source === VideoAnalyticsDataSource.TIKHUB
+        ? 'tikhub'
+        : 'unavailable'
   }
 
   private toSnapshotResponse(snapshot: AnalyticsRecord) {
