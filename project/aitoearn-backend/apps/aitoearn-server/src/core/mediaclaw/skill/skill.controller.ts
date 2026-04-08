@@ -30,6 +30,14 @@ export class SkillController {
     })
   }
 
+  @Get('capabilities')
+  async discoverCapabilities(@GetToken() user: MediaClawAuthUser, @Query('agentId') agentId: string) {
+    return this.skillService.discoverCapabilities(agentId, {
+      orgId: user.orgId || user.id,
+      userId: user.id,
+    })
+  }
+
   @Post('feedback')
   async submitFeedback(
     @GetToken() user: MediaClawAuthUser,

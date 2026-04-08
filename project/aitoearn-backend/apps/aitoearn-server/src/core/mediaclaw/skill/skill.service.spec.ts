@@ -8,5 +8,5 @@ describeModuleSpec<SkillService>({
   module: SkillModule,
   service: SkillService,
   controller: SkillController,
-  keyMethods: ['registerAgent', 'getAgentConfig', 'confirmDelivery'],
+  keyMethods: ['registerAgent', 'getAgentConfig', 'discoverCapabilities', 'confirmDelivery'],
 })

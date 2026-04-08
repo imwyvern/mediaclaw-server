@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose'
 import { Brand, Pipeline, PipelineStatus, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { MEDIACLAW_DISTRIBUTABLE_STATUSES } from '../video-task-status.utils'
+import { buildCapabilityDiscovery, normalizeAgentCapabilities } from './skill-capability.catalog'
 
 interface SkillScope {
   orgId: string
@@ -32,9 +33,10 @@ export class SkillService {
   async registerAgent(agentId: string, capabilities: string[], scope: SkillScope) {
     const now = new Date()
     const registryKey = this.buildRegistryKey(agentId, scope.orgId)
+    const normalizedCapabilities = normalizeAgentCapabilities(capabilities)
     const registration: AgentRegistration = {
       agentId,
-      capabilities: [...new Set((capabilities || []).filter(Boolean))],
+      capabilities: normalizedCapabilities,
       orgId: scope.orgId,
       userId: scope.userId,
       registeredAt: this.agentRegistry.get(registryKey)?.registeredAt ?? now,
@@ -53,6 +55,7 @@ export class SkillService {
     return {
       ...registration,
       totalCapabilities: registration.capabilities.length,
+      capabilityLayers: buildCapabilityDiscovery(registration.capabilities),
     }
   }
 
@@ -73,10 +76,16 @@ export class SkillService {
     ])
 
     const primaryPipeline = pipelines[0]
+    const capabilityLayers = buildCapabilityDiscovery(registration.capabilities)
 
     return {
       agentId,
       capabilities: registration.capabilities,
+      capabilityLayers,
+      capabilitySummary: {
+        total: capabilityLayers.length,
+        enabled: capabilityLayers.filter(layer => layer.enabled).length,
+      },
       brands: brands.map(brand => ({
         id: brand._id?.toString(),
         name: brand.name,
@@ -98,6 +107,27 @@ export class SkillService {
         preferredStyles: primaryPipeline?.preferences?.preferredStyles ?? [],
         avoidStyles: primaryPipeline?.preferences?.avoidStyles ?? [],
         subtitlePreferences: primaryPipeline?.preferences?.subtitlePreferences ?? {},
+      },
+      registeredAt: registration.registeredAt,
+      lastSeenAt: registration.lastSeenAt,
+    }
+  }
+
+  async discoverCapabilities(agentId: string, scope: SkillScope) {
+    const registration = this.touchRegistration(agentId, scope.orgId)
+    const capabilityLayers = buildCapabilityDiscovery(registration.capabilities)
+
+    return {
+      agentId,
+      capabilities: registration.capabilities,
+      layers: capabilityLayers,
+      summary: {
+        totalLayers: capabilityLayers.length,
+        enabledLayers: capabilityLayers.filter(layer => layer.enabled).length,
+        totalCommands: capabilityLayers.reduce((total, layer) => total + layer.commands.length, 0),
+        enabledCommands: capabilityLayers
+          .filter(layer => layer.enabled)
+          .reduce((total, layer) => total + layer.commands.length, 0),
       },
       registeredAt: registration.registeredAt,
       lastSeenAt: registration.lastSeenAt,

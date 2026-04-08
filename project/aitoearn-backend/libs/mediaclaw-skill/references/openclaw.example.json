@@ -6,12 +6,13 @@
   },
   "env": [
     "MEDIACLAW_API_KEY",
-    "MEDIACLAW_AGENT_ID"
+    "MEDIACLAW_AGENT_ID",
+    "MEDIACLAW_CLIENT_VERSION"
   ],
   "autoCheck": {
     "enabled": true,
     "intervalSeconds": 300,
-    "command": "deliveries --agent ${MEDIACLAW_AGENT_ID}"
+    "command": "heartbeat --agent ${MEDIACLAW_AGENT_ID}"
   },
   "downloadDir": "${MEDIACLAW_DOWNLOAD_DIR:-./downloads/mediaclaw}",
   "notification": {

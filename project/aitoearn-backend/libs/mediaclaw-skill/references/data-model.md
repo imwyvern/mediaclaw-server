@@ -4,7 +4,9 @@
 
 - `MEDIACLAW_API_KEY`: required bearer token for all API calls
 - `MEDIACLAW_BASE_URL`: optional API origin, defaults to `https://api.mediaclaw.com`
-- `MEDIACLAW_AGENT_ID`: optional agent id for skill registration, delivery polling, and feedback submission
+- `MEDIACLAW_AGENT_ID`: optional agent id for skill registration, capability discovery, heartbeat, delivery polling, and feedback submission
+- `MEDIACLAW_CLIENT_VERSION`: optional version string reported by `heartbeat`
+- `MEDIACLAW_AGENT_CAPABILITIES`: optional comma-separated capability fallback used by `heartbeat`
 - `MEDIACLAW_DOWNLOAD_DIR`: optional default directory for downloaded videos
 
 ## Core Routes
@@ -13,9 +15,11 @@
 
 - `POST /api/v1/skill/register`
 - `GET /api/v1/skill/config?agentId=<id>`
+- `GET /api/v1/skill/capabilities?agentId=<id>`
 - `GET /api/v1/skill/deliveries?agentId=<id>`
 - `POST /api/v1/skill/confirm-delivery`
 - `POST /api/v1/skill/feedback`
+- `POST /api/v1/heartbeat`
 
 ### Content Endpoints
 
@@ -29,14 +33,45 @@
 
 ### Analytics And Account
 
-- `GET /api/v1/account`
-- `GET /api/v1/account/usage`
+- `GET /api/v1/account/info`
+- `GET /api/v1/usage/summary`
 - `GET /api/v1/analytics/overview`
+- `GET /api/v1/analytics/content/:id`
 - `GET /api/v1/analytics/trends?period=daily|weekly|monthly`
+- `GET /api/v1/analytics/top`
+- `GET /api/v1/analytics/seo`
+- `POST /api/v1/analytics/report`
+- `GET /api/v1/audit-logs`
+- `GET /api/v1/discovery/pool`
 
 ### Task Scheduling
 
 - `POST /api/v1/tasks`
+- `GET /api/v1/tasks`
+- `GET /api/v1/tasks/:id`
+- `PATCH /api/v1/tasks/:id`
+- `POST /api/v1/tasks/:id/cancel`
+- `POST /api/v1/tasks/:id/retry`
+- `GET /api/v1/tasks/timeline/:id`
+
+### Brand, Pipeline, Campaign
+
+- `GET /api/v1/brand`
+- `GET /api/v1/brand/:id`
+- `PATCH /api/v1/brand/:id`
+- `PATCH /api/v1/brand/:id/assets`
+- `GET /api/v1/pipelines`
+- `GET /api/v1/pipelines/:id`
+- `POST /api/v1/pipelines`
+- `PATCH /api/v1/pipelines/:id`
+- `PATCH /api/v1/pipelines/:id/preferences`
+- `PATCH /api/v1/pipelines/:id/bind-group`
+- `GET /api/v1/campaigns`
+- `POST /api/v1/campaigns`
+- `GET /api/v1/campaigns/:id`
+- `GET /api/v1/campaigns/:id/videos`
+- `PATCH /api/v1/campaigns/:id`
+- `DELETE /api/v1/campaigns/:id`
 
 ## Enum Contract
 
@@ -103,6 +138,8 @@
 
 ## Suggested Client Behavior
 
+- Start each agent session with `register`, then call `discover` to align the L1-L4 capability map.
+- Use `heartbeat` as the default auto-check command so the server can push pending queue work and config updates.
 - Use `pending` for reviewer-specific queues.
 - Use `deliveries` when the client acts as a pull-based delivery agent.
 - Always `preview` before `download all` in bulk workflows.
