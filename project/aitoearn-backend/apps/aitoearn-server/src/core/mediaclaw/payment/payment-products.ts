@@ -1,6 +1,9 @@
 import {
+  BillingMode,
+  OrgType,
   PackType,
   PaymentProductType,
+  SubscriptionPlan,
 } from '@yikart/mongodb'
 
 export interface PaymentProductDefinition {
@@ -12,9 +15,40 @@ export interface PaymentProductDefinition {
   currency: 'CNY'
   unitCredits?: number
   packType?: PackType
+  subscriptionPlan?: SubscriptionPlan
+  monthlyFeeCents?: number
+  perVideoCents?: number
+  defaultBillingMode?: BillingMode
+  recommendedOrgType?: OrgType
 }
 
 const productCatalog = [
+  {
+    id: 'team_monthly',
+    name: 'Team 月度订阅',
+    description: '企业 Team 套餐，支持月度升级或续费',
+    productType: PaymentProductType.SUBSCRIPTION,
+    unitAmount: 98000,
+    currency: 'CNY',
+    subscriptionPlan: SubscriptionPlan.TEAM,
+    monthlyFeeCents: 98000,
+    perVideoCents: 2500,
+    defaultBillingMode: BillingMode.QUOTA,
+    recommendedOrgType: OrgType.TEAM,
+  },
+  {
+    id: 'pro_monthly',
+    name: 'Pro 月度订阅',
+    description: '企业 Pro 套餐，支持月度升级或续费',
+    productType: PaymentProductType.SUBSCRIPTION,
+    unitAmount: 298000,
+    currency: 'CNY',
+    subscriptionPlan: SubscriptionPlan.PRO,
+    monthlyFeeCents: 298000,
+    perVideoCents: 2000,
+    defaultBillingMode: BillingMode.QUOTA,
+    recommendedOrgType: OrgType.PROFESSIONAL,
+  },
   {
     id: 'single',
     name: '单条视频',
@@ -67,4 +101,60 @@ export function getPaymentProduct(productId: string) {
 
 export function listPaymentProducts() {
   return productCatalog.map(product => ({ ...product }))
+}
+
+export function resolveSubscriptionProduct(
+  plan: SubscriptionPlan,
+  input: {
+    monthlyFeeCents?: number | null
+    billingMode?: BillingMode | null
+  } = {},
+): PaymentProductDefinition {
+  const product = productCatalog.find(item => item.subscriptionPlan === plan)
+  if (product) {
+    if (
+      plan !== SubscriptionPlan.FLAGSHIP
+      || !input.monthlyFeeCents
+      || input.monthlyFeeCents <= 0
+    ) {
+      return {
+        ...product,
+        defaultBillingMode: input.billingMode || product.defaultBillingMode,
+      }
+    }
+  }
+
+  if (plan !== SubscriptionPlan.FLAGSHIP) {
+    throw new Error(`Unsupported subscription plan: ${plan}`)
+  }
+
+  const monthlyFeeCents = Number(input.monthlyFeeCents || 0)
+  if (!Number.isFinite(monthlyFeeCents) || monthlyFeeCents <= 0) {
+    throw new Error('Flagship plan requires monthlyFeeCents')
+  }
+
+  return {
+    id: 'flagship_monthly',
+    name: 'Flagship 月度订阅',
+    description: '企业旗舰套餐，按合同金额续费',
+    productType: PaymentProductType.SUBSCRIPTION,
+    unitAmount: Math.trunc(monthlyFeeCents),
+    currency: 'CNY',
+    subscriptionPlan: SubscriptionPlan.FLAGSHIP,
+    monthlyFeeCents: Math.trunc(monthlyFeeCents),
+    perVideoCents: 1500,
+    defaultBillingMode: input.billingMode || BillingMode.QUOTA,
+    recommendedOrgType: OrgType.ENTERPRISE,
+  }
+}
+
+export function resolveSubscriptionOrgType(plan: SubscriptionPlan) {
+  if (plan === SubscriptionPlan.TEAM) {
+    return OrgType.TEAM
+  }
+  if (plan === SubscriptionPlan.PRO) {
+    return OrgType.PROFESSIONAL
+  }
+
+  return OrgType.ENTERPRISE
 }

@@ -10,14 +10,13 @@ import {
 import { Throttle } from '@nestjs/throttler'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import {
-  PaymentMethod,
-  PaymentProductType,
   PaymentStatus,
-  userRoleSatisfies,
   UserRole,
+  userRoleSatisfies,
 } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PaymentCreateThrottleGuard } from './payment-create-throttle.guard'
+import { CreatePaymentOrderDto } from './payment.dto'
 import { XorPayService } from './xorpay.service'
 
 interface AuthenticatedPaymentUser {
@@ -46,15 +45,7 @@ export class XorPayController {
   })
   async createOrder(
     @GetToken() user: AuthenticatedPaymentUser,
-    @Body()
-    body: {
-      productId: string
-      paymentMethod: PaymentMethod
-      quantity?: number
-      productType?: PaymentProductType
-      openId?: string
-      clientIp?: string
-    },
+    @Body() body: CreatePaymentOrderDto,
     @Headers('x-forwarded-for') forwardedFor?: string,
     @Headers('x-real-ip') realIp?: string,
   ) {
@@ -66,6 +57,10 @@ export class XorPayController {
       productType: body.productType,
       quantity: body.quantity,
       openId: body.openId,
+      invoiceId: body.invoiceId,
+      subscriptionPlan: body.subscriptionPlan,
+      billingMode: body.billingMode,
+      monthlyFeeCents: body.monthlyFeeCents,
       clientIp: body.clientIp || forwardedFor?.split(',')[0]?.trim() || realIp,
     })
   }

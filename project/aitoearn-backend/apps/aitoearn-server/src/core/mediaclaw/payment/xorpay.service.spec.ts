@@ -58,9 +58,17 @@ function createOrderDocument(overrides: Record<string, unknown> = {}) {
     paymentMethod: PaymentMethod.WECHAT_NATIVE,
     status: PaymentStatus.PENDING,
     callbackData: {},
+    payResult: null,
+    metadata: {},
     productType: PaymentProductType.VIDEO_PACK,
     productId: 'pack_10',
+    productName: '10条套餐',
     quantity: 1,
+    payChannel: 'xorpay',
+    xorpayOrderId: null,
+    xorpayPayUrl: null,
+    benefitGranted: false,
+    benefitGrantedAt: null,
     paidAt: null,
     expiredAt: new Date(Date.now() + 30 * 60 * 1000),
     createdAt: new Date(),
@@ -88,6 +96,9 @@ describe('xorPayService', () => {
   let service: XorPayService
   let orderModel: Record<string, any>
   let videoPackModel: Record<string, any>
+  let subscriptionModel: Record<string, any>
+  let invoiceModel: Record<string, any>
+  let organizationModel: Record<string, any>
   let distributionService: Record<string, any>
 
   beforeEach(() => {
@@ -109,6 +120,22 @@ describe('xorPayService', () => {
       findOne: vi.fn(),
     }
 
+    subscriptionModel = {
+      findOne: vi.fn(),
+      findByIdAndUpdate: vi.fn(),
+      create: vi.fn(),
+    }
+
+    invoiceModel = {
+      findById: vi.fn(),
+      findByIdAndUpdate: vi.fn(),
+    }
+
+    organizationModel = {
+      findById: vi.fn(),
+      findByIdAndUpdate: vi.fn(),
+    }
+
     distributionService = {
       notifyPaymentSuccess: vi.fn().mockResolvedValue(undefined),
     }
@@ -116,14 +143,25 @@ describe('xorPayService', () => {
     service = new XorPayService(
       orderModel as any,
       videoPackModel as any,
+      subscriptionModel as any,
+      invoiceModel as any,
+      organizationModel as any,
       distributionService as any,
     )
   })
 
-  it('应创建支付订单并返回 mock 网关信息', async () => {
+  it('应创建支付订单并返回网关支付地址', async () => {
+    process.env['XORPAY_API_URL'] = 'https://xorpay.example.com/create'
     const order = createOrderDocument()
+    orderModel.findOne.mockReturnValue(createQuery(null))
     orderModel.create.mockResolvedValue(order)
     orderModel.findByIdAndUpdate.mockReturnValue(createQuery(order))
+    axiosPost.mockResolvedValue({
+      data: {
+        pay_url: 'https://xorpay.example.com/pay/MCORDER001',
+        trade_no: 'xor-trade-001',
+      },
+    })
 
     const result = await service.createOrder({
       userId: 'user-1',
@@ -142,12 +180,11 @@ describe('xorPayService', () => {
       quantity: 2,
       status: PaymentStatus.PENDING,
     }))
-    expect(axiosPost).not.toHaveBeenCalled()
+    expect(axiosPost).toHaveBeenCalled()
     expect(result.orderId).toBe('MCORDER001')
+    expect(result.xorpayPayUrl).toBe('https://xorpay.example.com/pay/MCORDER001')
     expect(result.callbackData).toMatchObject({
-      gatewayMocked: true,
-      tradeNo: 'MCORDER001',
-      payUrl: 'xorpay://mock/MCORDER001',
+      tradeNo: 'xor-trade-001',
     })
   })
 
@@ -161,11 +198,20 @@ describe('xorPayService', () => {
       paidAt,
       callbackData: { source: 'callback' },
     })
+    const grantedOrder = createOrderDocument({
+      status: PaymentStatus.PAID,
+      paidAt,
+      benefitGranted: true,
+      benefitGrantedAt: paidAt,
+      callbackData: { source: 'callback' },
+    })
 
     orderModel.findOne
       .mockReturnValueOnce(createQuery(pendingOrder))
       .mockReturnValueOnce(createQuery({ ...pendingOrder }))
-    orderModel.findByIdAndUpdate.mockReturnValue(createQuery(paidOrder))
+    orderModel.findByIdAndUpdate
+      .mockReturnValueOnce(createQuery(paidOrder))
+      .mockReturnValueOnce(createQuery(grantedOrder))
     videoPackModel.findOne.mockReturnValue(createQuery(null))
     videoPackModel.create.mockResolvedValue(undefined)
 
@@ -173,6 +219,7 @@ describe('xorPayService', () => {
       order_id: pendingOrder.orderId,
       amount: '199.00',
       status: 'success',
+      pay_time: '1711706400',
     }
 
     const result = await service.handleCallback(
@@ -181,6 +228,7 @@ describe('xorPayService', () => {
     )
 
     expect(result.status).toBe(PaymentStatus.PAID)
+    expect(result.benefitGranted).toBe(true)
     expect(videoPackModel.create).toHaveBeenCalledWith(expect.objectContaining({
       userId: pendingOrder.userId,
       paymentOrderId: pendingOrder.orderId,
@@ -190,7 +238,7 @@ describe('xorPayService', () => {
       status: PackStatus.ACTIVE,
       purchasedAt: paidAt,
     }))
-    expect(distributionService.notifyPaymentSuccess).toHaveBeenCalledWith(paidOrder)
+    expect(distributionService.notifyPaymentSuccess).toHaveBeenCalledWith(grantedOrder)
   })
 
   it('应拒绝非法回调签名', async () => {

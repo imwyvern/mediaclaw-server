@@ -1,8 +1,14 @@
-import { Body, Get, Post, Query } from '@nestjs/common'
+import { Body, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
-import { InvoiceStatus } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
+import {
+  CreateInvoicePaymentDto,
+  CreateSubscriptionCheckoutDto,
+  ExportInvoicesDto,
+  GenerateInvoiceDto,
+  ReconcileBillingDto,
+} from './billing.dto'
 import { BillingService } from './billing.service'
 
 @MediaClawApiController('api/v1/billing')
@@ -49,15 +55,55 @@ export class BillingController {
     )
   }
 
+  @Get('subscription')
+  async getSubscription(@GetToken() user: { id: string, orgId?: string | null }) {
+    return this.billingService.getCurrentSubscription(user.orgId || user.id)
+  }
+
+  @Post('subscription/checkout')
+  async createSubscriptionCheckout(
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: CreateSubscriptionCheckoutDto,
+  ) {
+    return this.billingService.createSubscriptionCheckout(
+      user.id,
+      user.orgId || user.id,
+      body,
+    )
+  }
+
+  @Post('invoices/generate')
+  async generateInvoice(
+    @GetToken() user: { id: string, orgId?: string | null },
+    @Body() body: GenerateInvoiceDto,
+  ) {
+    return this.billingService.generateMonthlyInvoice(user.orgId || user.id, body)
+  }
+
+  @Post('invoices/:invoiceId/pay-link')
+  async createInvoicePaymentLink(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: CreateInvoicePaymentDto,
+  ) {
+    return this.billingService.createInvoicePaymentLink(
+      user.id,
+      user.orgId || user.id,
+      invoiceId,
+      body,
+    )
+  }
+
   @Post('export')
   async exportInvoices(
     @GetToken() user: { id: string, orgId?: string | null },
-    @Body() body: {
-      startDate?: string
-      endDate?: string
-      status?: InvoiceStatus
-    },
+    @Body() body: ExportInvoicesDto,
   ) {
     return this.billingService.exportInvoices(user.orgId || user.id, body)
+  }
+
+  @Post('reconcile')
+  async reconcileBilling(@Body() body: ReconcileBillingDto) {
+    return this.billingService.reconcileBilling(body.orgId)
   }
 }

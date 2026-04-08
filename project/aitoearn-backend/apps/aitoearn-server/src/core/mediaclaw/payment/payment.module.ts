@@ -2,8 +2,14 @@ import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import { ThrottlerModule } from '@nestjs/throttler'
 import {
+  Invoice,
+  InvoiceSchema,
+  Organization,
+  OrganizationSchema,
   PaymentOrder,
   PaymentOrderSchema,
+  Subscription,
+  SubscriptionSchema,
   VideoPack,
   VideoPackSchema,
 } from '@yikart/mongodb'
@@ -17,6 +23,9 @@ import { XorPayService } from './xorpay.service'
     MongooseModule.forFeature([
       { name: PaymentOrder.name, schema: PaymentOrderSchema },
       { name: VideoPack.name, schema: VideoPackSchema },
+      { name: Subscription.name, schema: SubscriptionSchema },
+      { name: Invoice.name, schema: InvoiceSchema },
+      { name: Organization.name, schema: OrganizationSchema },
     ]),
     DistributionModule,
     ThrottlerModule.forRoot([

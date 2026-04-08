@@ -64,8 +64,32 @@ export class PaymentOrder extends WithTimestampSchema {
   @Prop({ type: String, required: true })
   productId: string
 
+  @Prop({ type: String, default: '' })
+  productName: string
+
   @Prop({ type: Number, default: 1, min: 1 })
   quantity: number
+
+  @Prop({ type: String, default: 'xorpay' })
+  payChannel: string
+
+  @Prop({ type: String, default: null })
+  xorpayOrderId: string | null
+
+  @Prop({ type: String, default: null })
+  xorpayPayUrl: string | null
+
+  @Prop({ type: MongooseSchema.Types.Mixed, default: null })
+  payResult: Record<string, any> | null
+
+  @Prop({ type: MongooseSchema.Types.Mixed, default: {} })
+  metadata: Record<string, any>
+
+  @Prop({ type: Boolean, default: false, index: true })
+  benefitGranted: boolean
+
+  @Prop({ type: Date, default: null })
+  benefitGrantedAt: Date | null
 
   @Prop({ type: Date, default: null })
   paidAt: Date | null

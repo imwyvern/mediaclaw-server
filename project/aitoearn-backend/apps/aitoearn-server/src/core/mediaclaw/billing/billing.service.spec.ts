@@ -16,10 +16,12 @@ describeModuleSpec<BillingService>({
 function createQuery<T>(value: T) {
   const query = {
     sort: vi.fn(),
+    lean: vi.fn(),
     exec: vi.fn().mockResolvedValue(value),
   }
 
   query.sort.mockReturnValue(query)
+  query.lean.mockReturnValue(query)
 
   return query
 }
@@ -28,6 +30,11 @@ describe('billingService', () => {
   let service: BillingService
   let videoPackModel: Record<string, any>
   let paymentOrderModel: Record<string, any>
+  let invoiceModel: Record<string, any>
+  let subscriptionModel: Record<string, any>
+  let organizationModel: Record<string, any>
+  let usageService: Record<string, any>
+  let xorPayService: Record<string, any>
 
   beforeEach(() => {
     videoPackModel = {
@@ -37,10 +44,20 @@ describe('billingService', () => {
     }
 
     paymentOrderModel = {}
+    invoiceModel = {}
+    subscriptionModel = {}
+    organizationModel = {}
+    usageService = {}
+    xorPayService = {}
 
     service = new BillingService(
       videoPackModel as any,
       paymentOrderModel as any,
+      invoiceModel as any,
+      subscriptionModel as any,
+      organizationModel as any,
+      usageService as any,
+      xorPayService as any,
     )
   })
 
