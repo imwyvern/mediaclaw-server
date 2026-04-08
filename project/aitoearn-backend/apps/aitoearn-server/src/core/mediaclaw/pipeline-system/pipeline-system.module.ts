@@ -1,8 +1,6 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
-  Brand,
-  BrandSchema,
   Pipeline,
   PipelineSchema,
   PipelineTemplate,
@@ -10,6 +8,7 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { PipelineModule } from '../pipeline/pipeline.module'
 import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { PipelineSystemController } from './pipeline-system.controller'
 import { PipelineSystemService } from './pipeline-system.service'
@@ -19,9 +18,9 @@ import { PipelineSystemService } from './pipeline-system.service'
     MongooseModule.forFeature([
       { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
       { name: Pipeline.name, schema: PipelineSchema },
-      { name: Brand.name, schema: BrandSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
+    PipelineModule,
     VideoWorkerQueueModule,
   ],
   controllers: [PipelineSystemController],

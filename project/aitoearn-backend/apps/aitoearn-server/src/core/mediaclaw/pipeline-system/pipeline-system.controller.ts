@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Get,
   Param,
@@ -7,35 +6,24 @@ import {
   Query,
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
-import { PipelineType } from '@yikart/mongodb'
-import { Types } from 'mongoose'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
+import {
+  ApplyPipelineTemplateDto,
+  CreatePipelineTemplateDto,
+  LearnPipelinePreferenceDto,
+  PipelineTemplateQueryDto,
+} from './pipeline-system.dto'
 import { PipelineSystemService } from './pipeline-system.service'
 
-@MediaClawApiController('api/v1/pipelines')
+@MediaClawApiController('api/v1/pipelines/system')
 export class PipelineSystemController {
   constructor(private readonly pipelineSystemService: PipelineSystemService) {}
 
-  @Post()
+  @Post('templates')
   async createTemplate(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      name: string
-      type: PipelineType
-      steps?: Array<{
-        name: string
-        config?: Record<string, any>
-        order?: number
-      }>
-      defaultParams?: {
-        duration?: number
-        aspectRatio?: string
-        subtitleStyle?: Record<string, any>
-        musicStyle?: string
-      }
-      isPublic?: boolean
-    },
+    @Body() body: CreatePipelineTemplateDto,
   ) {
     return this.pipelineSystemService.createTemplate({
       ...body,
@@ -43,45 +31,33 @@ export class PipelineSystemController {
     })
   }
 
-  @Get()
+  @Get('templates')
   async listTemplates(
     @GetToken() user: MediaClawAuthUser,
-    @Query('type') type?: PipelineType,
-    @Query('isPublic') isPublic?: string,
+    @Query() query: PipelineTemplateQueryDto,
   ) {
     return this.pipelineSystemService.listTemplates({
-      type,
-      isPublic: this.parseBooleanQuery(isPublic),
+      type: query.type as any,
+      isPublic: query.isPublic,
+      keyword: query.keyword,
+      presetOnly: query.presetOnly,
       requestedBy: user.id,
     })
   }
 
-  @Get(':id')
+  @Get('templates/:id')
   async getTemplate(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
-    return this.pipelineSystemService.getTemplate(this.ensureObjectId(id, 'id'), user.id)
+    return this.pipelineSystemService.getTemplate(id, user.id)
   }
 
-  @Post(':id/apply')
+  @Post('templates/:id/apply')
   async applyTemplate(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: {
-      brandId: string
-      overrides?: {
-        name?: string
-        description?: string
-        duration?: number
-        aspectRatio?: string
-        subtitleStyle?: Record<string, any>
-        musicStyle?: string
-        preferredStyles?: string[]
-        avoidStyles?: string[]
-        schedule?: Record<string, any>
-      }
-    },
+    @Body() body: ApplyPipelineTemplateDto,
   ) {
     return this.pipelineSystemService.applyTemplate(
-      this.ensureObjectId(id, 'id'),
+      id,
       user.id,
       user.orgId || user.id,
       body.brandId,
@@ -93,18 +69,11 @@ export class PipelineSystemController {
   async learnPreference(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: {
-      source?: string
-      preferredStyles?: string[]
-      avoidStyles?: string[]
-      subtitleStyle?: Record<string, any>
-      score?: number
-      notes?: string
-    },
+    @Body() body: LearnPipelinePreferenceDto,
   ) {
     return this.pipelineSystemService.learnPreference(
       user.orgId || user.id,
-      this.ensureObjectId(id, 'id'),
+      id,
       body,
     )
   }
@@ -116,31 +85,8 @@ export class PipelineSystemController {
   ) {
     return this.pipelineSystemService.warmUp(
       user.orgId || user.id,
-      this.ensureObjectId(id, 'id'),
+      id,
       user.id,
     )
-  }
-
-  private parseBooleanQuery(value?: string) {
-    if (typeof value !== 'string') {
-      return undefined
-    }
-
-    if (value === 'true') {
-      return true
-    }
-    if (value === 'false') {
-      return false
-    }
-
-    return undefined
-  }
-
-  private ensureObjectId(value: string, field: string) {
-    if (!Types.ObjectId.isValid(value)) {
-      throw new BadRequestException(`${field} is invalid`)
-    }
-
-    return value
   }
 }

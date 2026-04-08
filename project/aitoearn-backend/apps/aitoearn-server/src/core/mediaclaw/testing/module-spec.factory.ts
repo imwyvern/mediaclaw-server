@@ -2,7 +2,7 @@ import type { Type } from '@nestjs/common'
 import type { TestingModule } from '@nestjs/testing'
 import { Inject } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
-import { vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 interface QueueJobRecord {
   id: string
@@ -196,8 +196,8 @@ const testingHarness = vi.hoisted(() => {
     PaymentMethod: createEnum(['WECHAT_NATIVE', 'WECHAT_JSAPI', 'ALIPAY']),
     PaymentProductType: createEnum(['VIDEO_PACK', 'SUBSCRIPTION', 'ADDON']),
     PaymentStatus: createEnum(['PENDING', 'PAID', 'FAILED', 'REFUNDED', 'EXPIRED']),
-    PipelineStatus: createEnum(['DRAFT', 'ACTIVE', 'ARCHIVED']),
-    PipelineType: createEnum(['UGC', 'ADS', 'TEMPLATE']),
+    PipelineStatus: createEnum(['ACTIVE', 'PAUSED', 'ARCHIVED']),
+    PipelineType: createEnum(['SEEDING', 'REVIEW', 'NEW_PRODUCT', 'BRAND_STORY', 'PROMO', 'CUSTOM']),
     PlatformAccountPlatform: createEnum(['DOUYIN', 'XIAOHONGSHU', 'KUAISHOU', 'BILIBILI']),
     PlatformAccountStatus: createEnum(['ACTIVE', 'INACTIVE']),
     ProductionBatchStatus: createEnum(['PENDING', 'PROCESSING', 'PAUSED', 'PARTIAL', 'COMPLETED', 'FAILED', 'CANCELLED']),
@@ -279,8 +279,12 @@ vi.mock('@yikart/mongodb', () => {
     'ClawHostInstanceConfig',
     'Competitor',
     'CopyHistory',
+    'CopyPerformance',
+    'DeliveryRecord',
+    'DiscoveryNotification',
     'DistributionRule',
     'EmployeeAssignment',
+    'EnterpriseInvite',
     'Invoice',
     'MarketplaceTemplate',
     'MediaClawUser',
@@ -313,11 +317,16 @@ vi.mock('@yikart/mongodb', () => {
     'ClawHostInstanceSchema',
     'CompetitorSchema',
     'CopyHistorySchema',
+    'CopyPerformanceSchema',
+    'DeliveryRecordSchema',
+    'DiscoveryNotificationSchema',
     'DistributionRuleSchema',
     'EmployeeAssignmentSchema',
+    'EnterpriseInviteSchema',
     'InvoiceSchema',
     'MarketplaceTemplateSchema',
     'MediaClawUserSchema',
+    'NotificationSchema',
     'NotificationConfigSchema',
     'OrganizationSchema',
     'PaymentOrderSchema',
@@ -597,7 +606,7 @@ export function describeModuleSpec<TService>({
       moduleRef = await moduleBuilder.compile()
 
       serviceInstance = moduleRef.get(service, { strict: false })
-    })
+    }, 30_000)
 
     afterAll(async () => {
       await moduleRef?.close()
