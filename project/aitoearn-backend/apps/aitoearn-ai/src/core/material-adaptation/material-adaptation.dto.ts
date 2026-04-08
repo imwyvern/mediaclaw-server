@@ -4,6 +4,9 @@ import { z } from 'zod'
 export const AdaptMaterialDtoSchema = z.object({
   materialId: z.string().min(1).describe('素材 ID'),
   platforms: z.array(z.enum(AccountType)).min(1).describe('目标平台列表'),
+  brandId: z.string().optional().describe('品牌 ID，提供后会自动应用品牌资产约束'),
+  pipelineId: z.string().optional().describe('管线 ID，提供后会自动应用管线风格偏好'),
+  forceRegenerate: z.boolean().default(false).describe('是否忽略现有适配结果并强制重新生成'),
 })
 
 export class AdaptMaterialDto extends createZodDto(AdaptMaterialDtoSchema, 'AdaptMaterialDto') { }

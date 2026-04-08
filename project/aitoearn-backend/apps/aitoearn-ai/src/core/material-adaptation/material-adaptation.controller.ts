@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { GetToken, Public, TokenInfo } from '@yikart/aitoearn-auth'
 import { AccountType, ApiDoc, ZodValidationPipe } from '@yikart/common'
@@ -90,10 +90,17 @@ export class MaterialAdaptationController {
     @Param('materialId') materialId: string,
     @Param('platform', new ZodValidationPipe(PlatformParamSchema)) platform: AccountType,
     @Req() req: Request,
+    @Query('brandId') brandId?: string,
+    @Query('pipelineId') pipelineId?: string,
+    @Query('forceRegenerate') forceRegenerate?: string,
   ): Promise<MaterialAdaptationVo> {
     return this.materialAdaptationService.getByMaterialIdAndPlatform(materialId, platform, {
       ...filterHeaders(req.headers),
       authorization: `Bearer ${config.serverClient.token}`,
+    }, {
+      brandId,
+      pipelineId,
+      forceRegenerate: forceRegenerate === 'true',
     })
   }
 

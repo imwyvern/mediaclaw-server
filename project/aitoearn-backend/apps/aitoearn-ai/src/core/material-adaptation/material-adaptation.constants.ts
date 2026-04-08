@@ -155,6 +155,68 @@ export interface DraftMediaInfo {
   imageCount?: number
 }
 
+export interface PipelineStyleGuide {
+  label: string
+  tone: string
+  pacing: string
+  narrative: string
+  callToAction: string
+}
+
+const PIPELINE_STYLE_GUIDES: Record<string, PipelineStyleGuide> = {
+  seeding: {
+    label: '种草线',
+    tone: '生活化、亲切、像真实分享',
+    pacing: '中快节奏，前 3 秒给出明确钩子',
+    narrative: '从痛点或场景切入，再自然带出产品体验',
+    callToAction: '鼓励收藏、评论、私信了解，不要过度硬广',
+  },
+  review: {
+    label: '测评线',
+    tone: '专业、客观、信息密度高',
+    pacing: '节奏稳定，突出对比、参数和结论',
+    narrative: '先给评价结论，再展开核心维度和适用人群',
+    callToAction: '引导看完整测评、对比清单或留言提问',
+  },
+  new_product: {
+    label: '新品宣传线',
+    tone: '新鲜、兴奋、强调亮点',
+    pacing: '快节奏，首屏直接突出新品卖点',
+    narrative: '先讲新品变化，再讲场景和核心差异化',
+    callToAction: '引导立即关注新品、预约或试用',
+  },
+  brand_story: {
+    label: '品牌故事线',
+    tone: '温情、有深度、可信赖',
+    pacing: '相对舒缓，允许铺垫和情绪递进',
+    narrative: '突出品牌理念、用户故事或长期价值',
+    callToAction: '引导关注品牌故事、长期陪伴与价值认同',
+  },
+  promo: {
+    label: '促销线',
+    tone: '直接、明确、价格导向但不过度夸张',
+    pacing: '快节奏，尽快抛出优惠点和时效感',
+    narrative: '先讲优惠和稀缺性，再补充产品亮点和下单理由',
+    callToAction: '强调限时动作，如立即下单、马上咨询、抓住窗口期',
+  },
+  custom: {
+    label: '自定义线',
+    tone: '优先沿用当前品牌与管线配置',
+    pacing: '根据现有偏好自动平衡节奏',
+    narrative: '围绕品牌关键词和平台规则组织表达',
+    callToAction: '按场景生成自然的行动引导',
+  },
+}
+
+export interface StyleDrivenPlatformOptionsInput {
+  platform: string
+  materialType: 'video' | 'article'
+  aspectRatio?: string
+  preferredDuration?: number | null
+  preferredStyles?: string[]
+  pipelineType?: string
+}
+
 /**
  * 根据生成内容的实际属性，匹配 PLATFORM_RESTRICTIONS 中各平台的约束，
  * 返回该素材兼容的 AccountType 列表
@@ -202,6 +264,47 @@ export function getCompatibleAccountTypes(info: DraftMediaInfo): AccountType[] {
       topics: info.topics,
     })
   })
+}
+
+export function resolvePipelineStyleGuide(pipelineType?: string | null): PipelineStyleGuide | null {
+  if (!pipelineType) {
+    return null
+  }
+
+  return PIPELINE_STYLE_GUIDES[pipelineType] || PIPELINE_STYLE_GUIDES['custom']
+}
+
+export function buildStyleDrivenPlatformOptions(
+  input: StyleDrivenPlatformOptionsInput,
+): Record<string, unknown> | undefined {
+  const aspectRatio = input.aspectRatio || ''
+  const preferredDuration = typeof input.preferredDuration === 'number'
+    ? input.preferredDuration
+    : null
+  const normalizedStyles = (input.preferredStyles || []).map(style => style.toLowerCase())
+  const wantsStory = normalizedStyles.some(style => style.includes('story'))
+  const prefersVerticalShortVideo = input.materialType === 'video'
+    && aspectRatio === '9:16'
+    && (preferredDuration === null || preferredDuration <= 90)
+
+  switch (input.platform) {
+    case AccountType.INSTAGRAM:
+    case AccountType.FACEBOOK: {
+      const contentCategory = input.materialType === 'video'
+        ? (wantsStory && preferredDuration !== null && preferredDuration <= 60 ? 'story' : (prefersVerticalShortVideo ? 'reel' : 'post'))
+        : (wantsStory ? 'story' : 'post')
+      return { content_category: contentCategory }
+    }
+    case AccountType.TIKTOK:
+      return input.pipelineType
+        ? {
+            brand_organic_toggle: true,
+            brand_content_toggle: true,
+          }
+        : undefined
+    default:
+      return undefined
+  }
 }
 
 const BilibiliOptionSchema = z.object({

@@ -4,6 +4,7 @@ import { AiLogRepository } from './ai-log.repository'
 import { ApiKeyRepository } from './api-key.repository'
 import { AssetRepository } from './asset.repository'
 import { BlogRepository } from './blog.repository'
+import { BrandRepository } from './brand.repository'
 import { ContentGenerationTaskRepository } from './content-generation-task.repository'
 import { CreditsBalanceRepository } from './credits-balance.repository'
 import { CreditsRecordRepository } from './credits-record.repository'
@@ -14,11 +15,13 @@ import { MaterialRepository } from './material.repository'
 import { MediaGroupRepository } from './media-group.repository'
 import { MediaRepository } from './media.repository'
 import { NotificationRepository } from './notification.repository'
+import { PipelineRepository } from './pipeline.repository'
 import { PointsRecordRepository } from './points-record.repository'
 import { PublishRecordRepository } from './publish-record.repository'
 import { QrCodeArtImageRepository } from './qr-code-art-image.repository'
 import { UserNotificationControlRepository } from './user-notification-control.repository'
 import { UserRepository } from './user.repository'
+import { VideoTaskRepository } from './video-task.repository'
 
 export * from './account-group.repository'
 export * from './account.repository'
@@ -27,6 +30,7 @@ export * from './api-key.repository'
 export * from './asset.repository'
 export * from './base.repository'
 export * from './blog.repository'
+export * from './brand.repository'
 export * from './content-generation-task.repository'
 export * from './credits-balance.repository'
 export * from './credits-record.repository'
@@ -38,16 +42,19 @@ export * from './media-group.repository'
 export * from './media.repository'
 export * from './notification.repository'
 export * from './oauth2-credential.repository'
+export * from './pipeline.repository'
 export * from './points-record.repository'
 export * from './publish-record.repository'
 export * from './qr-code-art-image.repository'
 export * from './user-notification-control.repository'
 export * from './user.repository'
+export * from './video-task.repository'
 
 export const repositories = [
   AiLogRepository,
   AssetRepository,
   BlogRepository,
+  BrandRepository,
   NotificationRepository,
   CreditsBalanceRepository,
   CreditsRecordRepository,
@@ -66,4 +73,6 @@ export const repositories = [
   ContentGenerationTaskRepository,
   UserNotificationControlRepository,
   QrCodeArtImageRepository,
+  PipelineRepository,
+  VideoTaskRepository,
 ] as const
