@@ -43,7 +43,40 @@ class ProductionBatchSummary {
   avgDurationSec: number
 
   @Prop({ type: Number, default: 0 })
+  totalDurationSec: number
+
+  @Prop({ type: Number, default: 0 })
   successRate: number
+
+  @Prop({ type: Number, default: 0 })
+  errorRate: number
+
+  @Prop({ type: Number, default: 0 })
+  totalVideos: number
+
+  @Prop({ type: Number, default: 0 })
+  totalAccounts: number
+
+  @Prop({ type: Number, default: 0 })
+  successAccounts: number
+
+  @Prop({ type: Number, default: 0 })
+  failedAccounts: number
+
+  @Prop({ type: Number, default: 0 })
+  skippedAccounts: number
+
+  @Prop({ type: Number, default: 0 })
+  dedupPassed: number
+
+  @Prop({ type: Number, default: 0 })
+  dedupFailed: number
+
+  @Prop({ type: Date, default: null })
+  dedupCheckedAt?: Date | null
+
+  @Prop({ type: Date, default: null })
+  notifiedAt?: Date | null
 
   @Prop({ type: Date, default: null })
   startedAt?: Date | null

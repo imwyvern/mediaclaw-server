@@ -13,6 +13,7 @@ export class ProductionController {
     @GetToken() user: { orgId?: string, id?: string },
     @Body()
     body: {
+      batchName?: string
       templateId?: string
       count?: number
       pipelineId?: string
@@ -20,6 +21,9 @@ export class ProductionController {
       brandAssets?: string[]
       styleOverrides?: Record<string, unknown>
       referenceVideoUrl?: string
+      scheduleContext?: Record<string, unknown>
+      taskPlan?: Array<Record<string, unknown>>
+      config?: Record<string, unknown>
     },
   ) {
     return this.productionOrchestratorService.createBatch(

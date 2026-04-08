@@ -4,11 +4,13 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Cron } from '@nestjs/schedule'
 import {
   Brand,
+  NotificationEvent,
   Pipeline,
   PipelineStatus,
   ProductionBatch,
@@ -18,9 +20,49 @@ import {
   VideoTaskType,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { DedupService } from '../dedup/dedup.service'
+import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
+import { NotificationService } from '../notification/notification.service'
 import { VideoService } from '../video/video.service'
 
+interface BatchTaskPlanItem {
+  assignmentId?: string
+  employeeName?: string
+  employeePhone?: string
+  accountType?: string
+  platform?: string
+  platformAccountId?: string
+  platformAccountName?: string
+  accountId?: string
+  firstFrameUrl?: string
+  referenceVideoUrl?: string
+  templateId?: string
+  dailySequence?: number
+  dailyQuota?: number
+  styleOverrides?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
+interface BatchProcessingConfig {
+  concurrency?: number
+  retryLimit?: number
+  dedupOnComplete?: boolean
+  batchDedupOnFinish?: boolean
+  notifyChannel?: string
+  pauseOnErrorRate?: number | null
+}
+
+interface ResolvedBatchProcessingConfig {
+  concurrency: number
+  retryLimit: number
+  dedupOnComplete: boolean
+  batchDedupOnFinish: boolean
+  notifyChannel: string
+  pauseOnErrorRate: number | null
+}
+
 interface CreateBatchParams {
+  batchName?: string
   templateId?: string
   count?: number
   pipelineId?: string
@@ -29,6 +71,8 @@ interface CreateBatchParams {
   styleOverrides?: Record<string, unknown>
   referenceVideoUrl?: string
   scheduleContext?: Record<string, unknown>
+  taskPlan?: BatchTaskPlanItem[]
+  config?: BatchProcessingConfig
 }
 
 interface BatchFilters {
@@ -40,9 +84,20 @@ interface PaginationInput {
   limit?: number
 }
 
+interface ScheduledTaskPlanSummary {
+  taskPlan: BatchTaskPlanItem[]
+  accountTypes: Record<string, number>
+  totalAccounts: number
+}
+
 type ProductionBatchRecord = Record<string, any>
 type VideoTaskRecord = Record<string, any>
 type PipelineRecord = Record<string, any>
+type GenericRecord = Record<string, any>
+
+const DEFAULT_BATCH_CONCURRENCY = 2
+const DEFAULT_BATCH_RETRY_LIMIT = 1
+const STOP_BATCH_PROCESSING = Symbol('stop-batch-processing')
 
 @Injectable()
 export class ProductionOrchestratorService {
@@ -59,12 +114,18 @@ export class ProductionOrchestratorService {
     @InjectModel(Brand.name)
     private readonly brandModel: Model<Brand>,
     private readonly videoService: VideoService,
+    @Optional()
+    private readonly employeeDispatchService?: EmployeeDispatchService,
+    @Optional()
+    private readonly notificationService?: NotificationService,
+    @Optional()
+    private readonly dedupService?: DedupService,
   ) {}
 
   @Cron('0 2 * * *')
   async runDailyProductionSchedule() {
     const pipelines = await this.pipelineModel.find({
-      status: PipelineStatus.ACTIVE,
+      'status': PipelineStatus.ACTIVE,
       'schedule.enabled': true,
     }).lean().exec() as PipelineRecord[]
 
@@ -97,7 +158,6 @@ export class ProductionOrchestratorService {
 
   async createBatch(orgId: string, requestedBy: string, params: CreateBatchParams) {
     const normalizedOrgId = this.normalizeOrgId(orgId)
-    const count = this.normalizeCount(params.count)
     const templateId = this.normalizeOptionalString(params.templateId)
     const pipelineId = this.normalizeOptionalString(params.pipelineId)
     const brandId = this.normalizeOptionalString(params.brandId)
@@ -105,11 +165,17 @@ export class ProductionOrchestratorService {
     const brandAssets = this.normalizeStringList(params.brandAssets)
     const styleOverrides = this.asRecord(params.styleOverrides) || {}
     const scheduleContext = this.asRecord(params.scheduleContext) || {}
+    const taskPlan = this.normalizeBatchTaskPlan(params.taskPlan)
+    const config = this.normalizeBatchConfig(params.config)
+    const count = taskPlan.length > 0
+      ? taskPlan.length
+      : this.normalizeCount(params.count)
 
     await this.ensurePipelineBelongsToOrg(normalizedOrgId, pipelineId)
 
     const batchId = this.generateBatchId()
     const brandObjectId = this.toObjectIdIfValid(brandId)
+    const batchName = this.normalizeOptionalString(params.batchName) || templateId || batchId
 
     const batch = await this.productionBatchModel.create({
       batchId,
@@ -131,12 +197,25 @@ export class ProductionOrchestratorService {
         styleOverrides,
         referenceVideoUrl,
         scheduleContext,
+        taskPlan,
+        config,
       },
       summary: {
         avgCostPerVideo: 0,
         totalCost: 0,
         avgDurationSec: 0,
+        totalDurationSec: 0,
         successRate: 0,
+        errorRate: 0,
+        totalVideos: 0,
+        totalAccounts: this.countUniquePlanAccounts(taskPlan),
+        successAccounts: 0,
+        failedAccounts: 0,
+        skippedAccounts: 0,
+        dedupPassed: 0,
+        dedupFailed: 0,
+        dedupCheckedAt: null,
+        notifiedAt: null,
         startedAt: null,
         completedAt: null,
         elapsedMs: 0,
@@ -151,7 +230,7 @@ export class ProductionOrchestratorService {
       cancelledAt: null,
       errorMessage: '',
       brandId: brandObjectId,
-      batchName: templateId || batchId,
+      batchName,
       userId: requestedBy,
       tasks: [],
       totalTasks: count,
@@ -180,11 +259,12 @@ export class ProductionOrchestratorService {
       batch['_id'],
       {
         $set: {
-          status: ProductionBatchStatus.RUNNING,
+          'status': ProductionBatchStatus.RUNNING,
           startedAt,
-          cancelledAt: null,
-          errorMessage: '',
+          'cancelledAt': null,
+          'errorMessage': '',
           'summary.startedAt': batch['summary']?.['startedAt'] || startedAt,
+          'summary.completedAt': null,
         },
       },
       { new: true },
@@ -237,10 +317,10 @@ export class ProductionOrchestratorService {
       batch['_id'],
       {
         $set: {
-          status: ProductionBatchStatus.RUNNING,
+          'status': ProductionBatchStatus.RUNNING,
           'resumeState.resumedAt': new Date(),
           'resumeState.resumeCount': Number(resumeState['resumeCount'] || 0) + 1,
-          errorMessage: '',
+          'errorMessage': '',
         },
       },
       { new: true },
@@ -273,6 +353,7 @@ export class ProductionOrchestratorService {
               VideoTaskStatus.EDITING,
               VideoTaskStatus.RENDERING,
               VideoTaskStatus.QUALITY_CHECK,
+              VideoTaskStatus.GENERATING_COPY,
             ],
           },
         },
@@ -342,16 +423,24 @@ export class ProductionOrchestratorService {
       ...this.toBatchResponse(batch),
       tasks: taskIds.map((taskId, index) => {
         const task = taskMap.get(taskId)
+        const productionBatch = this.asRecord(task?.['metadata']?.['productionBatch']) || {}
         return {
           id: taskId,
           batchIndex: task?.['batchIndex'] ?? index,
           status: task?.['status'] || VideoTaskStatus.PENDING,
           retryCount: Number(task?.['retryCount'] || 0),
+          attempt: this.readTaskAttempt(task),
           errorMessage: task?.['errorMessage'] || '',
           sourceVideoUrl: task?.['sourceVideoUrl'] || '',
           outputVideoUrl: task?.['outputVideoUrl'] || task?.['output']?.['url'] || '',
           durationSec: Number(task?.['output']?.['duration'] || task?.['quality']?.['duration'] || 0),
           cost: Number(task?.['creditsConsumed'] || task?.['quotaUnits'] || 0),
+          dedupStatus: this.normalizeOptionalString(task?.['dedup']?.['status']) || 'pending',
+          assignmentId: this.normalizeOptionalString(productionBatch['assignmentId']) || null,
+          employeeName: this.normalizeOptionalString(productionBatch['employeeName']) || null,
+          accountType: this.normalizeOptionalString(productionBatch['accountType']) || null,
+          platformAccountId: this.normalizeOptionalString(productionBatch['platformAccountId']) || null,
+          accountId: this.normalizeOptionalString(productionBatch['accountId']) || null,
           createdAt: task?.['createdAt'] || null,
           updatedAt: task?.['updatedAt'] || null,
         }
@@ -363,7 +452,7 @@ export class ProductionOrchestratorService {
     const normalizedOrgId = this.normalizeOrgId(orgId)
     const pipelines = await this.pipelineModel.find({
       ...this.buildOrgMatch(normalizedOrgId),
-      status: PipelineStatus.ACTIVE,
+      'status': PipelineStatus.ACTIVE,
       'schedule.enabled': true,
     }).lean().exec() as PipelineRecord[]
 
@@ -401,7 +490,7 @@ export class ProductionOrchestratorService {
 
     const existingBatch = await this.productionBatchModel.findOne({
       ...this.buildOrgMatch(orgId),
-      pipelineId: this.toObjectIdIfValid(pipelineId),
+      'pipelineId': this.toObjectIdIfValid(pipelineId),
       'params.scheduleContext.autoScheduled': true,
       'params.scheduleContext.scheduleDateKey': scheduleDateKey,
     }).sort({ createdAt: -1 }).lean().exec() as ProductionBatchRecord | null
@@ -419,9 +508,20 @@ export class ProductionOrchestratorService {
 
     try {
       const batchParams = await this.buildScheduledBatchParams(orgId, pipeline, scheduleDateKey, timezone)
-      if (!batchParams.referenceVideoUrl) {
+      const taskPlan = this.normalizeBatchTaskPlan(batchParams.taskPlan)
+      if (taskPlan.length === 0) {
+        return {
+          pipelineId,
+          pipelineName,
+          status: 'skipped',
+          reason: 'no_dispatch_accounts',
+          scheduleDateKey,
+        }
+      }
+
+      if (!batchParams.referenceVideoUrl && !this.batchPlanHasPlayableSource(taskPlan)) {
         this.logger.warn({
-          message: 'Skipping scheduled production because reference video is missing',
+          message: 'Skipping scheduled production because reference input is missing',
           orgId,
           pipelineId,
           pipelineName,
@@ -457,6 +557,8 @@ export class ProductionOrchestratorService {
         status: 'scheduled',
         batchId: startedBatch['batchId'],
         count: startedBatch['totalCount'],
+        totalAccounts: Number(startedBatch['summary']?.['totalAccounts'] || 0),
+        accountTypes: batchParams.scheduleContext?.['accountTypes'] || {},
         scheduleDateKey,
       }
     }
@@ -494,35 +596,54 @@ export class ProductionOrchestratorService {
     const brandId = pipeline['brandId']?.toString?.() || this.normalizeOptionalString(pipeline['brandId'])
     const brand = brandId
       ? await this.brandModel.findOne({
-          _id: this.toObjectIdIfValid(brandId),
-          orgId: this.toObjectIdIfValid(orgId),
-        }).lean().exec() as Record<string, any> | null
+        _id: this.toObjectIdIfValid(brandId),
+        orgId: this.toObjectIdIfValid(orgId),
+      }).lean().exec() as Record<string, any> | null
       : null
     const brandAssets = [
       ...this.normalizeStringList(brand?.['assets']?.['keywords']),
       ...this.normalizeStringList(brand?.['assets']?.['slogans']),
       ...this.normalizeStringList(brand?.['assets']?.['colors']),
     ]
+    const templateId = this.normalizeOptionalString(subtitlePreferences['templateId']) || undefined
+    const referenceVideoUrl = this.normalizeOptionalString(brand?.['videoStyle']?.['referenceVideoUrl'])
+      || this.normalizeOptionalString(remixInsights['referenceVideoUrl'])
+      || this.normalizeOptionalString(subtitlePreferences['referenceVideoUrl'])
+    const styleOverrides = {
+      preferredStyles: this.normalizeStringList(preferences['preferredStyles']),
+      avoidStyles: this.normalizeStringList(preferences['avoidStyles']),
+      preferredDuration: Number(preferences['preferredDuration'] || 0),
+      aspectRatio: this.normalizeOptionalString(preferences['aspectRatio']),
+      subtitlePreferences,
+      remixInsights,
+      pipelineName: this.normalizeOptionalString(pipeline['name']),
+      scheduleCron: this.normalizeOptionalString(schedule['cron']),
+    }
+    const taskPlanSummary = await this.buildScheduledTaskPlan(
+      orgId,
+      pipeline,
+      templateId,
+      referenceVideoUrl,
+      styleOverrides,
+    )
 
     return {
-      templateId: this.normalizeOptionalString(subtitlePreferences['templateId']) || undefined,
-      count: Math.max(Number(schedule['videosPerRun'] || 1), 1),
+      templateId,
+      count: taskPlanSummary.taskPlan.length,
       pipelineId: pipeline['_id']?.toString?.() || undefined,
       brandId: brandId || undefined,
       brandAssets,
-      styleOverrides: {
-        preferredStyles: this.normalizeStringList(preferences['preferredStyles']),
-        avoidStyles: this.normalizeStringList(preferences['avoidStyles']),
-        preferredDuration: Number(preferences['preferredDuration'] || 0),
-        aspectRatio: this.normalizeOptionalString(preferences['aspectRatio']),
-        subtitlePreferences,
-        remixInsights,
-        pipelineName: this.normalizeOptionalString(pipeline['name']),
-        scheduleCron: this.normalizeOptionalString(schedule['cron']),
+      styleOverrides,
+      referenceVideoUrl,
+      taskPlan: taskPlanSummary.taskPlan,
+      config: {
+        concurrency: this.normalizePositiveInteger(schedule['concurrency'], DEFAULT_BATCH_CONCURRENCY, 8),
+        retryLimit: this.normalizePositiveInteger(schedule['retryLimit'], DEFAULT_BATCH_RETRY_LIMIT, 3),
+        dedupOnComplete: this.normalizeBoolean(schedule['dedupOnComplete'], true),
+        batchDedupOnFinish: this.normalizeBoolean(schedule['batchDedupOnFinish'], true),
+        notifyChannel: this.normalizeOptionalString(schedule['notifyChannel']),
+        pauseOnErrorRate: this.normalizeRatio(schedule['pauseOnErrorRate']),
       },
-      referenceVideoUrl: this.normalizeOptionalString(brand?.['videoStyle']?.['referenceVideoUrl'])
-        || this.normalizeOptionalString(remixInsights['referenceVideoUrl'])
-        || this.normalizeOptionalString(subtitlePreferences['referenceVideoUrl']),
       scheduleContext: {
         autoScheduled: true,
         scheduleDateKey,
@@ -530,7 +651,125 @@ export class ProductionOrchestratorService {
         pipelineId: pipeline['_id']?.toString?.() || '',
         pipelineName: this.normalizeOptionalString(pipeline['name']),
         videosPerRun: Math.max(Number(schedule['videosPerRun'] || 1), 1),
+        accountTypes: taskPlanSummary.accountTypes,
+        totalAccounts: taskPlanSummary.totalAccounts,
       },
+    }
+  }
+
+  private async buildScheduledTaskPlan(
+    orgId: string,
+    pipeline: PipelineRecord,
+    templateId: string | undefined,
+    referenceVideoUrl: string,
+    baseStyleOverrides: Record<string, unknown>,
+  ): Promise<ScheduledTaskPlanSummary> {
+    if (!this.employeeDispatchService) {
+      return {
+        taskPlan: [],
+        accountTypes: {},
+        totalAccounts: 0,
+      }
+    }
+
+    const dispatchRules = this.asRecord(pipeline['distributionRules']) || {}
+    const requestedAssignmentIds = new Set(this.normalizeStringList(dispatchRules['assignmentIds']))
+    const requestedPlatforms = new Set(
+      this.normalizeStringList(dispatchRules['preferredPlatforms']).map(item => item.toLowerCase()),
+    )
+    const requestedAccountTypes = new Set(
+      this.normalizeStringList(dispatchRules['accountTypes']).map(item => item.toLowerCase()),
+    )
+    const requestedPlatformAccountIds = new Set(this.normalizeStringList(dispatchRules['platformAccountIds']))
+    const requestedTemplateIds = this.normalizeStringList(dispatchRules['templateIds'])
+    const assignmentResponse = await this.employeeDispatchService.listAssignments(
+      orgId,
+      { status: 'active' },
+      { page: 1, limit: 200 },
+    )
+    const assignments = Array.isArray(assignmentResponse['items'])
+      ? assignmentResponse['items'] as GenericRecord[]
+      : []
+    const taskPlan: BatchTaskPlanItem[] = []
+
+    for (const assignment of assignments) {
+      const assignmentId = this.normalizeOptionalString(assignment['id'] || assignment['_id'])
+      if (requestedAssignmentIds.size > 0 && !requestedAssignmentIds.has(assignmentId)) {
+        continue
+      }
+
+      if (!this.isAssignmentTemplateEligible(assignment, templateId, requestedTemplateIds)) {
+        continue
+      }
+
+      const quota = Math.max(
+        Number(assignment['distributionRules']?.['maxDailyVideos'] || assignment['dailyQuota'] || 0),
+        0,
+      )
+      if (quota <= 0) {
+        continue
+      }
+
+      const accounts = this.resolveAssignmentAccounts(
+        assignment,
+        requestedPlatforms,
+        requestedAccountTypes,
+        requestedPlatformAccountIds,
+      )
+      if (accounts.length === 0) {
+        continue
+      }
+
+      const defaultPlatformAccountId = this.normalizeOptionalString(
+        assignment['defaultPlatformAccount']?.['id']
+        || assignment['distributionRules']?.['defaultPlatformAccountId'],
+      )
+      const orderedAccounts = this.sortAssignmentAccounts(accounts, defaultPlatformAccountId)
+
+      for (let sequence = 0; sequence < quota; sequence += 1) {
+        const account = orderedAccounts[sequence % orderedAccounts.length]
+        const accountType = this.normalizeOptionalString(account['platform'] || account['accountType'])
+        taskPlan.push({
+          assignmentId,
+          employeeName: this.normalizeOptionalString(assignment['employeeName']),
+          employeePhone: this.normalizeOptionalString(assignment['employeePhone']),
+          accountType,
+          platform: this.normalizeOptionalString(account['platform']),
+          platformAccountId: this.normalizeOptionalString(account['id']),
+          platformAccountName: this.normalizeOptionalString(account['accountName']),
+          accountId: this.normalizeOptionalString(account['accountId']),
+          firstFrameUrl: this.resolveAssignmentFirstFrameUrl(assignment, account),
+          referenceVideoUrl,
+          templateId,
+          dailySequence: sequence + 1,
+          dailyQuota: quota,
+          styleOverrides: {
+            ...baseStyleOverrides,
+            accountType,
+            platform: this.normalizeOptionalString(account['platform']),
+            platformAccountId: this.normalizeOptionalString(account['id']),
+            platformAccountName: this.normalizeOptionalString(account['accountName']),
+            dailySequence: sequence + 1,
+            dailyQuota: quota,
+          },
+          metadata: {
+            assignmentId,
+            employeeName: this.normalizeOptionalString(assignment['employeeName']),
+            employeePhone: this.normalizeOptionalString(assignment['employeePhone']),
+            accountType,
+            platform: this.normalizeOptionalString(account['platform']),
+            platformAccountId: this.normalizeOptionalString(account['id']),
+            platformAccountName: this.normalizeOptionalString(account['accountName']),
+            accountId: this.normalizeOptionalString(account['accountId']),
+          },
+        })
+      }
+    }
+
+    return {
+      taskPlan,
+      accountTypes: this.buildAccountTypeSummary(taskPlan),
+      totalAccounts: this.countUniquePlanAccounts(taskPlan),
     }
   }
 
@@ -541,7 +780,7 @@ export class ProductionOrchestratorService {
 
     const runner: Promise<void> = this.processBatch(orgId, batchObjectId)
       .then(() => undefined)
-      .catch(async error => {
+      .catch(async (error) => {
         const message = error instanceof Error ? error.message : String(error)
         this.logger.error(`Production batch processing failed for ${batchObjectId}: ${message}`)
         await this.markBatchRunFailure(batchObjectId, message).catch(() => undefined)
@@ -559,57 +798,124 @@ export class ProductionOrchestratorService {
       throw new NotFoundException('Production batch not found')
     }
 
-    const totalCount = Math.max(Number(batch['totalCount'] || batch['totalTasks'] || 0), 0)
-    for (let index = 0; index < totalCount; index += 1) {
-      const latestBatch = await this.syncBatchStateFromTasks(batchObjectId)
-      const latestStatus = this.normalizeBatchStatus(latestBatch['status'])
+    const totalCount = Math.max(
+      Number(batch['totalCount'] || batch['totalTasks'] || 0),
+      this.getBatchTaskPlan(batch).length,
+    )
+    if (totalCount === 0) {
+      return this.finalizeBatch(orgId, batchObjectId)
+    }
 
-      if (latestStatus === ProductionBatchStatus.PAUSED || latestStatus === ProductionBatchStatus.CANCELLED) {
-        return latestBatch
-      }
+    const config = this.resolveBatchProcessingConfig(batch)
+    const workerCount = Math.min(Math.max(config.concurrency, 1), totalCount)
+    let nextIndex = 0
+    let stopRequested = false
 
-      const existingTaskId = this.normalizeStringList(latestBatch['videoTaskIds'])[index]
-      if (!existingTaskId) {
-        const createdTask = await this.createBatchTask(latestBatch, index)
-        await this.syncBatchStateFromTasks(batchObjectId)
+    const runWorker = async () => {
+      while (!stopRequested) {
+        const index = nextIndex
+        nextIndex += 1
 
-        if (!this.isTerminalTaskStatus(createdTask['status'])) {
-          await this.waitForTaskTerminalState(createdTask['_id'].toString())
+        if (index >= totalCount) {
+          return
+        }
+
+        const result = await this.processBatchIndex(batchObjectId, index, config)
+        if (result === STOP_BATCH_PROCESSING) {
+          stopRequested = true
+          return
+        }
+
+        const pausedByErrorRate = await this.maybePauseBatchByErrorRate(batchObjectId, config)
+        if (pausedByErrorRate) {
+          stopRequested = true
+          return
         }
       }
-      else {
-        const existingTask = await this.getVideoTaskRecordOrFail(existingTaskId)
-        if (!this.isTerminalTaskStatus(existingTask['status'])) {
-          await this.waitForTaskTerminalState(existingTaskId)
-        }
-      }
+    }
 
-      await this.syncBatchStateFromTasks(batchObjectId)
+    await Promise.all(Array.from({ length: workerCount }, () => runWorker()))
+
+    const latestBatch = await this.syncBatchStateFromTasks(batchObjectId)
+    const latestStatus = this.normalizeBatchStatus(latestBatch['status'])
+    if (
+      latestStatus === ProductionBatchStatus.PAUSED
+      || latestStatus === ProductionBatchStatus.CANCELLED
+    ) {
+      return this.toBatchResponse(latestBatch)
     }
 
     return this.finalizeBatch(orgId, batchObjectId)
   }
 
-  private async createBatchTask(batch: ProductionBatchRecord, index: number) {
+  private async processBatchIndex(batchObjectId: string, index: number, config: ResolvedBatchProcessingConfig) {
+    while (true) {
+      const latestBatch = await this.syncBatchStateFromTasks(batchObjectId)
+      const latestStatus = this.normalizeBatchStatus(latestBatch['status'])
+      if (
+        latestStatus === ProductionBatchStatus.PAUSED
+        || latestStatus === ProductionBatchStatus.CANCELLED
+      ) {
+        return STOP_BATCH_PROCESSING
+      }
+
+      const latestTask = await this.getLatestTaskForIndex(batchObjectId, index)
+      if (latestTask) {
+        if (!this.isTerminalTaskStatus(latestTask['status'])) {
+          await this.waitForTaskTerminalState(latestTask['_id'].toString())
+          continue
+        }
+
+        if (this.isSuccessfulTaskStatus(latestTask['status'])) {
+          return undefined
+        }
+
+        const nextAttempt = this.readTaskAttempt(latestTask) + 1
+        if (nextAttempt > config.retryLimit) {
+          return undefined
+        }
+
+        const retryTask = await this.createBatchTask(latestBatch, index, nextAttempt)
+        if (!this.isTerminalTaskStatus(retryTask['status'])) {
+          await this.waitForTaskTerminalState(retryTask['_id'].toString())
+        }
+        continue
+      }
+
+      const createdTask = await this.createBatchTask(latestBatch, index, 0)
+      if (!this.isTerminalTaskStatus(createdTask['status'])) {
+        await this.waitForTaskTerminalState(createdTask['_id'].toString())
+      }
+    }
+  }
+
+  private async createBatchTask(
+    batch: ProductionBatchRecord,
+    index: number,
+    attempt = 0,
+  ) {
     const requestedBy = this.normalizeOptionalString(batch['createdBy'])
       || this.normalizeOptionalString(batch['userId'])
       || this.normalizeOptionalString(batch['orgId'])
     const orgId = batch['orgId']?.toString?.() || this.normalizeOptionalString(batch['orgId'])
+    const config = this.resolveBatchProcessingConfig(batch)
 
     try {
       const task = await this.videoService.createTask(
         orgId,
         requestedBy,
-        this.buildBatchTaskInput(batch, index),
+        this.buildBatchTaskInput(batch, index, attempt),
       )
 
       const updatedTask = await this.videoTaskModel.findByIdAndUpdate(
         task._id,
         {
           $set: {
-            batchIndex: index,
-            maxRetries: 2,
+            'batchIndex': index,
+            'maxRetries': config.retryLimit,
+            'retryCount': attempt,
             'metadata.productionBatch.batchIndex': index,
+            'metadata.productionBatch.attempt': attempt,
           },
         },
         { new: true },
@@ -622,7 +928,7 @@ export class ProductionOrchestratorService {
       return this.getVideoTaskRecordOrFail(task._id.toString())
     }
     catch (error) {
-      return this.createFailedBatchTask(batch, index, error)
+      return this.createFailedBatchTask(batch, index, error, attempt)
     }
   }
 
@@ -630,9 +936,12 @@ export class ProductionOrchestratorService {
     batch: ProductionBatchRecord,
     index: number,
     error: unknown,
+    attempt = 0,
   ) {
     const params = this.asRecord(batch['params']) || {}
-    const referenceVideoUrl = this.normalizeOptionalString(params['referenceVideoUrl'])
+    const taskPlan = this.getBatchTaskPlan(batch)
+    const planItem = taskPlan[index] || {}
+    const sourceVideoUrl = this.resolveBatchTaskSourceVideoUrl(batch, planItem)
     const requestedBy = this.normalizeOptionalString(batch['createdBy'])
       || this.normalizeOptionalString(batch['userId'])
       || this.normalizeOptionalString(batch['orgId'])
@@ -656,16 +965,16 @@ export class ProductionOrchestratorService {
       batchIndex: index,
       taskType: VideoTaskType.NEW_CONTENT,
       status: VideoTaskStatus.FAILED,
-      sourceVideoUrl: referenceVideoUrl,
+      sourceVideoUrl,
       source: {
-        type: referenceVideoUrl ? 'url' : 'manual',
-        url: referenceVideoUrl,
+        type: sourceVideoUrl ? 'url' : 'manual',
+        url: sourceVideoUrl,
         videoId: '',
       },
       creditsConsumed: 0,
       creditCharged: false,
-      retryCount: 0,
-      maxRetries: 2,
+      retryCount: attempt,
+      maxRetries: this.resolveBatchProcessingConfig(batch).retryLimit,
       errorMessage: message,
       errorLog: [
         {
@@ -674,6 +983,7 @@ export class ProductionOrchestratorService {
           detail: {
             batchId: batchBusinessId,
             batchIndex: index,
+            attempt,
           },
           recordedAt: new Date(),
         },
@@ -683,11 +993,24 @@ export class ProductionOrchestratorService {
         productionBatch: {
           batchId: batchBusinessId,
           batchIndex: index,
-          templateId: this.normalizeOptionalString(batch['templateId']),
+          attempt,
+          templateId: this.normalizeOptionalString(planItem['templateId']) || this.normalizeOptionalString(batch['templateId']),
           requestedBy,
+          assignmentId: this.normalizeOptionalString(planItem['assignmentId']),
+          employeeName: this.normalizeOptionalString(planItem['employeeName']),
+          employeePhone: this.normalizeOptionalString(planItem['employeePhone']),
+          accountType: this.normalizeOptionalString(planItem['accountType']),
+          platform: this.normalizeOptionalString(planItem['platform']),
+          platformAccountId: this.normalizeOptionalString(planItem['platformAccountId']),
+          platformAccountName: this.normalizeOptionalString(planItem['platformAccountName']),
+          accountId: this.normalizeOptionalString(planItem['accountId']),
+          firstFrameUrl: this.normalizeOptionalString(planItem['firstFrameUrl']),
           brandAssets: this.normalizeStringList(params['brandAssets']),
-          styleOverrides: this.asRecord(params['styleOverrides']) || {},
-          referenceVideoUrl,
+          styleOverrides: {
+            ...(this.asRecord(params['styleOverrides']) || {}),
+            ...(this.asRecord(planItem['styleOverrides']) || {}),
+          },
+          referenceVideoUrl: sourceVideoUrl,
           createdAt: new Date().toISOString(),
           creationFailed: true,
         },
@@ -709,9 +1032,19 @@ export class ProductionOrchestratorService {
   }
 
   private async finalizeBatch(orgId: string, batchId: string) {
-    const batch = await this.syncBatchStateFromTasks(
-      (await this.getBatchRecordOrFail(orgId, batchId))['_id'].toString(),
-    )
+    const batchObjectId = (await this.getBatchRecordOrFail(orgId, batchId))['_id'].toString()
+    let batch = await this.syncBatchStateFromTasks(batchObjectId)
+    const status = this.normalizeBatchStatus(batch['status'])
+
+    if (
+      status === ProductionBatchStatus.PAUSED
+      || status === ProductionBatchStatus.CANCELLED
+    ) {
+      return this.toBatchResponse(batch)
+    }
+
+    batch = await this.runBatchDedupIfNeeded(orgId, batch)
+    batch = await this.notifyBatchSummaryIfNeeded(orgId, batch)
 
     this.logger.log({
       message: 'Production batch processed',
@@ -719,9 +1052,213 @@ export class ProductionOrchestratorService {
       status: batch['status'],
       completedCount: batch['completedCount'],
       failedCount: batch['failedCount'],
+      skippedCount: batch['skippedCount'],
+      totalAccounts: batch['summary']?.['totalAccounts'] || 0,
+      dedupPassed: batch['summary']?.['dedupPassed'] || 0,
+      dedupFailed: batch['summary']?.['dedupFailed'] || 0,
     })
 
     return this.toBatchResponse(batch)
+  }
+
+  private async runBatchDedupIfNeeded(orgId: string, batch: ProductionBatchRecord) {
+    if (!this.dedupService) {
+      return batch
+    }
+
+    const config = this.resolveBatchProcessingConfig(batch)
+    if (!config.dedupOnComplete && !config.batchDedupOnFinish) {
+      return batch
+    }
+
+    const summary = this.asRecord(batch['summary']) || {}
+    if (summary['dedupCheckedAt']) {
+      return batch
+    }
+
+    const projectId = batch['pipelineId']?.toString?.()
+      || this.normalizeOptionalString(batch['pipelineId'])
+      || this.normalizeOptionalString(batch['batchId'])
+    if (!projectId) {
+      return batch
+    }
+
+    try {
+      const dedupSummary = await this.dedupService.batchCheckDuplicateByBatch(
+        orgId,
+        projectId,
+        batch['_id'].toString(),
+      )
+      const updated = await this.productionBatchModel.findByIdAndUpdate(
+        batch['_id'],
+        {
+          $set: {
+            'summary.dedupPassed': dedupSummary.passed,
+            'summary.dedupFailed': dedupSummary.duplicate + dedupSummary.error,
+            'summary.dedupCheckedAt': new Date(),
+          },
+        },
+        { new: true },
+      ).lean().exec() as ProductionBatchRecord | null
+
+      return updated || batch
+    }
+    catch (error) {
+      this.logger.warn({
+        message: 'Production batch dedup summary failed',
+        batchId: this.normalizeOptionalString(batch['batchId']) || batch['_id']?.toString(),
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return batch
+    }
+  }
+
+  private async notifyBatchSummaryIfNeeded(orgId: string, batch: ProductionBatchRecord) {
+    const status = this.normalizeBatchStatus(batch['status'])
+    if (
+      status !== ProductionBatchStatus.COMPLETED
+      && status !== ProductionBatchStatus.PARTIAL
+      && status !== ProductionBatchStatus.FAILED
+    ) {
+      return batch
+    }
+
+    const summary = this.asRecord(batch['summary']) || {}
+    if (summary['notifiedAt']) {
+      return batch
+    }
+
+    const config = this.resolveBatchProcessingConfig(batch)
+    const report = this.buildBatchReport(batch)
+
+    try {
+      if (config.notifyChannel && this.isHttpUrl(config.notifyChannel)) {
+        await this.postBatchSummary(config.notifyChannel, report)
+      }
+    }
+    catch (error) {
+      this.logger.warn({
+        message: 'Batch summary webhook delivery failed',
+        batchId: this.normalizeOptionalString(batch['batchId']) || batch['_id']?.toString(),
+        notifyChannel: config.notifyChannel,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    try {
+      if (this.notificationService) {
+        await this.notificationService.send(
+          orgId,
+          status === ProductionBatchStatus.FAILED
+            ? NotificationEvent.TASK_FAILED
+            : NotificationEvent.TASK_COMPLETED,
+          report,
+        )
+      }
+    }
+    catch (error) {
+      this.logger.warn({
+        message: 'Batch summary notification failed',
+        batchId: this.normalizeOptionalString(batch['batchId']) || batch['_id']?.toString(),
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    const updated = await this.productionBatchModel.findByIdAndUpdate(
+      batch['_id'],
+      {
+        $set: {
+          'summary.notifiedAt': new Date(),
+        },
+      },
+      { new: true },
+    ).lean().exec() as ProductionBatchRecord | null
+
+    return updated || batch
+  }
+
+  private async postBatchSummary(url: string, payload: Record<string, unknown>) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Webhook returned ${response.status}`)
+    }
+  }
+
+  private buildBatchReport(batch: ProductionBatchRecord) {
+    const summary = this.asRecord(batch['summary']) || {}
+    const scheduleContext = this.asRecord(batch['params']?.['scheduleContext']) || {}
+    const config = this.resolveBatchProcessingConfig(batch)
+
+    return {
+      batchId: this.normalizeOptionalString(batch['batchId']) || batch['_id']?.toString(),
+      orgId: batch['orgId']?.toString?.() || this.normalizeOptionalString(batch['orgId']),
+      pipelineId: batch['pipelineId']?.toString?.() || this.normalizeOptionalString(batch['pipelineId']) || null,
+      templateId: this.normalizeOptionalString(batch['templateId']) || null,
+      status: this.normalizeBatchStatus(batch['status']),
+      totalAccounts: Number(summary['totalAccounts'] || 0),
+      successAccounts: Number(summary['successAccounts'] || 0),
+      failedAccounts: Number(summary['failedAccounts'] || 0),
+      skippedAccounts: Number(summary['skippedAccounts'] || 0),
+      totalVideos: Number(summary['totalVideos'] || 0),
+      completedCount: Number(batch['completedCount'] || 0),
+      failedCount: Number(batch['failedCount'] || 0),
+      skippedCount: Number(batch['skippedCount'] || 0),
+      dedupPassed: Number(summary['dedupPassed'] || 0),
+      dedupFailed: Number(summary['dedupFailed'] || 0),
+      totalDurationSec: Number(summary['totalDurationSec'] || 0),
+      totalCost: Number(summary['totalCost'] || 0),
+      errorRate: Number(summary['errorRate'] || 0),
+      successRate: Number(summary['successRate'] || 0),
+      startedAt: summary['startedAt'] || batch['startedAt'] || null,
+      completedAt: summary['completedAt'] || batch['completedAt'] || null,
+      notifyChannel: config.notifyChannel || null,
+      scheduleContext,
+    }
+  }
+
+  private async maybePauseBatchByErrorRate(
+    batchObjectId: string,
+    config: ResolvedBatchProcessingConfig,
+  ) {
+    if (config.pauseOnErrorRate === null) {
+      return false
+    }
+
+    const batch = await this.syncBatchStateFromTasks(batchObjectId)
+    const processedCount = Number(batch['completedCount'] || 0) + Number(batch['failedCount'] || 0)
+    if (processedCount === 0) {
+      return false
+    }
+
+    const errorRate = Number(batch['summary']?.['errorRate'] || 0)
+    if (errorRate < config.pauseOnErrorRate) {
+      return false
+    }
+
+    const status = this.normalizeBatchStatus(batch['status'])
+    if (status !== ProductionBatchStatus.RUNNING) {
+      return false
+    }
+
+    await this.productionBatchModel.findByIdAndUpdate(
+      batch['_id'],
+      {
+        $set: {
+          status: ProductionBatchStatus.PAUSED,
+          errorMessage: `error_rate_exceeded:${errorRate.toFixed(4)}`,
+        },
+      },
+    ).exec()
+
+    return true
   }
 
   private async markBatchRunFailure(batchObjectId: string, errorMessage: string) {
@@ -731,7 +1268,11 @@ export class ProductionOrchestratorService {
     }
 
     const currentStatus = this.normalizeBatchStatus(batch['status'])
-    if (currentStatus === ProductionBatchStatus.CANCELLED || currentStatus === ProductionBatchStatus.COMPLETED) {
+    if (
+      currentStatus === ProductionBatchStatus.CANCELLED
+      || currentStatus === ProductionBatchStatus.COMPLETED
+      || currentStatus === ProductionBatchStatus.PARTIAL
+    ) {
       return
     }
 
@@ -755,22 +1296,18 @@ export class ProductionOrchestratorService {
       throw new NotFoundException('Production batch not found')
     }
 
-    const normalizedTasks = tasks.slice().sort((left, right) => {
-      const leftIndex = typeof left['batchIndex'] === 'number' ? Number(left['batchIndex']) : Number.MAX_SAFE_INTEGER
-      const rightIndex = typeof right['batchIndex'] === 'number' ? Number(right['batchIndex']) : Number.MAX_SAFE_INTEGER
-      if (leftIndex !== rightIndex) {
-        return leftIndex - rightIndex
-      }
-
-      const leftCreatedAt = new Date(left['createdAt'] || 0).getTime()
-      const rightCreatedAt = new Date(right['createdAt'] || 0).getTime()
-      return leftCreatedAt - rightCreatedAt
-    })
-    const totalCount = Math.max(Number(batch['totalCount'] || batch['totalTasks'] || 0), normalizedTasks.length)
-    const completedTasks = normalizedTasks.filter(task => task['status'] === VideoTaskStatus.COMPLETED)
+    const normalizedTasks = this.collapseBatchTasks(tasks)
+    const totalCount = Math.max(
+      Number(batch['totalCount'] || batch['totalTasks'] || 0),
+      this.getBatchTaskPlan(batch).length,
+      normalizedTasks.length,
+    )
+    const completedTasks = normalizedTasks.filter(task => this.isSuccessfulTaskStatus(task['status']))
     const failedTasks = normalizedTasks.filter(task => this.isFailedTaskStatus(task['status']))
     const activeTaskCount = normalizedTasks.filter(task => !this.isTerminalTaskStatus(task['status'])).length
     const currentStatus = this.normalizeBatchStatus(batch['status'])
+    const retryLimit = this.resolveBatchProcessingConfig(batch).retryLimit
+    const skippedCount = failedTasks.filter(task => this.readTaskAttempt(task) >= retryLimit).length
     const allProcessed = totalCount > 0
       && normalizedTasks.length >= totalCount
       && activeTaskCount === 0
@@ -818,31 +1355,32 @@ export class ProductionOrchestratorService {
       batch['_id'],
       {
         $set: {
-          status: nextStatus,
-          videoTaskIds: normalizedTasks.map(task => task['_id'].toString()),
-          tasks: normalizedTasks.map(task => ({
+          'status': nextStatus,
+          'videoTaskIds': normalizedTasks.map(task => task['_id'].toString()),
+          'tasks': normalizedTasks.map(task => ({
             taskId: task['_id'],
             status: task['status'],
             sourceVideoUrl: task['sourceVideoUrl'] || '',
             errorMessage: task['errorMessage'] || '',
           })),
           totalCount,
-          totalTasks: totalCount,
-          completedCount: completedTasks.length,
-          failedCount: failedTasks.length,
-          completedTasks: completedTasks.length,
-          failedTasks: failedTasks.length,
-          completedTaskIds: completedTasks.map(task => task['_id'].toString()),
-          failedTaskIds: failedTasks.map(task => task['_id'].toString()),
+          'totalTasks': totalCount,
+          'completedCount': completedTasks.length,
+          'failedCount': failedTasks.length,
+          'skippedCount': skippedCount,
+          'completedTasks': completedTasks.length,
+          'failedTasks': failedTasks.length,
+          'completedTaskIds': completedTasks.map(task => task['_id'].toString()),
+          'failedTaskIds': failedTasks.map(task => task['_id'].toString()),
           startedAt,
           completedAt,
-          errorMessage: [
+          'errorMessage': [
             ProductionBatchStatus.RUNNING,
             ProductionBatchStatus.PENDING,
           ].includes(nextStatus)
             ? ''
             : latestFailedTask?.['errorMessage'] || batch['errorMessage'] || '',
-          summary: this.buildBatchSummary(normalizedTasks, totalCount, startedAt, completedAt),
+          'summary': this.buildBatchSummary(normalizedTasks, totalCount, startedAt, completedAt, batch, skippedCount),
           'resumeState.lastProcessedIndex': this.resolveLastProcessedIndex(normalizedTasks),
         },
       },
@@ -880,15 +1418,22 @@ export class ProductionOrchestratorService {
     const params = this.asRecord(batch['params']) || {}
     const referenceVideoUrl = this.normalizeOptionalString(params['referenceVideoUrl'])
     const existingTaskIds = this.normalizeStringList(batch['videoTaskIds'])
+    const taskPlan = this.getBatchTaskPlan(batch)
 
-    if (!referenceVideoUrl && existingTaskIds.length === 0) {
-      throw new BadRequestException('referenceVideoUrl is required for automated production batches')
+    if (!referenceVideoUrl && !this.batchPlanHasPlayableSource(taskPlan) && existingTaskIds.length === 0) {
+      throw new BadRequestException('referenceVideoUrl or taskPlan source is required for automated production batches')
     }
   }
 
-  private buildBatchTaskInput(batch: ProductionBatchRecord, index: number) {
+  private buildBatchTaskInput(
+    batch: ProductionBatchRecord,
+    index: number,
+    attempt = 0,
+  ) {
     const params = this.asRecord(batch['params']) || {}
-    const referenceVideoUrl = this.normalizeOptionalString(params['referenceVideoUrl'])
+    const taskPlan = this.getBatchTaskPlan(batch)
+    const planItem = taskPlan[index] || {}
+    const sourceVideoUrl = this.resolveBatchTaskSourceVideoUrl(batch, planItem)
     const batchBusinessId = this.normalizeOptionalString(batch['batchId']) || batch['_id'].toString()
 
     return {
@@ -896,24 +1441,51 @@ export class ProductionOrchestratorService {
       pipelineId: batch['pipelineId']?.toString?.() || this.normalizeOptionalString(batch['pipelineId']) || undefined,
       batchId: batch['_id'].toString(),
       taskType: VideoTaskType.NEW_CONTENT,
-      sourceVideoUrl: referenceVideoUrl,
+      sourceVideoUrl,
       source: {
-        type: referenceVideoUrl ? 'url' : 'manual',
-        url: referenceVideoUrl,
+        type: sourceVideoUrl ? 'url' : 'manual',
+        url: sourceVideoUrl,
         videoId: '',
       },
       metadata: {
         batchId: batchBusinessId,
+        accountType: this.normalizeOptionalString(planItem['accountType']),
+        firstFrameUrl: this.normalizeOptionalString(planItem['firstFrameUrl']),
+        templateId: this.normalizeOptionalString(planItem['templateId']) || this.normalizeOptionalString(batch['templateId']),
+        coverUrl: this.normalizeOptionalString(planItem['firstFrameUrl']),
+        distribution: {
+          assignmentId: this.normalizeOptionalString(planItem['assignmentId']),
+          accountType: this.normalizeOptionalString(planItem['accountType']),
+          platform: this.normalizeOptionalString(planItem['platform']),
+          platformAccountId: this.normalizeOptionalString(planItem['platformAccountId']),
+          accountId: this.normalizeOptionalString(planItem['accountId']),
+          employeeName: this.normalizeOptionalString(planItem['employeeName']),
+        },
         productionBatch: {
           batchId: batchBusinessId,
           batchIndex: index,
-          templateId: this.normalizeOptionalString(batch['templateId']),
+          attempt,
+          templateId: this.normalizeOptionalString(planItem['templateId']) || this.normalizeOptionalString(batch['templateId']),
           requestedBy: this.normalizeOptionalString(batch['createdBy'])
             || this.normalizeOptionalString(batch['userId'])
             || this.normalizeOptionalString(batch['orgId']),
+          assignmentId: this.normalizeOptionalString(planItem['assignmentId']),
+          employeeName: this.normalizeOptionalString(planItem['employeeName']),
+          employeePhone: this.normalizeOptionalString(planItem['employeePhone']),
+          accountType: this.normalizeOptionalString(planItem['accountType']),
+          platform: this.normalizeOptionalString(planItem['platform']),
+          platformAccountId: this.normalizeOptionalString(planItem['platformAccountId']),
+          platformAccountName: this.normalizeOptionalString(planItem['platformAccountName']),
+          accountId: this.normalizeOptionalString(planItem['accountId']),
+          firstFrameUrl: this.normalizeOptionalString(planItem['firstFrameUrl']),
+          dailySequence: Number(planItem['dailySequence'] || 0),
+          dailyQuota: Number(planItem['dailyQuota'] || 0),
           brandAssets: this.normalizeStringList(params['brandAssets']),
-          styleOverrides: this.asRecord(params['styleOverrides']) || {},
-          referenceVideoUrl,
+          styleOverrides: {
+            ...(this.asRecord(params['styleOverrides']) || {}),
+            ...(this.asRecord(planItem['styleOverrides']) || {}),
+          },
+          referenceVideoUrl: sourceVideoUrl,
           createdAt: new Date().toISOString(),
         },
       },
@@ -1026,11 +1598,33 @@ export class ProductionOrchestratorService {
     return task
   }
 
+  private async getLatestTaskForIndex(batchObjectId: string, index: number) {
+    return this.videoTaskModel.findOne({
+      batchId: this.toObjectIdIfValid(batchObjectId),
+      batchIndex: index,
+    })
+      .sort({ createdAt: -1, updatedAt: -1 })
+      .lean()
+      .exec() as Promise<VideoTaskRecord | null>
+  }
+
   private isTerminalTaskStatus(status: unknown) {
     return [
       VideoTaskStatus.COMPLETED,
+      VideoTaskStatus.PENDING_REVIEW,
+      VideoTaskStatus.APPROVED,
+      VideoTaskStatus.PUBLISHED,
       VideoTaskStatus.FAILED,
       VideoTaskStatus.CANCELLED,
+    ].includes(status as VideoTaskStatus)
+  }
+
+  private isSuccessfulTaskStatus(status: unknown) {
+    return [
+      VideoTaskStatus.COMPLETED,
+      VideoTaskStatus.PENDING_REVIEW,
+      VideoTaskStatus.APPROVED,
+      VideoTaskStatus.PUBLISHED,
     ].includes(status as VideoTaskStatus)
   }
 
@@ -1060,7 +1654,10 @@ export class ProductionOrchestratorService {
     totalCount: number,
     startedAt: Date | string | null,
     completedAt: Date | null,
+    batch: ProductionBatchRecord,
+    skippedCount: number,
   ) {
+    const currentSummary = this.asRecord(batch['summary']) || {}
     const totalCost = tasks.reduce(
       (sum, task) => sum + Number(task['creditsConsumed'] || task['quotaUnits'] || 0),
       0,
@@ -1069,18 +1666,48 @@ export class ProductionOrchestratorService {
       (sum, task) => sum + Number(task['output']?.['duration'] || task['quality']?.['duration'] || 0),
       0,
     )
-    const completedCount = tasks.filter(task => task['status'] === VideoTaskStatus.COMPLETED).length
+    const completedCount = tasks.filter(task => this.isSuccessfulTaskStatus(task['status'])).length
+    const failedTasks = tasks.filter(task => this.isFailedTaskStatus(task['status']))
+    const processedCount = completedCount + failedTasks.length
     const averageBase = totalCount > 0 ? totalCount : tasks.length
     const normalizedStartedAt = startedAt ? new Date(startedAt) : null
     const elapsedMs = normalizedStartedAt
       ? Math.max((completedAt || new Date()).getTime() - normalizedStartedAt.getTime(), 0)
       : 0
+    const plannedAccounts = new Set(this.getBatchTaskPlan(batch).map(item => this.buildPlanAccountKey(item)).filter(Boolean))
+    const successAccounts = new Set(
+      tasks
+        .filter(task => this.isSuccessfulTaskStatus(task['status']))
+        .map(task => this.extractTaskAccountKey(task))
+        .filter(Boolean),
+    )
+    const failedAccounts = new Set(
+      failedTasks
+        .map(task => this.extractTaskAccountKey(task))
+        .filter(Boolean),
+    )
+    const totalAccounts = Math.max(
+      plannedAccounts.size,
+      successAccounts.size + failedAccounts.size,
+      Number(currentSummary['totalAccounts'] || 0),
+    )
 
     return {
       avgCostPerVideo: averageBase > 0 ? Number((totalCost / averageBase).toFixed(2)) : 0,
       totalCost: Number(totalCost.toFixed(2)),
       avgDurationSec: averageBase > 0 ? Number((totalDuration / averageBase).toFixed(2)) : 0,
+      totalDurationSec: Number(totalDuration.toFixed(2)),
       successRate: totalCount > 0 ? Number((completedCount / totalCount).toFixed(4)) : 0,
+      errorRate: processedCount > 0 ? Number((failedTasks.length / processedCount).toFixed(4)) : 0,
+      totalVideos: completedCount,
+      totalAccounts,
+      successAccounts: successAccounts.size,
+      failedAccounts: failedAccounts.size,
+      skippedAccounts: Math.min(totalAccounts, Math.max(skippedCount, Number(currentSummary['skippedAccounts'] || 0))),
+      dedupPassed: Number(currentSummary['dedupPassed'] || 0),
+      dedupFailed: Number(currentSummary['dedupFailed'] || 0),
+      dedupCheckedAt: currentSummary['dedupCheckedAt'] || null,
+      notifiedAt: currentSummary['notifiedAt'] || null,
       startedAt: normalizedStartedAt,
       completedAt,
       elapsedMs,
@@ -1178,6 +1805,94 @@ export class ProductionOrchestratorService {
     return Array.from(new Set(value.map(item => this.normalizeOptionalString(item)).filter(Boolean)))
   }
 
+  private normalizeBatchTaskPlan(value: unknown) {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return value
+      .map((item) => {
+        const record = this.asRecord(item)
+        if (!record) {
+          return null
+        }
+
+        return {
+          assignmentId: this.normalizeOptionalString(record['assignmentId']),
+          employeeName: this.normalizeOptionalString(record['employeeName']),
+          employeePhone: this.normalizeOptionalString(record['employeePhone']),
+          accountType: this.normalizeOptionalString(record['accountType']) || this.normalizeOptionalString(record['platform']),
+          platform: this.normalizeOptionalString(record['platform']),
+          platformAccountId: this.normalizeOptionalString(record['platformAccountId'] || record['id']),
+          platformAccountName: this.normalizeOptionalString(record['platformAccountName'] || record['accountName']),
+          accountId: this.normalizeOptionalString(record['accountId']),
+          firstFrameUrl: this.normalizeOptionalString(record['firstFrameUrl'] || record['coverUrl'] || record['avatarUrl']),
+          referenceVideoUrl: this.normalizeOptionalString(record['referenceVideoUrl']),
+          templateId: this.normalizeOptionalString(record['templateId']),
+          dailySequence: Math.max(Number(record['dailySequence'] || 0), 0),
+          dailyQuota: Math.max(Number(record['dailyQuota'] || 0), 0),
+          styleOverrides: this.asRecord(record['styleOverrides']) || {},
+          metadata: this.asRecord(record['metadata']) || {},
+        } as BatchTaskPlanItem
+      })
+      .filter((item): item is BatchTaskPlanItem => Boolean(item))
+  }
+
+  private normalizeBatchConfig(value: unknown): BatchProcessingConfig {
+    const source = this.asRecord(value) || {}
+    return {
+      concurrency: this.normalizePositiveInteger(source['concurrency'], DEFAULT_BATCH_CONCURRENCY, 8),
+      retryLimit: this.normalizePositiveInteger(source['retryLimit'], DEFAULT_BATCH_RETRY_LIMIT, 3),
+      dedupOnComplete: this.normalizeBoolean(source['dedupOnComplete'], true),
+      batchDedupOnFinish: this.normalizeBoolean(source['batchDedupOnFinish'], true),
+      notifyChannel: this.normalizeOptionalString(source['notifyChannel']),
+      pauseOnErrorRate: this.normalizeRatio(source['pauseOnErrorRate']),
+    }
+  }
+
+  private resolveBatchProcessingConfig(batch: ProductionBatchRecord): ResolvedBatchProcessingConfig {
+    const config = this.asRecord(batch['params']?.['config']) || {}
+    return {
+      concurrency: this.normalizePositiveInteger(config['concurrency'], DEFAULT_BATCH_CONCURRENCY, 8),
+      retryLimit: this.normalizePositiveInteger(config['retryLimit'], DEFAULT_BATCH_RETRY_LIMIT, 3),
+      dedupOnComplete: this.normalizeBoolean(config['dedupOnComplete'], true),
+      batchDedupOnFinish: this.normalizeBoolean(config['batchDedupOnFinish'], true),
+      notifyChannel: this.normalizeOptionalString(config['notifyChannel']),
+      pauseOnErrorRate: this.normalizeRatio(config['pauseOnErrorRate']),
+    }
+  }
+
+  private normalizePositiveInteger(value: unknown, fallback: number, max = 100) {
+    const normalized = Math.trunc(Number(value))
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      return fallback
+    }
+    return Math.min(normalized, max)
+  }
+
+  private normalizeBoolean(value: unknown, fallback: boolean) {
+    if (typeof value === 'boolean') {
+      return value
+    }
+    if (typeof value === 'string') {
+      if (value === 'true') {
+        return true
+      }
+      if (value === 'false') {
+        return false
+      }
+    }
+    return fallback
+  }
+
+  private normalizeRatio(value: unknown) {
+    const normalized = Number(value)
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      return null
+    }
+    return Math.min(Math.max(normalized, 0.01), 1)
+  }
+
   private asRecord(value: unknown) {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? value as Record<string, unknown>
@@ -1196,5 +1911,195 @@ export class ProductionOrchestratorService {
 
   private delay(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  private getBatchTaskPlan(batch: ProductionBatchRecord) {
+    return this.normalizeBatchTaskPlan(batch['params']?.['taskPlan'])
+  }
+
+  private batchPlanHasPlayableSource(taskPlan: BatchTaskPlanItem[]) {
+    return taskPlan.some(item =>
+      Boolean(
+        this.normalizeOptionalString(item.referenceVideoUrl)
+        || this.normalizeOptionalString(item.firstFrameUrl),
+      ),
+    )
+  }
+
+  private resolveBatchTaskSourceVideoUrl(batch: ProductionBatchRecord, planItem: BatchTaskPlanItem) {
+    const params = this.asRecord(batch['params']) || {}
+    return this.normalizeOptionalString(planItem.referenceVideoUrl)
+      || this.normalizeOptionalString(params['referenceVideoUrl'])
+      || this.normalizeOptionalString(planItem.firstFrameUrl)
+  }
+
+  private resolveAssignmentAccounts(
+    assignment: GenericRecord,
+    requestedPlatforms: Set<string>,
+    requestedAccountTypes: Set<string>,
+    requestedPlatformAccountIds: Set<string>,
+  ) {
+    const platformAccounts = Array.isArray(assignment['platformAccounts'])
+      ? assignment['platformAccounts'] as GenericRecord[]
+      : []
+
+    const normalizedAccounts = platformAccounts
+      .map(account => ({
+        id: this.normalizeOptionalString(account['id']),
+        platform: this.normalizeOptionalString(account['platform']).toLowerCase(),
+        accountId: this.normalizeOptionalString(account['accountId']),
+        accountName: this.normalizeOptionalString(account['accountName']),
+        avatarUrl: this.normalizeOptionalString(account['avatarUrl']),
+        coverUrl: this.normalizeOptionalString(account['coverUrl']),
+        firstFrameUrl: this.normalizeOptionalString(account['firstFrameUrl']),
+      }))
+      .filter(account => Boolean(account.id || account.accountId || account.platform))
+
+    const assignmentAccountTypes = new Set(
+      this.normalizeStringList(assignment['distributionRules']?.['accountTypes']).map(item => item.toLowerCase()),
+    )
+
+    return normalizedAccounts.filter((account) => {
+      if (requestedPlatformAccountIds.size > 0 && !requestedPlatformAccountIds.has(account.id)) {
+        return false
+      }
+      if (requestedPlatforms.size > 0 && !requestedPlatforms.has(account.platform)) {
+        return false
+      }
+      if (requestedAccountTypes.size > 0 && !requestedAccountTypes.has(account.platform)) {
+        return false
+      }
+      if (assignmentAccountTypes.size > 0 && !assignmentAccountTypes.has(account.platform)) {
+        return false
+      }
+      return true
+    })
+  }
+
+  private sortAssignmentAccounts(accounts: GenericRecord[], defaultPlatformAccountId: string) {
+    return accounts.slice().sort((left, right) => {
+      const leftDefault = left['id'] === defaultPlatformAccountId ? 1 : 0
+      const rightDefault = right['id'] === defaultPlatformAccountId ? 1 : 0
+      if (leftDefault !== rightDefault) {
+        return rightDefault - leftDefault
+      }
+
+      return this.normalizeOptionalString(left['accountName']).localeCompare(
+        this.normalizeOptionalString(right['accountName']),
+      )
+    })
+  }
+
+  private isAssignmentTemplateEligible(
+    assignment: GenericRecord,
+    templateId: string | undefined,
+    requestedTemplateIds: string[],
+  ) {
+    const assignmentTemplateIds = this.normalizeStringList(assignment['distributionRules']?.['templateIds'])
+    if (requestedTemplateIds.length > 0 && templateId && !requestedTemplateIds.includes(templateId)) {
+      return false
+    }
+    if (assignmentTemplateIds.length > 0 && templateId && !assignmentTemplateIds.includes(templateId)) {
+      return false
+    }
+    return true
+  }
+
+  private resolveAssignmentFirstFrameUrl(assignment: GenericRecord, account: GenericRecord) {
+    const metadata = this.asRecord(assignment['metadata']) || {}
+    const accountId = this.normalizeOptionalString(account['id'])
+    const firstFrameByAccountId = this.asRecord(metadata['firstFrameByAccountId']) || {}
+    const coverByAccountId = this.asRecord(metadata['coverByAccountId']) || {}
+
+    return this.normalizeOptionalString(firstFrameByAccountId[accountId])
+      || this.normalizeOptionalString(coverByAccountId[accountId])
+      || this.normalizeOptionalString(metadata['firstFrameUrl'])
+      || this.normalizeOptionalString(account['firstFrameUrl'])
+      || this.normalizeOptionalString(account['coverUrl'])
+      || this.normalizeOptionalString(account['avatarUrl'])
+  }
+
+  private buildAccountTypeSummary(taskPlan: BatchTaskPlanItem[]) {
+    return taskPlan.reduce<Record<string, number>>((acc, item) => {
+      const key = this.normalizeOptionalString(item.accountType || item.platform) || 'unknown'
+      acc[key] = (acc[key] || 0) + 1
+      return acc
+    }, {})
+  }
+
+  private countUniquePlanAccounts(taskPlan: BatchTaskPlanItem[]) {
+    return new Set(taskPlan.map(item => this.buildPlanAccountKey(item)).filter(Boolean)).size
+  }
+
+  private buildPlanAccountKey(item: BatchTaskPlanItem) {
+    const platformAccountId = this.normalizeOptionalString(item.platformAccountId)
+    const accountId = this.normalizeOptionalString(item.accountId)
+    const accountType = this.normalizeOptionalString(item.accountType || item.platform)
+    return platformAccountId || `${accountType}:${accountId}`
+  }
+
+  private extractTaskAccountKey(task: VideoTaskRecord | null | undefined) {
+    const productionBatch = this.asRecord(task?.['metadata']?.['productionBatch']) || {}
+    const platformAccountId = this.normalizeOptionalString(productionBatch['platformAccountId'])
+    const accountId = this.normalizeOptionalString(productionBatch['accountId'])
+    const accountType = this.normalizeOptionalString(productionBatch['accountType'] || productionBatch['platform'])
+    return platformAccountId || `${accountType}:${accountId}`
+  }
+
+  private collapseBatchTasks(tasks: VideoTaskRecord[]) {
+    const indexedTasks = new Map<number, VideoTaskRecord>()
+    const unindexedTasks: VideoTaskRecord[] = []
+
+    for (const task of tasks) {
+      const batchIndex = typeof task['batchIndex'] === 'number'
+        ? Number(task['batchIndex'])
+        : null
+      if (batchIndex === null || Number.isNaN(batchIndex)) {
+        unindexedTasks.push(task)
+        continue
+      }
+
+      const existing = indexedTasks.get(batchIndex)
+      if (!existing || this.isLaterTaskVersion(task, existing)) {
+        indexedTasks.set(batchIndex, task)
+      }
+    }
+
+    return [
+      ...Array.from(indexedTasks.entries())
+        .sort((left, right) => left[0] - right[0])
+        .map(([, task]) => task),
+      ...unindexedTasks.sort((left, right) => this.compareTaskVersion(left, right)),
+    ]
+  }
+
+  private isLaterTaskVersion(candidate: VideoTaskRecord, current: VideoTaskRecord) {
+    return this.compareTaskVersion(candidate, current) > 0
+  }
+
+  private compareTaskVersion(left: VideoTaskRecord, right: VideoTaskRecord) {
+    const leftCreatedAt = new Date(left['createdAt'] || 0).getTime()
+    const rightCreatedAt = new Date(right['createdAt'] || 0).getTime()
+    if (leftCreatedAt !== rightCreatedAt) {
+      return leftCreatedAt - rightCreatedAt
+    }
+
+    const leftUpdatedAt = new Date(left['updatedAt'] || 0).getTime()
+    const rightUpdatedAt = new Date(right['updatedAt'] || 0).getTime()
+    return leftUpdatedAt - rightUpdatedAt
+  }
+
+  private readTaskAttempt(task: VideoTaskRecord | null | undefined) {
+    const metadata = this.asRecord(task?.['metadata']) || {}
+    const productionBatch = this.asRecord(metadata['productionBatch']) || {}
+    const normalized = Number(productionBatch['attempt'] ?? task?.['retryCount'] ?? 0)
+    if (!Number.isFinite(normalized) || normalized < 0) {
+      return 0
+    }
+    return Math.trunc(normalized)
+  }
+
+  private isHttpUrl(value: string) {
+    return /^https?:\/\//i.test(value)
   }
 }

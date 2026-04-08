@@ -10,10 +10,13 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { DedupModule } from '../dedup/dedup.module'
+import { EmployeeDispatchModule } from '../employee-dispatch/employee-dispatch.module'
+import { NotificationModule } from '../notification/notification.module'
 import { VideoModule } from '../video/video.module'
 
-import { ProductionController } from './production.controller'
 import { ProductionOrchestratorService } from './production-orchestrator.service'
+import { ProductionController } from './production.controller'
 
 @Module({
   imports: [
@@ -23,6 +26,9 @@ import { ProductionOrchestratorService } from './production-orchestrator.service
       { name: Pipeline.name, schema: PipelineSchema },
       { name: Brand.name, schema: BrandSchema },
     ]),
+    EmployeeDispatchModule,
+    NotificationModule,
+    DedupModule,
     VideoModule,
   ],
   controllers: [ProductionController],
