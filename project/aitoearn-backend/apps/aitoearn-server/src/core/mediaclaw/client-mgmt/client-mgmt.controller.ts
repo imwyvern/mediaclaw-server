@@ -36,6 +36,11 @@ export class ClientMgmtController {
     )
   }
 
+  @Get(':orgId/invites')
+  async listPendingInvites(@Param('orgId') orgId: string) {
+    return this.clientMgmtService.listPendingInvites(orgId)
+  }
+
   @Get(':orgId')
   async getOrgDetail(@Param('orgId') orgId: string) {
     return this.clientMgmtService.getOrgDetail(orgId)
@@ -80,5 +85,13 @@ export class ClientMgmtController {
     },
   ) {
     return this.clientMgmtService.inviteMember(orgId, body.phone, body.role)
+  }
+
+  @Delete(':orgId/invites/:inviteId')
+  async revokeInvite(
+    @Param('orgId') orgId: string,
+    @Param('inviteId') inviteId: string,
+  ) {
+    return this.clientMgmtService.revokeInvite(orgId, inviteId)
   }
 }

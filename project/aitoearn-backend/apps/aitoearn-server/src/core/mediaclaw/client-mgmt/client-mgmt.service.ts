@@ -7,7 +7,6 @@ import { InjectModel } from '@nestjs/mongoose'
 import {
   Brand,
   Invoice,
-  McUserType,
   MediaClawUser,
   normalizeUserRole,
   Organization,
@@ -21,6 +20,7 @@ import {
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { EnterpriseAuthService } from '../auth/enterprise-auth.service'
+import { OrgMemberAdminService } from '../org/org-member-admin.service'
 import {
   MEDIACLAW_PENDING_TASK_STATUSES,
   MEDIACLAW_SUCCESS_STATUSES,
@@ -53,6 +53,7 @@ export class ClientMgmtService {
     @InjectModel(Invoice.name)
     private readonly invoiceModel: Model<Invoice>,
     private readonly enterpriseAuthService: EnterpriseAuthService,
+    private readonly orgMemberAdminService: OrgMemberAdminService,
   ) {}
 
   async listOrgs(filters: OrgFilters, pagination: PaginationInput) {
@@ -80,7 +81,7 @@ export class ClientMgmtService {
           }>([
             {
               $match: {
-                'isActive': true,
+                isActive: true,
               },
             },
             {
@@ -104,7 +105,7 @@ export class ClientMgmtService {
           }>([
             {
               $match: {
-                'orgId': { $in: orgIds },
+                orgId: { $in: orgIds },
               },
             },
             {
@@ -121,7 +122,7 @@ export class ClientMgmtService {
           }>([
             {
               $match: {
-                'orgId': { $in: orgIds },
+                orgId: { $in: orgIds },
               },
             },
             {
@@ -349,122 +350,32 @@ export class ClientMgmtService {
   }
 
   async listOrgMembers(orgId: string) {
-    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
-    await this.ensureOrgExists(normalizedOrgId)
+    return this.orgMemberAdminService.listMembers(orgId)
+  }
 
-    const members = await this.mediaClawUserModel
-      .find({ 'orgMemberships.orgId': normalizedOrgId })
-      .sort({ createdAt: 1 })
-      .lean()
-      .exec()
-
-    return members.map(member => ({
-      id: member._id.toString(),
-      phone: member.phone,
-      email: member.email,
-      name: member.name,
-      avatarUrl: member.avatarUrl,
-      role: normalizeUserRole(this.findMembershipRole(member, normalizedOrgId) || member.role),
-      userType: member.userType,
-      isActive: member.isActive,
-      lastLoginAt: member.lastLoginAt,
-      createdAt: member.createdAt,
-      updatedAt: member.updatedAt,
-    }))
+  async listPendingInvites(orgId: string) {
+    return this.enterpriseAuthService.listPendingInvites(orgId)
   }
 
   async updateMemberRole(orgId: string, userId: string, role: UserRole) {
-    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
-    const normalizedUserId = this.toObjectId(userId, 'userId')
-    const normalizedRole = this.normalizeEnterpriseRole(role)
-    await this.ensureOrgExists(normalizedOrgId)
-
-    const member = await this.mediaClawUserModel
-      .findOne({
-        '_id': normalizedUserId,
-        'orgMemberships.orgId': normalizedOrgId,
-      })
-      .exec()
-
-    if (!member) {
-      throw new NotFoundException('Organization member not found')
-    }
-
-    member.orgMemberships = (member.orgMemberships || []).map((membership) => {
-      if (membership.orgId.toString() !== normalizedOrgId.toString()) {
-        return membership
-      }
-
-      return {
-        ...membership,
-        role: normalizedRole,
-      }
-    })
-
-    if (member.orgId?.toString() === normalizedOrgId.toString()) {
-      member.role = normalizedRole
-    }
-
-    await member.save()
-
-    return {
-      id: member._id.toString(),
-      orgId: member.orgId?.toString() || null,
-      role: normalizedRole,
-      updatedAt: member.updatedAt,
-    }
+    return this.orgMemberAdminService.updateMemberRole(orgId, userId, role)
   }
 
   async removeOrgMember(orgId: string, userId: string) {
-    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
-    const normalizedUserId = this.toObjectId(userId, 'userId')
-    await this.ensureOrgExists(normalizedOrgId)
-
-    const member = await this.mediaClawUserModel
-      .findOne({
-        '_id': normalizedUserId,
-        'orgMemberships.orgId': normalizedOrgId,
-      })
-      .exec()
-
-    if (!member) {
-      throw new NotFoundException('Organization member not found')
-    }
-
-    member.orgMemberships = (member.orgMemberships || []).filter(
-      membership => membership.orgId.toString() !== normalizedOrgId.toString(),
-    )
-
-    const nextMembership = member.orgMemberships[0] || null
-    if (member.orgId?.toString() === normalizedOrgId.toString()) {
-      member.orgId = nextMembership?.orgId || null
-      member.role = nextMembership
-        ? normalizeUserRole(nextMembership.role)
-        : UserRole.EMPLOYEE
-      member.userType = nextMembership ? McUserType.ENTERPRISE : McUserType.INDIVIDUAL
-    }
-
-    if (!member.orgMemberships.length && !member.orgId) {
-      member.userType = McUserType.INDIVIDUAL
-      member.role = UserRole.EMPLOYEE
-    }
-
-    await member.save()
-
-    return {
-      id: member._id.toString(),
-      removed: true,
-    }
+    return this.orgMemberAdminService.removeMember(orgId, userId)
   }
 
   async inviteMember(orgId: string, phone: string, role: UserRole = UserRole.EMPLOYEE) {
-    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
-    await this.ensureOrgExists(normalizedOrgId)
+    await this.ensureOrgExists(this.toObjectId(orgId, 'orgId'))
     return this.enterpriseAuthService.inviteByPhone(
-      normalizedOrgId.toString(),
+      orgId,
       phone,
       this.normalizeEnterpriseRole(role),
     )
+  }
+
+  async revokeInvite(orgId: string, inviteId: string) {
+    return this.enterpriseAuthService.revokeInvite(orgId, inviteId)
   }
 
   private buildOrgQuery(filters: OrgFilters) {
@@ -489,17 +400,6 @@ export class ClientMgmtService {
     }
 
     return query
-  }
-
-  private findMembershipRole(
-    member: Pick<MediaClawUser, 'orgMemberships'>,
-    orgId: Types.ObjectId,
-  ) {
-    const membership = (member.orgMemberships || []).find(
-      item => item.orgId.toString() === orgId.toString(),
-    )
-
-    return membership?.role || null
   }
 
   private normalizeEnterpriseRole(role: UserRole) {

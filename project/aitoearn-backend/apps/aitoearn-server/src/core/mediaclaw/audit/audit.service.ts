@@ -6,10 +6,14 @@ import { FilterQuery, Model, Types } from 'mongoose'
 interface AuditEvent {
   orgId: string
   userId?: string
+  userName?: string
   action: string
   resource: string
   resourceId?: string
+  target?: string
+  meta?: Record<string, any>
   details?: Record<string, any>
+  ip?: string
   ipAddress?: string
   userAgent?: string
 }
@@ -45,10 +49,14 @@ export class AuditService {
       return await this.auditLogModel.create({
         orgId: new Types.ObjectId(event.orgId),
         userId: event.userId || '',
+        userName: event.userName || '',
         action: event.action.trim(),
         resource: event.resource.trim(),
+        target: event.target || '',
         resourceId: event.resourceId || '',
         details: event.details || {},
+        meta: event.meta || {},
+        ip: event.ip || '',
         ipAddress: event.ipAddress || '',
         userAgent: event.userAgent || '',
       })

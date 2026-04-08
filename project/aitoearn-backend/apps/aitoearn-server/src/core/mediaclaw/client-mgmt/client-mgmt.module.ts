@@ -15,12 +15,14 @@ import {
   VideoTaskSchema,
 } from '@yikart/mongodb'
 import { McAuthModule } from '../auth/auth.module'
+import { OrgModule } from '../org/org.module'
 import { ClientMgmtController } from './client-mgmt.controller'
 import { ClientMgmtService } from './client-mgmt.service'
 
 @Module({
   imports: [
     McAuthModule,
+    OrgModule,
     MongooseModule.forFeature([
       { name: Organization.name, schema: OrganizationSchema },
       { name: MediaClawUser.name, schema: MediaClawUserSchema },

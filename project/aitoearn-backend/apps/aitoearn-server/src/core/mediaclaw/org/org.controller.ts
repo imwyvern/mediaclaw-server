@@ -1,5 +1,6 @@
 import {
   Body,
+  Delete,
   ForbiddenException,
   Get,
   Param,
@@ -34,9 +35,52 @@ export class OrgController {
     return this.orgService.listMembers(this.resolveOrgId(user))
   }
 
+  @Get('invites')
+  async listPendingInvites(@GetToken() user: { orgId?: string, id?: string }) {
+    return this.orgService.listPendingInvites(this.resolveOrgId(user))
+  }
+
   @Get('model-preferences')
   async getModelPreferences(@GetToken() user: { orgId?: string, id?: string }) {
     return this.orgService.getModelPreferences(this.resolveOrgId(user))
+  }
+
+  @Post('members/invite')
+  async inviteMember(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: { phone: string, role?: UserRole },
+  ) {
+    return this.orgService.inviteMember(
+      this.resolveOrgId(user),
+      body.phone,
+      body.role || UserRole.EMPLOYEE,
+      user.id,
+    )
+  }
+
+  @Patch('members/:userId/role')
+  async updateMemberRole(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('userId') userId: string,
+    @Body('role') role: UserRole,
+  ) {
+    return this.orgService.updateMemberRole(this.resolveOrgId(user), userId, role)
+  }
+
+  @Delete('members/:userId')
+  async removeMember(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('userId') userId: string,
+  ) {
+    return this.orgService.removeMember(this.resolveOrgId(user), userId)
+  }
+
+  @Delete('invites/:inviteId')
+  async revokeInvite(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('inviteId') inviteId: string,
+  ) {
+    return this.orgService.revokeInvite(this.resolveOrgId(user), inviteId)
   }
 
   @Post()

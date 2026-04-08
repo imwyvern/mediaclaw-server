@@ -1,21 +1,23 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
-  MediaClawUser,
-  normalizeUserRole,
   Organization,
   OrganizationEnterpriseProfile,
   OrganizationModelPreferenceKey,
+  UserRole,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { EnterpriseAuthService } from '../auth/enterprise-auth.service'
 import { ModelResolverService } from '../model-resolver/model-resolver.service'
+import { OrgMemberAdminService } from './org-member-admin.service'
 
 @Injectable()
 export class OrgService {
   constructor(
     @InjectModel(Organization.name) private readonly orgModel: Model<Organization>,
-    @InjectModel(MediaClawUser.name) private readonly mediaClawUserModel: Model<MediaClawUser>,
     private readonly modelResolverService: ModelResolverService,
+    private readonly orgMemberAdminService: OrgMemberAdminService,
+    private readonly enterpriseAuthService: EnterpriseAuthService,
   ) {}
 
   async createForCurrentOrg(orgId: string, data: Partial<Organization>) {
@@ -54,37 +56,32 @@ export class OrgService {
   }
 
   async listMembers(orgId: string) {
-    const normalizedOrgId = this.toObjectId(orgId)
-    const members = await this.mediaClawUserModel.find({
-      isActive: true,
-      'orgMemberships.orgId': normalizedOrgId,
-    })
-      .sort({ role: 1, createdAt: 1 })
-      .lean()
-      .exec()
+    return this.orgMemberAdminService.listMembers(orgId)
+  }
 
-    return members.map((member) => {
-      const membership = (member.orgMemberships || []).find(
-        item => item.orgId?.toString() === normalizedOrgId.toString(),
-      )
-      const role = normalizeUserRole(membership?.role || member.role)
+  async listPendingInvites(orgId: string) {
+    return this.enterpriseAuthService.listPendingInvites(orgId)
+  }
 
-      return {
-        id: member._id?.toString?.() || '',
-        orgId: normalizedOrgId.toString(),
-        phone: member.phone || '',
-        email: member.email || '',
-        name: member.name || member.phone || '未命名成员',
-        avatarUrl: member.avatarUrl || '',
-        wechatId: member.wechatOpenId || '',
-        userType: member.userType || '',
-        role,
-        joinedAt: membership?.joinedAt || null,
-        lastLoginAt: member.lastLoginAt || null,
-        createdAt: member.createdAt || null,
-        updatedAt: member.updatedAt || null,
-      }
-    })
+  async inviteMember(
+    orgId: string,
+    phone: string,
+    role: UserRole = UserRole.EMPLOYEE,
+    invitedByUserId?: string,
+  ) {
+    return this.enterpriseAuthService.inviteByPhone(orgId, phone, role, invitedByUserId)
+  }
+
+  async updateMemberRole(orgId: string, userId: string, role: UserRole) {
+    return this.orgMemberAdminService.updateMemberRole(orgId, userId, role)
+  }
+
+  async removeMember(orgId: string, userId: string) {
+    return this.orgMemberAdminService.removeMember(orgId, userId)
+  }
+
+  async revokeInvite(orgId: string, inviteId: string) {
+    return this.enterpriseAuthService.revokeInvite(orgId, inviteId)
   }
 
   async getModelPreferences(orgId: string) {

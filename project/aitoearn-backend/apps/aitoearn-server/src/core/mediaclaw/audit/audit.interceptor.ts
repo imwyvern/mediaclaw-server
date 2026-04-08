@@ -1,6 +1,7 @@
 import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common'
 import { Observable } from 'rxjs'
 import { tap } from 'rxjs/operators'
+import { resolveAuditOperation } from './audit-action.mapper'
 import { AuditService } from './audit.service'
 
 @Injectable()
@@ -19,27 +20,39 @@ export class AuditInterceptor implements NestInterceptor {
     const method = request.method?.toUpperCase()
     const startedAt = Date.now()
 
-    if (!['POST', 'PATCH', 'DELETE'].includes(method)) {
-      return next.handle()
-    }
-
     const user = request['user']
-    const orgId = user?.orgId || user?.id
+    const orgId = user?.['orgId'] || user?.['id']
     if (!orgId) {
       return next.handle()
     }
 
-    const routePath = request.route?.path || request.originalUrl || request.url || ''
-    const resource = this.extractResource(routePath)
+    const auditOperation = resolveAuditOperation({
+      method,
+      baseUrl: request.baseUrl,
+      route: request.route,
+      originalUrl: request.originalUrl,
+      url: request.url,
+      params: request.params,
+      query: request.query,
+      body: request.body,
+    })
+
+    if (!auditOperation) {
+      return next.handle()
+    }
 
     return next.handle().pipe(
       tap(() => {
+        const ipAddress = this.resolveIpAddress(request)
         void this.auditService.log({
           orgId,
-          userId: user?.id,
-          action: `${method} ${routePath}`,
-          resource,
-          resourceId: request.params?.id || request.params?.resourceId || '',
+          userId: user?.['id'],
+          userName: this.resolveUserName(user),
+          action: auditOperation.action,
+          resource: auditOperation.resource,
+          resourceId: auditOperation.resourceId,
+          target: auditOperation.target,
+          meta: auditOperation.meta,
           details: {
             method,
             path: request.originalUrl || request.url,
@@ -49,8 +62,9 @@ export class AuditInterceptor implements NestInterceptor {
             statusCode: response.statusCode,
             durationMs: Date.now() - startedAt,
           },
-          ipAddress: request.ip || request.headers['x-forwarded-for'] || '',
-          userAgent: request.headers['user-agent'] || '',
+          ip: ipAddress,
+          ipAddress,
+          userAgent: request.headers?.['user-agent'] || '',
         }).catch((error) => {
           this.logger.error({
             message: 'Failed to write audit log from interceptor',
@@ -61,15 +75,21 @@ export class AuditInterceptor implements NestInterceptor {
     )
   }
 
-  private extractResource(path: string) {
-    const cleanedPath = path.split('?')[0]
-    const segments = cleanedPath.split('/').filter(Boolean)
+  private resolveUserName(user: Record<string, any> | undefined) {
+    return user?.['name'] || user?.['displayName'] || user?.['email'] || user?.['phone'] || user?.['id'] || ''
+  }
 
-    if (segments.length >= 3 && segments[0] === 'api' && segments[1] === 'v1') {
-      return segments[2]
+  private resolveIpAddress(request: Record<string, any>) {
+    const forwardedFor = request?.['headers']?.['x-forwarded-for']
+    if (Array.isArray(forwardedFor)) {
+      return forwardedFor[0] || request['ip'] || ''
     }
 
-    return segments[0] || 'unknown'
+    if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+      return forwardedFor.split(',')[0]?.trim() || request['ip'] || ''
+    }
+
+    return request['ip'] || ''
   }
 
   private sanitizeRecord(value: Record<string, unknown>) {

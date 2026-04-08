@@ -43,13 +43,13 @@ interface RegisterEnterpriseInput {
   description?: string
 }
 
-type OrgMembershipRecord = {
+interface OrgMembershipRecord {
   orgId: { toString: () => string }
   role: UserRole
   joinedAt: Date
 }
 
-type OrganizationResponseInput = {
+interface OrganizationResponseInput {
   _id: { toString: () => string }
   name: string
   type: OrgType
@@ -372,6 +372,48 @@ export class EnterpriseAuthService {
     }))
   }
 
+  async revokeInvite(orgId: string, inviteId: string) {
+    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
+    const normalizedInviteId = this.toObjectId(inviteId, 'inviteId')
+
+    const invite = await this.enterpriseInviteModel.findOne({
+      _id: normalizedInviteId,
+      orgId: normalizedOrgId,
+    }).exec()
+
+    if (!invite) {
+      throw new NotFoundException('Invite not found')
+    }
+
+    if (invite.status !== EnterpriseInviteStatus.PENDING) {
+      throw new BadRequestException('Invite cannot be revoked')
+    }
+
+    const revoked = await this.enterpriseInviteModel.findByIdAndUpdate(
+      invite._id,
+      {
+        $set: {
+          status: EnterpriseInviteStatus.REVOKED,
+        },
+      },
+      { new: true },
+    ).exec()
+
+    if (!revoked) {
+      throw new NotFoundException('Invite not found')
+    }
+
+    return {
+      id: revoked._id.toString(),
+      orgId: revoked.orgId.toString(),
+      phone: revoked.phone,
+      role: normalizeUserRole(revoked.role),
+      status: revoked.status,
+      revoked: true,
+      updatedAt: revoked.updatedAt,
+    }
+  }
+
   private async findOrCreateUserByPhone(
     phone: string,
     options: {
@@ -493,7 +535,7 @@ export class EnterpriseAuthService {
 
   private normalizeOptionalString(value?: string | null) {
     const normalized = value?.trim()
-    return normalized ? normalized : null
+    return normalized || null
   }
 
   private toOptionalObjectId(value?: string | null) {
