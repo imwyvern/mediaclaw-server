@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
+  NotificationEvent,
   Organization,
   OrganizationApiKeyEntry,
   OrganizationApiKeyMap,
@@ -10,6 +11,7 @@ import {
 import axios from 'axios'
 import { Model, Types } from 'mongoose'
 import { MediaclawConfigService } from '../mediaclaw-config.service'
+import { NotificationService } from '../notification/notification.service'
 
 type ConfigKeyInput = string | readonly string[]
 
@@ -41,6 +43,7 @@ export class ByokService {
     @InjectModel(Organization.name)
     private readonly organizationModel: Model<Organization>,
     private readonly configService: MediaclawConfigService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async setApiKey(
@@ -48,6 +51,51 @@ export class ByokService {
     provider: OrgApiKeyProvider,
     plainKey: string,
     validateNow = true,
+  ) {
+    return this.upsertApiKey(orgId, provider, plainKey, {
+      validateNow,
+      rotated: false,
+    })
+  }
+
+  async rotateApiKey(
+    orgId: string,
+    provider: OrgApiKeyProvider,
+    plainKey: string,
+    validateNow = true,
+  ) {
+    return this.upsertApiKey(orgId, provider, plainKey, {
+      validateNow,
+      rotated: true,
+    })
+  }
+
+  async validateProviderKey(provider: OrgApiKeyProvider, plainKey: string) {
+    const normalizedProvider = this.normalizeProvider(provider)
+    const normalizedKey = plainKey.trim()
+
+    if (!normalizedKey) {
+      throw new BadRequestException('key is required')
+    }
+
+    const validation = await this.safeValidateKey(normalizedProvider, normalizedKey)
+
+    return {
+      provider: normalizedProvider,
+      valid: validation.isValid,
+      lastValidatedAt: validation.lastValidatedAt,
+      message: validation.message,
+    }
+  }
+
+  private async upsertApiKey(
+    orgId: string,
+    provider: OrgApiKeyProvider,
+    plainKey: string,
+    options: {
+      validateNow: boolean
+      rotated: boolean
+    },
   ) {
     const organization = await this.findOrganization(orgId)
     const normalizedProvider = this.normalizeProvider(provider)
@@ -58,7 +106,7 @@ export class ByokService {
     }
 
     const currentApiKeys = this.readApiKeyMap(organization.apiKeys)
-    const validation = validateNow
+    const validation = options.validateNow
       ? await this.safeValidateKey(normalizedProvider, normalizedKey)
       : {
           isValid: false,
@@ -68,7 +116,7 @@ export class ByokService {
 
     currentApiKeys[normalizedProvider] = {
       encryptedKey: this.encryptKey(normalizedKey),
-      addedAt: currentApiKeys[normalizedProvider]?.addedAt || new Date(),
+      addedAt: options.rotated ? new Date() : currentApiKeys[normalizedProvider]?.addedAt || new Date(),
       lastUsedAt: currentApiKeys[normalizedProvider]?.lastUsedAt || null,
       isValid: validation.isValid,
       lastValidatedAt: validation.lastValidatedAt,
@@ -199,6 +247,10 @@ export class ByokService {
         const apiKeys = this.readApiKeyMap(organization.apiKeys)
         const current = apiKeys[normalizedProvider]
         if (current?.encryptedKey) {
+          if (current.isValid === false) {
+            return this.resolvePlatformDefaultKey(normalizedProvider, fallbackEnvName)
+          }
+
           const decrypted = this.decryptKey(current.encryptedKey)
           apiKeys[normalizedProvider] = {
             ...current,
@@ -219,7 +271,51 @@ export class ByokService {
     provider: OrgApiKeyProvider,
     fallbackEnvName?: ConfigKeyInput,
   ) {
-    return this.resolveApiKey(orgId, provider, fallbackEnvName)
+    const normalizedProvider = this.normalizeProvider(provider)
+
+    if (orgId && Types.ObjectId.isValid(orgId)) {
+      const organization = await this.organizationModel.findById(new Types.ObjectId(orgId)).exec()
+      if (organization) {
+        const apiKeys = this.readApiKeyMap(organization.apiKeys)
+        const current = apiKeys[normalizedProvider]
+        if (current?.encryptedKey) {
+          const decrypted = this.decryptKey(current.encryptedKey)
+          if (this.shouldValidateRuntimeKey(current)) {
+            const validation = await this.safeValidateKey(normalizedProvider, decrypted)
+            apiKeys[normalizedProvider] = {
+              ...current,
+              isValid: validation.isValid,
+              lastValidatedAt: validation.lastValidatedAt,
+              lastUsedAt: validation.isValid ? new Date() : current.lastUsedAt || null,
+            }
+            organization.set('apiKeys', apiKeys)
+            await organization.save()
+
+            if (validation.isValid) {
+              return decrypted
+            }
+
+            const fallbackKey = this.resolvePlatformDefaultKey(normalizedProvider, fallbackEnvName)
+            await this.notifyByokFallback(orgId, normalizedProvider, validation.message, Boolean(fallbackKey))
+            if (fallbackKey) {
+              return fallbackKey
+            }
+
+            throw new BadRequestException(`BYOK validation failed for ${normalizedProvider}: ${validation.message}`)
+          }
+
+          apiKeys[normalizedProvider] = {
+            ...current,
+            lastUsedAt: new Date(),
+          }
+          organization.set('apiKeys', apiKeys)
+          await organization.save()
+          return decrypted
+        }
+      }
+    }
+
+    return this.resolvePlatformDefaultKey(normalizedProvider, fallbackEnvName)
   }
 
   private async findOrganization(orgId: string) {
@@ -417,6 +513,29 @@ export class ByokService {
       : this.defaultFallbackEnvNames(provider)
 
     return this.configService.getString(envCandidates, '')
+  }
+
+  private shouldValidateRuntimeKey(entry: OrganizationApiKeyEntry) {
+    if (entry.isValid !== true || !entry.lastValidatedAt) {
+      return true
+    }
+
+    return Date.now() - entry.lastValidatedAt.getTime() >= 24 * 60 * 60 * 1000
+  }
+
+  private async notifyByokFallback(
+    orgId: string,
+    provider: OrgApiKeyProvider,
+    reason: string,
+    fallbackAvailable: boolean,
+  ) {
+    await this.notificationService.send(orgId, NotificationEvent.TASK_FAILED, {
+      type: 'byok_fallback',
+      provider,
+      reason,
+      fallbackAvailable,
+      triggeredAt: new Date().toISOString(),
+    })
   }
 
   private defaultFallbackEnvNames(provider: OrgApiKeyProvider) {

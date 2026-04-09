@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import { ApiKey, ApiKeySchema } from '@yikart/mongodb'
+import { SettingsModule } from '../settings/settings.module'
 import { MediaClawApiKeyController } from './apikey.controller'
 import { MediaClawApiKeyGuard } from './apikey.guard'
 import { MediaClawApiKeyService } from './apikey.service'
 
 @Module({
   imports: [
+    SettingsModule,
     MongooseModule.forFeature([
       { name: ApiKey.name, schema: ApiKeySchema },
     ]),

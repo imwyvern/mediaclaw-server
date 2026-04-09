@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { ApiKey, normalizeUserRole, UserRole } from '@yikart/mongodb'
+import { ApiKey, normalizeUserRole, OrgApiKeyProvider, UserRole } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { ByokService } from '../settings/byok.service'
 
 interface CreateApiKeyInput {
   name: string
@@ -17,10 +18,18 @@ interface ValidateApiKeyInput {
   prefix?: string
 }
 
+interface UpsertByokInput {
+  provider: OrgApiKeyProvider
+  key?: string
+  apiKey?: string
+  validateNow?: boolean
+}
+
 @Injectable()
 export class MediaClawApiKeyService {
   constructor(
     @InjectModel(ApiKey.name) private readonly apiKeyModel: Model<ApiKey>,
+    private readonly byokService: ByokService,
   ) {}
 
   async create(userId: string, input: CreateApiKeyInput) {
@@ -158,6 +167,38 @@ export class MediaClawApiKeyService {
     await this.apiKeyModel.findByIdAndUpdate(id, {
       $set: { isActive: false },
     }).exec()
+  }
+
+  async createByok(orgId: string, input: UpsertByokInput) {
+    return this.byokService.addKey(orgId, input)
+  }
+
+  async listByok(orgId: string) {
+    return this.byokService.listApiKeys(orgId)
+  }
+
+  async validateIncomingByok(input: UpsertByokInput) {
+    return this.byokService.validateProviderKey(
+      input.provider,
+      input.key?.trim() || input.apiKey?.trim() || '',
+    )
+  }
+
+  async validateStoredByok(orgId: string, provider: OrgApiKeyProvider) {
+    return this.byokService.validateKey(orgId, provider)
+  }
+
+  async rotateByok(orgId: string, provider: OrgApiKeyProvider, input: Omit<UpsertByokInput, 'provider'>) {
+    return this.byokService.rotateApiKey(
+      orgId,
+      provider,
+      input.key?.trim() || input.apiKey?.trim() || '',
+      input.validateNow !== false,
+    )
+  }
+
+  async deleteByok(orgId: string, provider: OrgApiKeyProvider) {
+    return this.byokService.removeApiKey(orgId, provider)
   }
 
   private hashKey(rawKey: string) {

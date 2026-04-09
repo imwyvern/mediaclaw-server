@@ -1,7 +1,10 @@
 import { Body, Delete, Get, Param, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { OrgApiKeyProvider } from '@yikart/mongodb'
 import {
   IsArray,
+  IsBoolean,
+  IsEnum,
   IsOptional,
   IsString,
 } from 'class-validator'
@@ -33,6 +36,37 @@ class ValidateApiKeyDto {
   prefix?: string
 }
 
+class UpsertByokDto {
+  @IsEnum(OrgApiKeyProvider)
+  provider: OrgApiKeyProvider
+
+  @IsOptional()
+  @IsString()
+  key?: string
+
+  @IsOptional()
+  @IsString()
+  apiKey?: string
+
+  @IsOptional()
+  @IsBoolean()
+  validateNow?: boolean
+}
+
+class RotateByokDto {
+  @IsOptional()
+  @IsString()
+  key?: string
+
+  @IsOptional()
+  @IsString()
+  apiKey?: string
+
+  @IsOptional()
+  @IsBoolean()
+  validateNow?: boolean
+}
+
 @MediaClawApiController('api/v1/apikey')
 export class MediaClawApiKeyController {
   constructor(private readonly apiKeyService: MediaClawApiKeyService) {}
@@ -54,6 +88,49 @@ export class MediaClawApiKeyController {
   @Get()
   async list(@GetToken() user: MediaClawAuthUser) {
     return this.apiKeyService.list(user.id)
+  }
+
+  @Post('byok')
+  async createByok(
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: UpsertByokDto,
+  ) {
+    return this.apiKeyService.createByok(user.orgId || user.id, body)
+  }
+
+  @Get('byok')
+  async listByok(@GetToken() user: MediaClawAuthUser) {
+    return this.apiKeyService.listByok(user.orgId || user.id)
+  }
+
+  @Post('byok/validate')
+  async validateIncomingByok(@Body() body: UpsertByokDto) {
+    return this.apiKeyService.validateIncomingByok(body)
+  }
+
+  @Post('byok/:provider/validate')
+  async validateStoredByok(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('provider') provider: OrgApiKeyProvider,
+  ) {
+    return this.apiKeyService.validateStoredByok(user.orgId || user.id, provider)
+  }
+
+  @Post('byok/:provider/rotate')
+  async rotateByok(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('provider') provider: OrgApiKeyProvider,
+    @Body() body: RotateByokDto,
+  ) {
+    return this.apiKeyService.rotateByok(user.orgId || user.id, provider, body)
+  }
+
+  @Delete('byok/:provider')
+  async deleteByok(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('provider') provider: OrgApiKeyProvider,
+  ) {
+    return this.apiKeyService.deleteByok(user.orgId || user.id, provider)
   }
 
   @Post('validate')
