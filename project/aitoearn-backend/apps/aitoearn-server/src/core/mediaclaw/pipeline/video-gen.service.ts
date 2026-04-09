@@ -1,15 +1,15 @@
-import { Injectable, Optional } from '@nestjs/common'
-import { OrgApiKeyProvider } from '@yikart/mongodb'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { Injectable, Optional } from '@nestjs/common'
+import { OrgApiKeyProvider } from '@yikart/mongodb'
+import { MediaclawConfigService } from '../mediaclaw-config.service'
+import { ByokService } from '../settings/byok.service'
 import {
   PipelineFrameArtifact,
   PipelineJobContext,
   PipelineStepExecutionResult,
 } from './pipeline.types'
 import { downloadFile, requestJson, runCommand } from './pipeline.utils'
-import { MediaclawConfigService } from '../mediaclaw-config.service'
-import { ByokService } from '../settings/byok.service'
 
 interface KlingCreateResponse {
   id?: string
@@ -263,7 +263,7 @@ export class VideoGenService {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${runtime.apiKey}`,
+          'Authorization': `Bearer ${runtime.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

@@ -1,8 +1,8 @@
+import { spawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 import { mkdir, stat, unlink } from 'node:fs/promises'
 import { get as httpGet, request as httpRequest } from 'node:http'
 import { get as httpsGet, request as httpsRequest } from 'node:https'
-import { spawn } from 'node:child_process'
 import { dirname } from 'node:path'
 
 interface CommandOptions {
@@ -262,7 +262,7 @@ export function escapeDrawtext(value: string) {
   return value
     .replace(/\\/g, '\\\\')
     .replace(/:/g, '\\:')
-    .replace(/'/g, "\\\\'")
+    .replace(/'/g, '\\\\\'')
     .replace(/\[/g, '\\[')
     .replace(/\]/g, '\\]')
     .replace(/,/g, '\\,')
@@ -274,7 +274,7 @@ export function normalizeHexColor(value: string | undefined, fallback: string) {
     return fallback
   }
 
-  if (/^#?[0-9a-fA-F]{6}$/.test(normalized)) {
+  if (/^#?[0-9a-f]{6}$/i.test(normalized)) {
     return normalized.startsWith('#') ? normalized : `#${normalized}`
   }
 

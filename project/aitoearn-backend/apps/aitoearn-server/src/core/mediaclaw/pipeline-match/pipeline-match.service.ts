@@ -79,11 +79,11 @@ interface ReferenceAnalysis {
 }
 
 type TemplateRecord = Record<string, any> & {
-  _id: { toString(): string }
+  _id: { toString: () => string }
 }
 
 type ViralContentRecord = Record<string, any> & {
-  _id: { toString(): string }
+  _id: { toString: () => string }
 }
 
 const TEMPLATE_SEEDS = [
@@ -1014,7 +1014,7 @@ export class PipelineMatchService implements OnModuleInit {
 
       const segments = url.pathname.split('/').map(item => item.trim()).filter(Boolean)
       const lastSegment = segments.at(-1) || ''
-      return /^[a-z0-9_-]{5,}$/i.test(lastSegment) ? lastSegment : ''
+      return /^[\w-]{5,}$/.test(lastSegment) ? lastSegment : ''
     }
     catch {
       return ''

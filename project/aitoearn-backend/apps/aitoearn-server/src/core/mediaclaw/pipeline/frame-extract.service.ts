@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common'
 import { copyFile } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Injectable } from '@nestjs/common'
 import { PipelineFrameArtifact, PipelineVideoMetadata } from './pipeline.types'
 import { downloadFile, ensureDirectory, runCommand } from './pipeline.utils'
 

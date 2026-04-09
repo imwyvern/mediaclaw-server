@@ -1,3 +1,4 @@
+import type { PipelineQualityReport } from './pipeline.types'
 import { InjectQueue } from '@nestjs/bullmq'
 import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
@@ -11,7 +12,6 @@ import {
 } from '@yikart/mongodb'
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
-import type { PipelineQualityReport } from './pipeline.types'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from '../worker/worker.constants'
 
 type PromptRetryStrategy = 'retry_optimized' | 'fallback_strategy' | 'needs_manual_review'
@@ -304,9 +304,9 @@ export class PromptOptimizerService {
 
     await this.videoTaskModel.findByIdAndUpdate(task._id, {
       $set: {
-        status: this.mapRetryStatus(retryTargetStep),
-        errorMessage: '',
-        completedAt: null,
+        'status': this.mapRetryStatus(retryTargetStep),
+        'errorMessage': '',
+        'completedAt': null,
         'metadata.failedStep': null,
         'metadata.pipelineContext': nextContext,
         'metadata.promptOptimizer.lastRetry': {
@@ -760,9 +760,7 @@ export class PromptOptimizerService {
       && 'errors' in errorOrQualityResult
       && Array.isArray((errorOrQualityResult as { errors?: unknown[] }).errors)
     ) {
-      const errors = (errorOrQualityResult as { errors: unknown[] }).errors
-        .map(item => typeof item === 'string' ? item.trim() : '')
-        .filter(Boolean)
+      const errors = (errorOrQualityResult as { errors: unknown[] }).errors.map(item => typeof item === 'string' ? item.trim() : '').filter(Boolean)
       if (errors.length > 0) {
         return errors.join('; ')
       }

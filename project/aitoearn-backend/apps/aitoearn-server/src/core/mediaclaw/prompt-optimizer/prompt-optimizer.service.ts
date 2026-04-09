@@ -1,5 +1,5 @@
+import type { PipelineJobContext } from '../pipeline/pipeline.types'
 import { InjectQueue } from '@nestjs/bullmq'
-import axios from 'axios'
 import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
@@ -11,10 +11,10 @@ import {
   VideoTask,
   VideoTaskStatus,
 } from '@yikart/mongodb'
+import axios from 'axios'
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import { ModelResolverService } from '../model-resolver/model-resolver.service'
-import type { PipelineJobContext } from '../pipeline/pipeline.types'
 import { ByokService } from '../settings/byok.service'
 import {
   VIDEO_WORKER_QUEUE,
@@ -22,10 +22,10 @@ import {
   VideoWorkerStep,
 } from '../worker/worker.constants'
 
-type PromptOptimizerRetryStrategy =
-  | 'retry_optimized'
-  | 'fallback_strategy'
-  | 'needs_manual_review'
+type PromptOptimizerRetryStrategy
+  = | 'retry_optimized'
+    | 'fallback_strategy'
+    | 'needs_manual_review'
 
 interface PromptOptimizerFailureAnalysis {
   failReason: string
@@ -100,8 +100,8 @@ export class PromptOptimizerLoopService {
   ): Promise<PromptOptimizerFailureResult> {
     const task = await this.getTask(videoTaskId)
     const stage = this.toIterationStage(stageInput)
-    const originalPrompt =
-      originalPromptInput?.trim() || this.readOriginalPrompt(task, stage)
+    const originalPrompt
+      = originalPromptInput?.trim() || this.readOriginalPrompt(task, stage)
     const qualityScore = this.extractQualityScore(errorOrQualityResult, task)
     const errorMessage = this.readErrorMessage(task, errorOrQualityResult)
     const failCategory = this.resolveFailureCategory(errorMessage, qualityScore)
@@ -209,8 +209,8 @@ export class PromptOptimizerLoopService {
       '[Optimization patch]',
       `Stage: ${failureAnalysis.stage}`,
       `Failure: ${failureAnalysis.failReason}`,
-      ...guidance.map((item) => `- ${item}`),
-      ...failureAnalysis.suggestedFixes.map((item) => `- ${item}`),
+      ...guidance.map(item => `- ${item}`),
+      ...failureAnalysis.suggestedFixes.map(item => `- ${item}`),
       '- Add negative constraints for low-quality, off-topic, or unstable output patterns.',
     ]
       .filter(Boolean)
@@ -321,7 +321,7 @@ export class PromptOptimizerLoopService {
       .lean()
       .exec()
 
-    return items.map((item) => this.toIterationLogResponse(item))
+    return items.map(item => this.toIterationLogResponse(item))
   }
 
   async getBatchIterationSummary(batchId: string) {
@@ -363,12 +363,12 @@ export class PromptOptimizerLoopService {
     }
 
     for (const taskId of successfulTaskIds) {
-      const taskLogs = logs.filter((item) => item.videoTaskId === taskId)
+      const taskLogs = logs.filter(item => item.videoTaskId === taskId)
       if (taskLogs.length === 0) {
         continue
       }
 
-      const maxIteration = Math.max(...taskLogs.map((item) => Number(item.iteration || 0)))
+      const maxIteration = Math.max(...taskLogs.map(item => Number(item.iteration || 0)))
       if (maxIteration > 0) {
         iterationsToSuccess.push(maxIteration)
       }
@@ -377,8 +377,8 @@ export class PromptOptimizerLoopService {
     const avgIterationsToSuccess = iterationsToSuccess.length > 0
       ? Number(
           (
-            iterationsToSuccess.reduce((sum, value) => sum + value, 0) /
-            iterationsToSuccess.length
+            iterationsToSuccess.reduce((sum, value) => sum + value, 0)
+            / iterationsToSuccess.length
           ).toFixed(2),
         )
       : 0
@@ -436,9 +436,9 @@ export class PromptOptimizerLoopService {
     await this.videoTaskModel
       .findByIdAndUpdate(task._id, {
         $set: {
-          status: VideoTaskStatus.PENDING,
-          errorMessage: '',
-          completedAt: null,
+          'status': VideoTaskStatus.PENDING,
+          'errorMessage': '',
+          'completedAt': null,
           'metadata.failedStep': null,
           'metadata.pipelineContext': nextContext,
           'metadata.retryStrategy': strategy,
@@ -514,8 +514,8 @@ export class PromptOptimizerLoopService {
 
   private readOriginalPrompt(task: VideoTask, stage: IterationLogStage) {
     const pipelineContext = this.readPipelineContext(task)
-    const prompts =
-      pipelineContext && typeof pipelineContext.prompts === 'object'
+    const prompts
+      = pipelineContext && typeof pipelineContext.prompts === 'object'
         ? pipelineContext.prompts
         : {}
 
@@ -557,7 +557,7 @@ export class PromptOptimizerLoopService {
 
       if (Array.isArray(record['errors'])) {
         const errors = record['errors']
-          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .map(item => (typeof item === 'string' ? item.trim() : ''))
           .filter(Boolean)
         if (errors.length > 0) {
           return errors.join('; ')
@@ -577,8 +577,8 @@ export class PromptOptimizerLoopService {
       return fromInput
     }
 
-    const qualityRecord: Record<string, unknown> | null =
-      this.extractQualityMetrics(errorOrQualityResult) || this.extractTaskQuality(task)
+    const qualityRecord: Record<string, unknown> | null
+      = this.extractQualityMetrics(errorOrQualityResult) || this.extractTaskQuality(task)
     if (!qualityRecord) {
       return null
     }
@@ -592,8 +592,8 @@ export class PromptOptimizerLoopService {
 
     const shortEdge = Math.min(width || 0, height || 0)
     const resolution = shortEdge >= 1080 ? 100 : shortEdge >= 720 ? 86 : shortEdge > 0 ? 60 : 0
-    const fileSizeScore =
-      fileSize >= 2 * 1024 * 1024
+    const fileSizeScore
+      = fileSize >= 2 * 1024 * 1024
         ? 96
         : fileSize >= 500 * 1024
           ? 82
@@ -636,8 +636,8 @@ export class PromptOptimizerLoopService {
 
     const source = errorOrQualityResult as Record<string, unknown>
     const embedded = source['qualityScore']
-    const candidate =
-      embedded && typeof embedded === 'object'
+    const candidate
+      = embedded && typeof embedded === 'object'
         ? (embedded as Record<string, unknown>)
         : source
 
@@ -647,11 +647,11 @@ export class PromptOptimizerLoopService {
     const dimensions = candidate['dimensions']
 
     if (
-      total <= 0 ||
-      production <= 0 ||
-      virality <= 0 ||
-      !dimensions ||
-      typeof dimensions !== 'object'
+      total <= 0
+      || production <= 0
+      || virality <= 0
+      || !dimensions
+      || typeof dimensions !== 'object'
     ) {
       return null
     }
@@ -701,20 +701,20 @@ export class PromptOptimizerLoopService {
     }
 
     if (
-      normalizedMessage.includes('brand') ||
-      normalizedMessage.includes('logo') ||
-      normalizedMessage.includes('palette') ||
-      normalizedMessage.includes('color')
+      normalizedMessage.includes('brand')
+      || normalizedMessage.includes('logo')
+      || normalizedMessage.includes('palette')
+      || normalizedMessage.includes('color')
     ) {
       return 'brand_mismatch'
     }
 
     if (
-      normalizedMessage.includes('irrelevant') ||
-      normalizedMessage.includes('mismatch') ||
-      normalizedMessage.includes('topic') ||
-      normalizedMessage.includes('audience') ||
-      normalizedMessage.includes('content')
+      normalizedMessage.includes('irrelevant')
+      || normalizedMessage.includes('mismatch')
+      || normalizedMessage.includes('topic')
+      || normalizedMessage.includes('audience')
+      || normalizedMessage.includes('content')
     ) {
       return 'content'
     }
@@ -733,18 +733,18 @@ export class PromptOptimizerLoopService {
     }
 
     if (
-      normalizedMessage.includes('timeout') ||
-      normalizedMessage.includes('timed out')
+      normalizedMessage.includes('timeout')
+      || normalizedMessage.includes('timed out')
     ) {
       return 'Provider timed out during stage execution'
     }
 
     if (
-      normalizedMessage.includes('401') ||
-      normalizedMessage.includes('403') ||
-      normalizedMessage.includes('unauthorized') ||
-      normalizedMessage.includes('forbidden') ||
-      normalizedMessage.includes('http 5')
+      normalizedMessage.includes('401')
+      || normalizedMessage.includes('403')
+      || normalizedMessage.includes('unauthorized')
+      || normalizedMessage.includes('forbidden')
+      || normalizedMessage.includes('http 5')
     ) {
       return 'Technical provider error interrupted stage execution'
     }
@@ -1082,7 +1082,7 @@ export class PromptOptimizerLoopService {
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         timeout: 60_000,
@@ -1144,7 +1144,7 @@ export class PromptOptimizerLoopService {
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         timeout: 60_000,

@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common'
 import { join } from 'node:path'
+import { Injectable } from '@nestjs/common'
 import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { PipelineJobContext, PipelineSubtitleRenderResult } from './pipeline.types'
 import { escapeDrawtext, normalizeHexColor, pathExists, runCommand } from './pipeline.utils'
