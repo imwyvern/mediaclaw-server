@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
 import { Brand, BrandSchema, Pipeline, PipelineSchema, VideoTask, VideoTaskSchema } from '@yikart/mongodb'
 import { MediaClawApiKeyModule } from '../apikey/apikey.module'
+import { EmployeeDispatchModule } from '../employee-dispatch/employee-dispatch.module'
 import { SkillController } from './skill.controller'
 import { SkillService } from './skill.service'
 
@@ -13,6 +14,7 @@ import { SkillService } from './skill.service'
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
     MediaClawApiKeyModule,
+    EmployeeDispatchModule,
   ],
   controllers: [SkillController],
   providers: [SkillService],

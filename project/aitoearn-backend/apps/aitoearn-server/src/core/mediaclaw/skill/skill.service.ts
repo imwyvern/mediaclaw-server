@@ -1,7 +1,8 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Brand, Pipeline, PipelineStatus, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 import { MEDIACLAW_DISTRIBUTABLE_STATUSES } from '../video-task-status.utils'
 import { buildCapabilityDiscovery, normalizeAgentCapabilities } from './skill-capability.catalog'
 
@@ -19,6 +20,11 @@ interface AgentRegistration {
   lastSeenAt: Date
 }
 
+interface DeliveryConfirmationInput {
+  deliveryRecordId?: string
+  taskId?: string
+}
+
 @Injectable()
 export class SkillService {
   private readonly logger = new Logger(SkillService.name)
@@ -28,6 +34,7 @@ export class SkillService {
     @InjectModel(Brand.name) private readonly brandModel: Model<Brand>,
     @InjectModel(Pipeline.name) private readonly pipelineModel: Model<Pipeline>,
     @InjectModel(VideoTask.name) private readonly videoTaskModel: Model<VideoTask>,
+    @Optional() private readonly employeeDispatchService?: EmployeeDispatchService,
   ) {}
 
   async registerAgent(agentId: string, capabilities: string[], scope: SkillScope) {
@@ -178,6 +185,39 @@ export class SkillService {
   async getPendingDeliveries(agentId: string, scope: SkillScope) {
     this.touchRegistration(agentId, scope.orgId)
 
+    if (this.employeeDispatchService) {
+      const deliveries = await this.employeeDispatchService.listPendingDeliveries(scope.orgId, {}, {
+        page: 1,
+        limit: 100,
+      })
+
+      return deliveries.items.map(item => ({
+        taskId: item.task?.id || item.videoTaskId || null,
+        deliveryRecordId: item.id,
+        assignmentId: item.assignment?.id || item.employeeAssignmentId || null,
+        brandId: null,
+        pipelineId: null,
+        outputVideoUrl: item.task?.outputVideoUrl || '',
+        title: item.task?.title || '',
+        copy: {
+          title: item.task?.title || '',
+        },
+        completedAt: item.pushedAt || item.deliveredAt || item.createdAt || null,
+        heartbeatPending: Boolean(item.heartbeatPending),
+        publishStatus: item.task?.publishStatus || null,
+        assignment: item.assignment || null,
+        delivery: {
+          status: item.status,
+          deliveryChannel: item.deliveryChannel,
+          deliveredAt: item.deliveredAt || null,
+          pushedAt: item.pushedAt || null,
+          confirmedAt: item.confirmedAt || null,
+          receivedAt: item.receivedAt || null,
+          heartbeatPending: Boolean(item.heartbeatPending),
+        },
+      }))
+    }
+
     const scopeFilter = this.buildTaskScope(scope)
     const deliveryFilter = {
       $or: [
@@ -206,12 +246,30 @@ export class SkillService {
       })))
   }
 
-  async confirmDelivery(agentId: string, taskId: string, scope: SkillScope) {
+  async confirmDelivery(agentId: string, input: DeliveryConfirmationInput, scope: SkillScope) {
     this.touchRegistration(agentId, scope.orgId)
+
+    const resolvedDeliveryRecordId = input.deliveryRecordId
+      || await this.resolveDeliveryRecordIdForTask(input.taskId || '', scope)
+
+    if (this.employeeDispatchService && resolvedDeliveryRecordId) {
+      const delivery = await this.employeeDispatchService.confirmDelivery(scope.orgId, resolvedDeliveryRecordId)
+      return {
+        taskId: delivery.videoTaskId,
+        deliveryRecordId: delivery.id,
+        delivered: true,
+        deliveredAt: delivery.confirmedAt || delivery.receivedAt || delivery.deliveredAt || null,
+        status: delivery.status,
+      }
+    }
+
+    if (!input.taskId) {
+      throw new NotFoundException('Video task not found')
+    }
 
     const deliveredAt = new Date()
     const task = await this.videoTaskModel.findOneAndUpdate(
-      this.buildScopedTaskQuery(taskId, scope),
+      this.buildScopedTaskQuery(input.taskId, scope),
       {
         $set: {
           'metadata.delivery': {
@@ -259,6 +317,17 @@ export class SkillService {
     }
   }
 
+  private async resolveDeliveryRecordIdForTask(taskId: string, scope: SkillScope) {
+    if (!taskId) {
+      return ''
+    }
+
+    const task = await this.videoTaskModel.findOne(this.buildScopedTaskQuery(taskId, scope)).lean().exec()
+    return this.normalizeOptionalString(
+      task?.metadata?.['distribution']?.['employeeDispatch']?.['deliveryRecordId'],
+    )
+  }
+
   private buildTaskScope(scope: SkillScope) {
     const orgObjectId = this.toObjectId(scope.orgId)
     if (!orgObjectId) {
@@ -279,5 +348,9 @@ export class SkillService {
     }
 
     return new Types.ObjectId(value)
+  }
+
+  private normalizeOptionalString(value: unknown) {
+    return typeof value === 'string' ? value.trim() : ''
   }
 }

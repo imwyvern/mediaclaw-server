@@ -5,6 +5,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  ValidateIf,
 } from 'class-validator'
 import { MediaClawApiKeyGuard } from '../apikey/apikey.guard'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
@@ -36,8 +37,13 @@ class ConfirmSkillDeliveryDto {
   @IsString()
   agentId: string
 
+  @ValidateIf(body => !body.taskId)
   @IsString()
-  taskId: string
+  deliveryRecordId?: string
+
+  @ValidateIf(body => !body.deliveryRecordId)
+  @IsString()
+  taskId?: string
 }
 
 @Public()
@@ -97,7 +103,10 @@ export class SkillController {
     @GetToken() user: MediaClawAuthUser,
     @Body() body: ConfirmSkillDeliveryDto,
   ) {
-    return this.skillService.confirmDelivery(body.agentId, body.taskId, {
+    return this.skillService.confirmDelivery(body.agentId, {
+      taskId: body.taskId,
+      deliveryRecordId: body.deliveryRecordId,
+    }, {
       orgId: user.orgId || user.id,
       userId: user.id,
     })

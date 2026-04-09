@@ -1,7 +1,10 @@
 import { Types } from 'mongoose'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SkillService } from './skill.service'
 
 describe('skillService behavior', () => {
+  let employeeDispatchService: Record<string, any>
+
   function createQueryMock(result: unknown) {
     return {
       sort: vi.fn().mockReturnThis(),
@@ -9,6 +12,13 @@ describe('skillService behavior', () => {
       exec: vi.fn().mockResolvedValue(result),
     }
   }
+
+  beforeEach(() => {
+    employeeDispatchService = {
+      listPendingDeliveries: vi.fn(),
+      confirmDelivery: vi.fn(),
+    }
+  })
 
   it('应在未显式声明能力时回填默认能力并暴露能力层级', async () => {
     const brandModel = {
@@ -151,5 +161,130 @@ describe('skillService behavior', () => {
       total: 4,
       enabled: 3,
     }))
+  })
+
+  it('应优先聚合 employee dispatch 待交付记录', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const userId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId().toString()
+    const deliveryRecordId = new Types.ObjectId().toString()
+    const assignmentId = new Types.ObjectId().toString()
+
+    employeeDispatchService.listPendingDeliveries.mockResolvedValue({
+      items: [
+        {
+          id: deliveryRecordId,
+          videoTaskId: taskId,
+          employeeAssignmentId: assignmentId,
+          deliveryChannel: 'manual',
+          status: 'pushed',
+          deliveredAt: null,
+          pushedAt: new Date('2026-04-09T15:00:00.000Z'),
+          confirmedAt: null,
+          receivedAt: null,
+          createdAt: new Date('2026-04-09T14:00:00.000Z'),
+          heartbeatPending: true,
+          assignment: {
+            id: assignmentId,
+            employeeName: '小王',
+            employeePhone: '13800000000',
+          },
+          task: {
+            id: taskId,
+            title: '今日上新',
+            outputVideoUrl: 'https://cdn.example.com/video.mp4',
+            publishStatus: 'completed',
+          },
+        },
+      ],
+      total: 1,
+      page: 1,
+      limit: 100,
+    })
+
+    const service = new SkillService(
+      {} as any,
+      {} as any,
+      {} as any,
+      employeeDispatchService as any,
+    )
+
+    await service.registerAgent('agent-3', ['delivery'], { orgId, userId })
+    const deliveries = await service.getPendingDeliveries('agent-3', { orgId, userId })
+
+    expect(employeeDispatchService.listPendingDeliveries).toHaveBeenCalledWith(orgId, {}, {
+      page: 1,
+      limit: 100,
+    })
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        taskId,
+        deliveryRecordId,
+        assignmentId,
+        outputVideoUrl: 'https://cdn.example.com/video.mp4',
+        title: '今日上新',
+        heartbeatPending: true,
+        publishStatus: 'completed',
+        assignment: expect.objectContaining({
+          employeeName: '小王',
+        }),
+        delivery: expect.objectContaining({
+          status: 'pushed',
+          deliveryChannel: 'manual',
+          heartbeatPending: true,
+        }),
+      }),
+    ])
+  })
+
+  it('应在只提供 taskId 时桥接到 employee dispatch 的 deliveryRecord', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const userId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId().toString()
+    const deliveryRecordId = new Types.ObjectId().toString()
+    const confirmedAt = new Date('2026-04-09T16:00:00.000Z')
+    const videoTaskModel = {
+      findOne: vi.fn().mockReturnValue(createQueryMock({
+        _id: new Types.ObjectId(taskId),
+        metadata: {
+          distribution: {
+            employeeDispatch: {
+              deliveryRecordId,
+            },
+          },
+        },
+      })),
+      findOneAndUpdate: vi.fn(),
+    }
+
+    employeeDispatchService.confirmDelivery.mockResolvedValue({
+      id: deliveryRecordId,
+      videoTaskId: taskId,
+      status: 'received',
+      confirmedAt,
+      receivedAt: confirmedAt,
+      deliveredAt: null,
+    })
+
+    const service = new SkillService(
+      {} as any,
+      {} as any,
+      videoTaskModel as any,
+      employeeDispatchService as any,
+    )
+
+    await service.registerAgent('agent-4', ['delivery'], { orgId, userId })
+    const result = await service.confirmDelivery('agent-4', { taskId }, { orgId, userId })
+
+    expect(videoTaskModel.findOne).toHaveBeenCalled()
+    expect(employeeDispatchService.confirmDelivery).toHaveBeenCalledWith(orgId, deliveryRecordId)
+    expect(videoTaskModel.findOneAndUpdate).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      taskId,
+      deliveryRecordId,
+      delivered: true,
+      deliveredAt: confirmedAt,
+      status: 'received',
+    })
   })
 })
