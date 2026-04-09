@@ -9,6 +9,7 @@ import {
 } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
+import { HealthMonitorService } from './health-monitor.service'
 import { PlatformAccountService } from './platform-account.service'
 
 class CreatePlatformAccountDto {
@@ -34,7 +35,10 @@ class CreatePlatformAccountDto {
 
 @MediaClawApiController('api/v1/platform-accounts')
 export class PlatformAccountController {
-  constructor(private readonly platformAccountService: PlatformAccountService) {}
+  constructor(
+    private readonly platformAccountService: PlatformAccountService,
+    private readonly healthMonitorService: HealthMonitorService,
+  ) {}
 
   @Post()
   async create(
@@ -56,6 +60,11 @@ export class PlatformAccountController {
   @Get()
   async list(@GetToken() user: MediaClawAuthUser) {
     return this.platformAccountService.listAccounts(user.orgId || user.id)
+  }
+
+  @Get(':id/health')
+  async health(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
+    return this.healthMonitorService.getAccountHealth(user.orgId || user.id, id)
   }
 
   @Get(':id')
