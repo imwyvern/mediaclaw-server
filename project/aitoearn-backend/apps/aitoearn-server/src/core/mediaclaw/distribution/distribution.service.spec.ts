@@ -4,7 +4,11 @@ import {
 } from '@yikart/mongodb'
 import { Types } from 'mongoose'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DistributionPublishStatus } from './distribution.constants'
+import {
+  DistributionCallbackStatus,
+  DistributionLifecycleStatus,
+  DistributionPublishStatus,
+} from './distribution.constants'
 import { DistributionService } from './distribution.service'
 
 function createQuery<T>(value: T) {
@@ -299,10 +303,12 @@ describe('distributionService', () => {
     const result = await service.expireStaleDistributions()
 
     expect(result.total).toBe(1)
+    expect(result.alerted).toBe(1)
     expect(videoTaskModel.findByIdAndUpdate).toHaveBeenCalledWith(
       taskId,
       expect.objectContaining({
         $set: expect.objectContaining({
+          'metadata.distribution.lifecycleStatus': DistributionLifecycleStatus.EXPIRED,
           'metadata.distribution.publishStatus': DistributionPublishStatus.EXPIRED,
         }),
       }),
@@ -318,6 +324,13 @@ describe('distributionService', () => {
       'distribution.expired',
       expect.objectContaining({
         contentId: taskId.toString(),
+      }),
+    )
+    expect(notificationService.send).toHaveBeenCalledWith(
+      orgId,
+      expect.any(String),
+      expect.objectContaining({
+        type: 'distribution_follow_up_required',
       }),
     )
   })
@@ -441,5 +454,137 @@ describe('distributionService', () => {
       }),
     )
     expect(result.publishPostId).toBe('post_1')
+  })
+
+  it('应在员工拒绝发布回调后转为 ready 并尝试重新分发', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const pipelineId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId().toString()
+    const deliveryRecordId = new Types.ObjectId().toString()
+    const assignmentId = new Types.ObjectId().toString()
+    const reassignedAssignmentId = new Types.ObjectId().toString()
+    const task = {
+      _id: new Types.ObjectId(taskId),
+      orgId: new Types.ObjectId(orgId),
+      pipelineId: new Types.ObjectId(pipelineId),
+      status: VideoTaskStatus.COMPLETED,
+      dedup: {
+        status: 'passed',
+      },
+      metadata: {
+        distribution: {
+          publishStatus: DistributionPublishStatus.PUSHED,
+          employeeDispatch: {
+            assignmentId,
+            deliveryRecordId,
+            deliveryStatus: 'pushed',
+          },
+        },
+      },
+      toObject() {
+        return this
+      },
+    }
+
+    videoTaskModel.findOne.mockReturnValue(createQuery(task))
+    videoTaskModel.findByIdAndUpdate.mockReturnValue(createQuery({
+      ...task,
+      metadata: {
+        distribution: {
+          publishStatus: DistributionPublishStatus.COMPLETED,
+          lifecycleStatus: DistributionLifecycleStatus.READY,
+          callbackStatus: DistributionCallbackStatus.REJECTED,
+          rejectionReason: '素材不匹配',
+        },
+      },
+    }))
+    videoTaskModel.find.mockReturnValue(createQuery([task]))
+    pipelineModel.findOne.mockReturnValue(createQuery({
+      _id: new Types.ObjectId(pipelineId),
+      orgId: new Types.ObjectId(orgId),
+      distributionRules: {
+        assignmentIds: [reassignedAssignmentId],
+      },
+    }))
+    employeeDispatchService.batchDispatch.mockResolvedValue({
+      total: 1,
+      dispatched: 1,
+      failed: 0,
+      pending: 0,
+      strategy: 'round-robin',
+      results: [
+        {
+          videoTaskId: taskId,
+          dispatched: true,
+          assignmentId: reassignedAssignmentId,
+          status: 'pushed',
+        },
+      ],
+    })
+
+    const result = await service.handleEmployeeCallback(orgId, taskId, {
+      status: DistributionCallbackStatus.REJECTED,
+      reason: '素材不匹配',
+    })
+
+    expect(employeeDispatchService.expireDeliveryRecord).toHaveBeenCalledWith(
+      orgId,
+      deliveryRecordId,
+      expect.objectContaining({
+        reason: '素材不匹配',
+      }),
+    )
+    expect(employeeDispatchService.batchDispatch).toHaveBeenCalledWith(
+      orgId,
+      [taskId],
+      expect.objectContaining({
+        assignmentIds: [reassignedAssignmentId],
+      }),
+    )
+    expect(result.callbackStatus).toBe(DistributionCallbackStatus.REJECTED)
+    expect(result.reassignment).toEqual(
+      expect.objectContaining({
+        reassigned: true,
+      }),
+    )
+  })
+
+  it('应返回推送转发布转化率与平均发布时间', async () => {
+    const orgId = new Types.ObjectId().toString()
+    videoTaskModel.find.mockReturnValue(createQuery([
+      {
+        _id: new Types.ObjectId(),
+        orgId: new Types.ObjectId(orgId),
+        status: VideoTaskStatus.PUBLISHED,
+        publishedAt: new Date('2026-04-08T02:00:00.000Z'),
+        metadata: {
+          distribution: {
+            publishStatus: DistributionPublishStatus.PUBLISHED,
+            pushedAt: '2026-04-08T00:00:00.000Z',
+            publishedAt: '2026-04-08T02:00:00.000Z',
+            lastStatusAt: '2026-04-08T02:00:00.000Z',
+          },
+        },
+      },
+      {
+        _id: new Types.ObjectId(),
+        orgId: new Types.ObjectId(orgId),
+        status: VideoTaskStatus.COMPLETED,
+        metadata: {
+          distribution: {
+            publishStatus: DistributionPublishStatus.PUSHED,
+            pushedAt: '2026-04-08T03:00:00.000Z',
+            lastStatusAt: '2026-04-08T03:00:00.000Z',
+          },
+        },
+      },
+    ]))
+
+    const result = await service.getDashboardStats(orgId, { days: 30 })
+
+    expect(result.totals.pushed).toBe(2)
+    expect(result.totals.published).toBe(1)
+    expect(result.pushToPublishConversionRate).toBe(50)
+    expect(result.avgTimeToPublishHours).toBe(2)
   })
 })

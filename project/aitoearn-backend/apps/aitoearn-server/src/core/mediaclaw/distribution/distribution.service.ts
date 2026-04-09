@@ -21,7 +21,10 @@ import { NotificationService } from '../notification/notification.service'
 import { isDistributableVideoTaskStatus } from '../video-task-status.utils'
 import { WebhookService } from '../webhook/webhook.service'
 import {
+  DistributionCallbackStatus,
+  DistributionLifecycleStatus,
   DistributionPublishStatus,
+  isDistributionLifecycleStatus,
   isDistributionPublishStatus,
 } from './distribution.constants'
 import { DistributionQueueService } from './distribution.queue.service'
@@ -53,7 +56,7 @@ interface DistributionTargetRecord {
 }
 
 interface DistributionTimelineEntry {
-  status: DistributionPublishStatus
+  status: string
   timestamp: string
   details?: Record<string, unknown>
 }
@@ -74,12 +77,23 @@ interface RuleEvaluationResult {
   } | null
 }
 
-type DistributionLifecycleStatus = 'pending_assignment' | 'assigned' | 'published' | 'tracked'
-
 interface DistributionStatusQuery {
   contentId?: string
   page?: number
   limit?: number
+}
+
+interface DistributionDashboardQuery {
+  days?: number
+  status?: 'all' | 'published' | 'expired' | 'pushed'
+}
+
+interface DistributionCallbackInput {
+  status: DistributionCallbackStatus
+  publishUrl?: string
+  publishPostId?: string
+  platform?: string
+  reason?: string
 }
 
 @Injectable()
@@ -209,15 +223,17 @@ export class DistributionService {
       {
         $set: {
           'metadata.distribution.targets': pushRecords,
+          'metadata.distribution.lifecycleStatus': DistributionLifecycleStatus.PUSHED,
           'metadata.distribution.publishStatus': DistributionPublishStatus.PUSHED,
           'metadata.distribution.lastStatusAt': timestamp,
           'metadata.distribution.lastDistributedAt': timestamp,
+          'metadata.distribution.pushedAt': timestamp,
         },
         $push: {
           'metadata.distribution.history': {
             $each: [
               this.createDistributionHistory(
-                DistributionPublishStatus.PUSHED,
+                DistributionLifecycleStatus.PUSHED,
                 timestamp,
                 { targets: pushRecords },
               ),
@@ -265,6 +281,11 @@ export class DistributionService {
 
     const timestamp = new Date().toISOString()
     const setPayload: Record<string, unknown> = {
+      'metadata.distribution.lifecycleStatus': status === DistributionPublishStatus.PUBLISHED
+        ? DistributionLifecycleStatus.PUBLISHED
+        : status === DistributionPublishStatus.EXPIRED
+          ? DistributionLifecycleStatus.EXPIRED
+          : DistributionLifecycleStatus.PUSHED,
       'metadata.distribution.publishStatus': status,
       'metadata.distribution.lastStatusAt': timestamp,
     }
@@ -285,7 +306,7 @@ export class DistributionService {
         $set: setPayload,
         $push: {
           'metadata.distribution.history': {
-            $each: [this.createDistributionHistory(status, timestamp)],
+            $each: [this.createDistributionHistory(this.resolveLifecycleStatusFromPublishStatus(status), timestamp)],
           },
         },
       },
@@ -323,7 +344,7 @@ export class DistributionService {
         $push: {
           'metadata.distribution.feedback': feedbackRecord,
           'metadata.distribution.history': {
-            status: this.resolvePublishStatus(task),
+            status: this.resolveLifecycleStatus(task),
             timestamp,
             details: {
               feedback: feedbackRecord,
@@ -506,16 +527,18 @@ export class DistributionService {
             publishPostId: normalizedPublishPostId,
             publishedAt: timestamp,
           },
+          'metadata.distribution.lifecycleStatus': DistributionLifecycleStatus.PUBLISHED,
           'metadata.distribution.publishStatus': DistributionPublishStatus.PUBLISHED,
           'metadata.distribution.publishUrl': normalizedPublishUrl,
           'metadata.distribution.platform': normalizedPlatform,
           'metadata.distribution.publishPostId': normalizedPublishPostId,
           'metadata.distribution.lastStatusAt': timestamp,
+          'metadata.distribution.publishedAt': timestamp,
         },
         $push: {
           'metadata.distribution.history': {
             $each: [
-              this.createDistributionHistory(DistributionPublishStatus.PUBLISHED, timestamp, {
+              this.createDistributionHistory(DistributionLifecycleStatus.PUBLISHED, timestamp, {
                 publishUrl: normalizedPublishUrl,
                 platform: normalizedPlatform,
                 publishPostId: normalizedPublishPostId,
@@ -577,6 +600,170 @@ export class DistributionService {
       total,
       page,
       limit,
+    }
+  }
+
+  async getDashboardStats(orgId: string, input: DistributionDashboardQuery = {}) {
+    const days = Math.max(1, Math.min(Math.trunc(Number(input.days) || 30), 365))
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    const normalizedOrgId = this.toObjectId(orgId, 'orgId')
+    const statusFilter = input.status && input.status !== 'all'
+      ? { 'metadata.distribution.publishStatus': input.status }
+      : {}
+
+    const tasks = await this.videoTaskModel.find({
+      orgId: normalizedOrgId,
+      'metadata.distribution.lastStatusAt': { $gte: since.toISOString() },
+      ...statusFilter,
+    }).lean().exec() as Array<Record<string, any>>
+
+    const pushedTasks = tasks.filter((task) => {
+      const status = this.resolvePublishStatus(task)
+      return status === DistributionPublishStatus.PUSHED
+        || status === DistributionPublishStatus.PUBLISHED
+        || status === DistributionPublishStatus.EXPIRED
+    })
+    const publishedTasks = tasks.filter(task => this.resolvePublishStatus(task) === DistributionPublishStatus.PUBLISHED)
+    const expiredTasks = tasks.filter(task => this.resolvePublishStatus(task) === DistributionPublishStatus.EXPIRED)
+    const conversionRate = pushedTasks.length > 0
+      ? Number(((publishedTasks.length / pushedTasks.length) * 100).toFixed(2))
+      : 0
+    const publishDurations = publishedTasks
+      .map((task) => {
+        const distribution = this.asRecord(task['metadata']?.['distribution'])
+        const pushedAt = this.parseDate(
+          distribution?.['pushedAt']
+          || distribution?.['lastDistributedAt'],
+        )
+        const publishedAt = this.parseDate(
+          distribution?.['publishedAt']
+          || task['publishedAt']
+          || task['metadata']?.['publishedAt'],
+        )
+
+        if (!pushedAt || !publishedAt || publishedAt.getTime() < pushedAt.getTime()) {
+          return null
+        }
+
+        return publishedAt.getTime() - pushedAt.getTime()
+      })
+      .filter((value): value is number => value !== null)
+    const avgTimeToPublishMs = publishDurations.length > 0
+      ? Math.round(publishDurations.reduce((sum, value) => sum + value, 0) / publishDurations.length)
+      : 0
+
+    return {
+      orgId,
+      windowDays: days,
+      totals: {
+        tasks: tasks.length,
+        pushed: pushedTasks.length,
+        published: publishedTasks.length,
+        expired: expiredTasks.length,
+      },
+      pushToPublishConversionRate: conversionRate,
+      avgTimeToPublishMs,
+      avgTimeToPublishHours: Number((avgTimeToPublishMs / (60 * 60 * 1000)).toFixed(2)),
+      recent: tasks.slice(0, 10).map(task => this.toDistributionResponse(task)),
+    }
+  }
+
+  async handleEmployeeCallback(orgId: string, contentId: string, input: DistributionCallbackInput) {
+    const task = await this.getTaskOrFail(orgId, contentId)
+    const timestamp = new Date().toISOString()
+    const normalizedReason = this.normalizeOptionalString(input.reason)
+    const normalizedPlatform = this.normalizeOptionalString(input.platform)
+    const normalizedPublishUrl = this.normalizeOptionalString(input.publishUrl)
+    const normalizedPublishPostId = this.normalizeOptionalString(input.publishPostId)
+
+    if (input.status === DistributionCallbackStatus.PUBLISHED) {
+      return this.confirmPublish(
+        orgId,
+        contentId,
+        normalizedPublishUrl,
+        normalizedPlatform,
+        normalizedPublishPostId,
+      )
+    }
+
+    const currentDistribution = this.asRecord(task.metadata?.distribution) || {}
+    const currentEmployeeDispatch = this.asRecord(currentDistribution['employeeDispatch'])
+    const currentDeliveryRecordId = this.normalizeOptionalString(currentEmployeeDispatch?.['deliveryRecordId'])
+    const currentAssignmentId = this.normalizeOptionalString(currentEmployeeDispatch?.['assignmentId'])
+    const lifecycleStatus = input.status === DistributionCallbackStatus.PROCESSING
+      ? DistributionLifecycleStatus.PROCESSING
+      : DistributionLifecycleStatus.READY
+    const setPayload: Record<string, unknown> = {
+      'metadata.distribution.lifecycleStatus': lifecycleStatus,
+      'metadata.distribution.lastStatusAt': timestamp,
+      'metadata.distribution.callbackStatus': input.status,
+      'metadata.distribution.callbackUpdatedAt': timestamp,
+      'metadata.distribution.rejectionReason': input.status === DistributionCallbackStatus.REJECTED
+        ? normalizedReason || 'employee_rejected'
+        : null,
+      'metadata.distribution.readyAt': lifecycleStatus === DistributionLifecycleStatus.READY ? timestamp : null,
+      'metadata.distribution.publishStatus': lifecycleStatus === DistributionLifecycleStatus.READY
+        ? DistributionPublishStatus.COMPLETED
+        : this.resolvePublishStatus(task),
+      'metadata.distribution.heartbeatPending': false,
+    }
+
+    if (currentAssignmentId) {
+      setPayload['metadata.distribution.employeeDispatch.assignmentId'] = currentAssignmentId
+    }
+    if (currentDeliveryRecordId) {
+      setPayload['metadata.distribution.employeeDispatch.deliveryRecordId'] = currentDeliveryRecordId
+    }
+
+    const updated = await this.videoTaskModel.findByIdAndUpdate(
+      task._id,
+      {
+        $set: setPayload,
+        $push: {
+          'metadata.distribution.history': {
+            $each: [
+              this.createDistributionHistory(input.status, timestamp, {
+                reason: normalizedReason || null,
+              }),
+            ],
+          },
+        },
+      },
+      { new: true },
+    ).lean().exec() as Record<string, any> | null
+
+    if (!updated) {
+      throw new NotFoundException('Content not found')
+    }
+
+    let reassignment: Record<string, unknown> | null = null
+    if (input.status === DistributionCallbackStatus.REJECTED) {
+      if (this.employeeDispatchService && currentDeliveryRecordId) {
+        await this.employeeDispatchService.expireDeliveryRecord(orgId, currentDeliveryRecordId, {
+          expiredAt: timestamp,
+          reason: normalizedReason || 'employee_rejected',
+        }).catch((error) => {
+          this.logger.warn({
+            message: 'Expire delivery record after rejection failed',
+            contentId,
+            deliveryRecordId: currentDeliveryRecordId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+      }
+
+      reassignment = await this.reassignOrAlert(
+        orgId,
+        updated,
+        normalizedReason || 'employee_rejected',
+        'distribution.rejected',
+      )
+    }
+
+    return {
+      reassignment,
+      ...this.toDistributionResponse(updated),
+      callbackStatus: input.status,
     }
   }
 
@@ -729,6 +916,8 @@ export class DistributionService {
       'metadata.distribution.publishStatus': DistributionPublishStatus.PUSHED,
       'metadata.distribution.lastDistributedAt': { $lte: cutoffIso },
     }).lean().exec() as Array<Record<string, any>>
+    let reassigned = 0
+    let alerted = 0
 
     for (const task of staleTasks) {
       const expiredAt = new Date().toISOString()
@@ -739,6 +928,7 @@ export class DistributionService {
 
       await this.videoTaskModel.findByIdAndUpdate(task['_id'], {
         $set: {
+          'metadata.distribution.lifecycleStatus': DistributionLifecycleStatus.EXPIRED,
           'metadata.distribution.publishStatus': DistributionPublishStatus.EXPIRED,
           'metadata.distribution.expiredAt': expiredAt,
           'metadata.distribution.lastStatusAt': expiredAt,
@@ -747,7 +937,7 @@ export class DistributionService {
         $push: {
           'metadata.distribution.history': {
             $each: [
-              this.createDistributionHistory(DistributionPublishStatus.EXPIRED, expiredAt, {
+              this.createDistributionHistory(DistributionLifecycleStatus.EXPIRED, expiredAt, {
                 reason: 'publish_not_confirmed_within_48h',
               }),
             ],
@@ -774,18 +964,45 @@ export class DistributionService {
         contentId: task['_id']?.toString?.() || '',
         expiredAt,
         reason: 'publish_not_confirmed_within_48h',
-      }).catch((error) => {
-        this.logger.warn({
-          message: 'Distribution expiry webhook failed',
-          taskId: task['_id']?.toString?.() || '',
-          error: error instanceof Error ? error.message : String(error),
+        }).catch((error) => {
+          this.logger.warn({
+            message: 'Distribution expiry webhook failed',
+            taskId: task['_id']?.toString?.() || '',
+            error: error instanceof Error ? error.message : String(error),
+          })
         })
-      })
+
+      const followUp = await this.reassignOrAlert(
+        orgId,
+        {
+          ...task,
+          metadata: {
+            ...(this.asRecord(task['metadata']) || {}),
+            distribution: {
+              ...(this.asRecord(task['metadata']?.['distribution']) || {}),
+              lifecycleStatus: DistributionLifecycleStatus.EXPIRED,
+              publishStatus: DistributionPublishStatus.EXPIRED,
+              expiredAt,
+            },
+          },
+        },
+        'publish_not_confirmed_within_48h',
+        'distribution.expired.alert',
+      )
+
+      if (followUp?.['reassigned']) {
+        reassigned += 1
+      }
+      if (followUp?.['alerted']) {
+        alerted += 1
+      }
     }
 
     return {
       total: staleTasks.length,
       cutoffAt: cutoffIso,
+      reassigned,
+      alerted,
     }
   }
 
@@ -1229,7 +1446,11 @@ export class DistributionService {
     }
 
     const transitions: Record<DistributionPublishStatus, DistributionPublishStatus[]> = {
-      [DistributionPublishStatus.COMPLETED]: [DistributionPublishStatus.PUSHED],
+      [DistributionPublishStatus.COMPLETED]: [
+        DistributionPublishStatus.PUSHED,
+        DistributionPublishStatus.PUBLISHED,
+        DistributionPublishStatus.EXPIRED,
+      ],
       [DistributionPublishStatus.PUSHED]: [
         DistributionPublishStatus.PUBLISHED,
         DistributionPublishStatus.EXPIRED,
@@ -1242,7 +1463,7 @@ export class DistributionService {
   }
 
   private createDistributionHistory(
-    status: DistributionPublishStatus,
+    status: string,
     timestamp: string,
     details?: Record<string, unknown>,
   ): DistributionTimelineEntry {
@@ -1285,6 +1506,9 @@ export class DistributionService {
     const metadata = task['metadata'] as Record<string, any> | undefined
     const distribution = metadata?.['distribution'] as Record<string, any> | undefined
     const publishInfo = metadata?.['publishInfo'] as Record<string, any> | undefined
+    const pushedAtValue = distribution?.['pushedAt'] || distribution?.['lastDistributedAt']
+    const publishedAtValue = distribution?.['publishedAt'] || publishInfo?.['publishedAt'] || task['publishedAt'] || metadata?.['publishedAt']
+    const timeToPublishMs = this.calculateTimeDifferenceMs(pushedAtValue, publishedAtValue)
 
     return {
       contentId: task['_id']?.toString(),
@@ -1292,6 +1516,8 @@ export class DistributionService {
       distributionStatus: this.resolveLifecycleStatus(task),
       publishStatus: this.resolvePublishStatus(task),
       employeeDispatch: distribution?.['employeeDispatch'] || null,
+      callbackStatus: distribution?.['callbackStatus'] || null,
+      rejectionReason: distribution?.['rejectionReason'] || null,
       publishUrl: distribution?.['publishUrl'] || publishInfo?.['publishUrl'] || task['platformPostUrl'] || metadata?.['platformPostUrl'] || null,
       publishPostId: distribution?.['publishPostId'] || publishInfo?.['publishPostId'] || task['platformPostId'] || metadata?.['platformPostId'] || null,
       platform: distribution?.['platform'] || publishInfo?.['platform'] || metadata?.['publishInfo']?.['platform'] || null,
@@ -1301,33 +1527,73 @@ export class DistributionService {
       heartbeatPending: Boolean(distribution?.['heartbeatPending']),
       manualPickupRequired: Boolean(distribution?.['manualPickupRequired']),
       lastDistributedAt: distribution?.['lastDistributedAt'] || null,
+      pushedAt: pushedAtValue || null,
+      publishedAt: publishedAtValue || null,
       lastStatusAt: distribution?.['lastStatusAt'] || null,
       expiredAt: distribution?.['expiredAt'] || null,
+      timeToPublishMs,
+      timeToPublishHours: timeToPublishMs !== null ? Number((timeToPublishMs / (60 * 60 * 1000)).toFixed(2)) : null,
     }
   }
 
   private resolveLifecycleStatus(task: Record<string, any> | VideoTask): DistributionLifecycleStatus {
     const distribution = task.metadata?.distribution as Record<string, any> | undefined
-    const feedback = Array.isArray(distribution?.['feedback']) ? distribution?.['feedback'] : []
-
-    if (feedback.length > 0 || distribution?.['publishStatus'] === DistributionPublishStatus.EXPIRED) {
-      return 'tracked'
+    const storedStatus = distribution?.['lifecycleStatus']
+    if (isDistributionLifecycleStatus(storedStatus)) {
+      return storedStatus
     }
 
-    if (this.resolvePublishStatus(task) === DistributionPublishStatus.PUBLISHED) {
-      return 'published'
+    const publishStatus = this.resolvePublishStatus(task)
+    if (publishStatus === DistributionPublishStatus.PUBLISHED) {
+      return DistributionLifecycleStatus.PUBLISHED
+    }
+    if (publishStatus === DistributionPublishStatus.EXPIRED) {
+      return DistributionLifecycleStatus.EXPIRED
+    }
+    if (publishStatus === DistributionPublishStatus.PUSHED) {
+      return DistributionLifecycleStatus.PUSHED
+    }
+
+    const callbackStatus = this.normalizeOptionalString(distribution?.['callbackStatus']).toLowerCase()
+    if (callbackStatus === DistributionCallbackStatus.PROCESSING) {
+      return DistributionLifecycleStatus.PROCESSING
+    }
+    if (callbackStatus === DistributionCallbackStatus.READY || callbackStatus === DistributionCallbackStatus.REJECTED) {
+      return DistributionLifecycleStatus.READY
     }
 
     const employeeDispatch = distribution?.['employeeDispatch'] as Record<string, any> | undefined
+    const deliveryStatus = this.normalizeOptionalString(
+      distribution?.['deliveryStatus'] || employeeDispatch?.['deliveryStatus'],
+    ).toLowerCase()
     if (
-      employeeDispatch?.['assignmentId']
-      || (Array.isArray(distribution?.['targets']) && distribution?.['targets'].length > 0)
-      || distribution?.['publishStatus'] === DistributionPublishStatus.PUSHED
+      deliveryStatus === 'pending'
+      || deliveryStatus === 'received'
+      || deliveryStatus === 'downloaded'
+      || Boolean(distribution?.['manualPickupRequired'])
+      || Boolean(distribution?.['heartbeatPending'])
     ) {
-      return 'assigned'
+      return DistributionLifecycleStatus.PROCESSING
     }
 
-    return 'pending_assignment'
+    if (isDistributableVideoTaskStatus(task.status) || distribution) {
+      return DistributionLifecycleStatus.READY
+    }
+
+    return DistributionLifecycleStatus.CREATED
+  }
+
+  private resolveLifecycleStatusFromPublishStatus(status: DistributionPublishStatus) {
+    switch (status) {
+      case DistributionPublishStatus.PUSHED:
+        return DistributionLifecycleStatus.PUSHED
+      case DistributionPublishStatus.PUBLISHED:
+        return DistributionLifecycleStatus.PUBLISHED
+      case DistributionPublishStatus.EXPIRED:
+        return DistributionLifecycleStatus.EXPIRED
+      default:
+        return DistributionLifecycleStatus.READY
+    }
   }
 
   private async emitPublishedSignals(
@@ -1356,8 +1622,101 @@ export class DistributionService {
     ])
   }
 
+  private async reassignOrAlert(
+    orgId: string,
+    task: Record<string, any>,
+    reason: string,
+    eventName: string,
+  ) {
+    const contentId = task['_id']?.toString?.() || ''
+    const pipelineId = task['pipelineId']?.toString?.() || ''
+
+    if (orgId && pipelineId && this.employeeDispatchService) {
+      const dispatchResult = await this.dispatchByPipelineRules(orgId, pipelineId, [contentId]).catch((error) => {
+        this.logger.warn({
+          message: 'Distribution reassignment failed',
+          contentId,
+          pipelineId,
+          reason,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return null
+      })
+
+      const firstResult = Array.isArray(dispatchResult?.['results'])
+        ? dispatchResult?.['results']?.[0]
+        : null
+      if (firstResult?.['dispatched']) {
+        return {
+          reassigned: true,
+          alerted: false,
+          assignment: firstResult,
+        }
+      }
+    }
+
+    if (orgId && this.notificationService) {
+      await this.notificationService.send(orgId, NotificationEvent.TASK_FAILED, {
+        type: 'distribution_follow_up_required',
+        contentId,
+        reason,
+        eventName,
+        distributionStatus: this.resolveLifecycleStatus(task),
+      }).catch((error) => {
+        this.logger.warn({
+          message: 'Distribution alert notification failed',
+          contentId,
+          reason,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+    }
+
+    await this.webhookService.trigger(eventName, {
+      orgId: orgId || null,
+      contentId,
+      reason,
+      distributionStatus: this.resolveLifecycleStatus(task),
+    }).catch((error) => {
+      this.logger.warn({
+        message: 'Distribution follow-up webhook failed',
+        contentId,
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+
+    return {
+      reassigned: false,
+      alerted: true,
+    }
+  }
+
   private normalizeOptionalString(value: unknown) {
     return typeof value === 'string' ? value.trim() : ''
+  }
+
+  private calculateTimeDifferenceMs(start: unknown, end: unknown) {
+    const startDate = this.parseDate(start)
+    const endDate = this.parseDate(end)
+    if (!startDate || !endDate || endDate.getTime() < startDate.getTime()) {
+      return null
+    }
+
+    return endDate.getTime() - startDate.getTime()
+  }
+
+  private parseDate(value: unknown) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value
+    }
+
+    if (typeof value !== 'string' || !value.trim()) {
+      return null
+    }
+
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
   }
 
   private normalizeStringList(value: unknown) {

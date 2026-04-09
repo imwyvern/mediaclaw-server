@@ -5,17 +5,22 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsIn,
   IsMongoId,
   IsNotEmpty,
   IsObject,
   IsOptional,
+  IsPositive,
   IsString,
   IsUrl,
   Max,
   Min,
   ValidateNested,
 } from 'class-validator'
-import { DistributionPublishStatus } from './distribution.constants'
+import {
+  DistributionCallbackStatus,
+  DistributionPublishStatus,
+} from './distribution.constants'
 
 export class DistributionRuleEntryDto {
   @IsOptional()
@@ -166,4 +171,42 @@ export class DistributionStatusQueryDto {
   @Min(1)
   @Max(100)
   limit?: number
+}
+
+export class DistributionDashboardQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsPositive()
+  @Max(365)
+  days?: number
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['all', 'published', 'expired', 'pushed'])
+  status?: 'all' | 'published' | 'expired' | 'pushed'
+}
+
+export class DistributionCallbackDto {
+  @IsEnum(DistributionCallbackStatus)
+  status: DistributionCallbackStatus
+
+  @IsOptional()
+  @IsUrl({ require_tld: false }, { message: 'publishUrl must be a valid URL' })
+  publishUrl?: string
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  publishPostId?: string
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  platform?: string
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  reason?: string
 }

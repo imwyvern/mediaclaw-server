@@ -8,6 +8,8 @@ import {
   AssignDistributionDto,
   CollectDistributionFeedbackDto,
   CreateDistributionRuleDto,
+  DistributionCallbackDto,
+  DistributionDashboardQueryDto,
   DistributionStatusQueryDto,
   EvaluateDistributionRulesDto,
   PublishConfirmDto,
@@ -49,6 +51,14 @@ export class DistributionController {
     @Query() query: DistributionStatusQueryDto,
   ) {
     return this.distributionService.getDistributionStatus(user.orgId || user.id || '', query)
+  }
+
+  @Get('dashboard')
+  async getDashboard(
+    @GetToken() user: MediaClawAuthUser,
+    @Query() query: DistributionDashboardQueryDto,
+  ) {
+    return this.distributionService.getDashboardStats(user.orgId || user.id || '', query)
   }
 
   @Post()
@@ -111,6 +121,15 @@ export class DistributionController {
       body.contentId,
       body.status,
     )
+  }
+
+  @Post(':id/callback')
+  async employeeCallback(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: DistributionCallbackDto,
+  ) {
+    return this.distributionService.handleEmployeeCallback(user.orgId || user.id || '', id, body)
   }
 
   @Post('feedback')
