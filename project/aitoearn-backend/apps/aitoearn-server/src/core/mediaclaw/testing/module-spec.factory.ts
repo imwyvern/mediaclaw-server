@@ -167,6 +167,9 @@ const testingHarness = vi.hoisted(() => {
   }
 
   const mongoEnumMocks: Record<string, Record<string, string>> = {
+    IterationFailureCategory: createEnum(['QUALITY', 'CONTENT', 'TECHNICAL', 'BRAND_MISMATCH']),
+    IterationLogStage: createEnum(['FRAME_EDIT', 'I2V_GENERATE', 'SUBTITLE', 'QUALITY_CHECK', 'COPY_GENERATE']),
+    IterationLogStatus: createEnum(['SUCCESS', 'FAILED', 'RETRIED', 'SKIPPED']),
     BillingMode: createEnum(['QUOTA', 'POSTPAID', 'BYOK']),
     BrandAssetType: createEnum(['LOGO', 'COLOR_PALETTE', 'FONT', 'IMAGE', 'VIDEO']),
     CampaignStatus: createEnum(['DRAFT', 'ACTIVE', 'PAUSED', 'COMPLETED']),
@@ -289,6 +292,7 @@ vi.mock('@yikart/mongodb', () => {
     'EmployeeAssignment',
     'EnterpriseInvite',
     'Invoice',
+    'IterationLog',
     'MarketplaceTemplate',
     'MediaClawUser',
     'Notification',
@@ -328,6 +332,7 @@ vi.mock('@yikart/mongodb', () => {
     'EmployeeAssignmentSchema',
     'EnterpriseInviteSchema',
     'InvoiceSchema',
+    'IterationLogSchema',
     'MarketplaceTemplateSchema',
     'MediaClawUserSchema',
     'NotificationSchema',

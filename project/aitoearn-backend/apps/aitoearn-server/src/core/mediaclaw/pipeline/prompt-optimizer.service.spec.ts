@@ -1,10 +1,34 @@
+import { VideoTaskStatus } from '@yikart/mongodb'
 import { Types } from 'mongoose'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { PromptOptimizerService } from './prompt-optimizer.service'
 
 vi.mock('@yikart/mongodb', () => {
+  class IterationLog {}
   class VideoTask {}
 
   return {
+    IterationFailureCategory: {
+      QUALITY: 'quality',
+      CONTENT: 'content',
+      TECHNICAL: 'technical',
+      BRAND_MISMATCH: 'brand_mismatch',
+    },
+    IterationLog,
+    IterationLogStage: {
+      FRAME_EDIT: 'frame_edit',
+      I2V_GENERATE: 'i2v_generate',
+      SUBTITLE: 'subtitle',
+      QUALITY_CHECK: 'quality_check',
+      COPY_GENERATE: 'copy_generate',
+    },
+    IterationLogStatus: {
+      SUCCESS: 'success',
+      FAILED: 'failed',
+      RETRIED: 'retried',
+      SKIPPED: 'skipped',
+    },
     VideoTask,
     OrgApiKeyProvider: {
       DEEPSEEK: 'deepseek',
@@ -26,16 +50,37 @@ vi.mock('./pipeline.utils', () => ({
   requestJson: vi.fn(),
 }))
 
-import { VideoTaskStatus } from '@yikart/mongodb'
-import { PromptOptimizerService } from './prompt-optimizer.service'
-
 function createExecQuery<T>(value: T) {
   return {
     exec: vi.fn().mockResolvedValue(value),
   }
 }
 
-describe('PromptOptimizerService', () => {
+function createIterationLogModel(latestIteration?: number | null) {
+  return {
+    findOne: vi.fn().mockReturnValue({
+      sort: vi.fn().mockReturnValue({
+        lean: vi.fn().mockReturnValue({
+          exec: vi.fn().mockResolvedValue(
+            latestIteration
+              ? { iteration: latestIteration }
+              : null,
+          ),
+        }),
+      }),
+    }),
+    create: vi.fn().mockImplementation(async (payload: Record<string, unknown>) => ({
+      toObject: () => ({
+        _id: new Types.ObjectId(),
+        ...payload,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    })),
+  }
+}
+
+describe('promptOptimizerService', () => {
   const taskId = '507f1f77bcf86cd799439041'
   const orgId = '507f1f77bcf86cd799439042'
 
@@ -45,6 +90,7 @@ describe('PromptOptimizerService', () => {
   })
 
   it('应在无 provider key 时走启发式失败分析并持久化优化 prompt', async () => {
+    const iterationLogModel = createIterationLogModel()
     const videoTaskModel = {
       findById: vi.fn().mockReturnValue(createExecQuery({
         _id: new Types.ObjectId(taskId),
@@ -66,38 +112,30 @@ describe('PromptOptimizerService', () => {
       findByIdAndUpdate: vi.fn().mockReturnValue(createExecQuery(null)),
     }
 
-    const service = new PromptOptimizerService(videoTaskModel as any, undefined, undefined)
+    const service = new PromptOptimizerService(videoTaskModel as any, undefined, iterationLogModel as any)
     const result = await service.analyzeFailure(taskId)
 
     expect(result).toMatchObject({
       taskId,
       failedStep: 'render-video',
-      failureReason: 'Provider timed out while processing the request',
-      rootCause: 'Prompt or payload is too large or too open-ended',
+      failureReason: 'Provider timed out during stage execution',
+      rootCause: 'Prompt context is too broad or the provider response path is unstable',
     })
-    expect(videoTaskModel.findByIdAndUpdate).toHaveBeenCalledWith(
-      expect.any(Types.ObjectId),
-      expect.objectContaining({
-        $set: expect.objectContaining({
-          'metadata.promptOptimizer.lastAnalysis': expect.objectContaining({
-            taskId,
-            failedStep: 'render-video',
-          }),
-          'metadata.optimizedPrompts': expect.objectContaining({
-            'render-video': expect.stringContaining('Optimization guidance:'),
-          }),
-        }),
-        $push: expect.objectContaining({
-          promptFixes: expect.objectContaining({
-            originalPrompt: 'Original render prompt',
-            result: 'analyzed',
-          }),
-        }),
-      }),
-    )
+    const [updatedTaskId, updatePayload] = videoTaskModel.findByIdAndUpdate.mock.calls[0]
+    expect(updatedTaskId.toString()).toBe(taskId)
+    expect(updatePayload.$set['metadata.promptOptimizer.lastAnalysis']).toMatchObject({
+      taskId,
+      failedStep: 'render-video',
+    })
+    expect(updatePayload.$set['metadata.optimizedPrompts']['render-video']).toContain('[Optimization patch]')
+    expect(updatePayload.$push.promptFixes).toMatchObject({
+      originalPrompt: 'Original render prompt',
+      result: 'analyzed',
+    })
   })
 
   it('应仅重跑失败环节并把优化后的 prompt 注入队列上下文', async () => {
+    const iterationLogModel = createIterationLogModel(1)
     const queue = {
       add: vi.fn().mockResolvedValue(undefined),
     }
@@ -127,14 +165,15 @@ describe('PromptOptimizerService', () => {
       findByIdAndUpdate: vi.fn().mockReturnValue(createExecQuery(null)),
     }
 
-    const service = new PromptOptimizerService(videoTaskModel as any, queue as any, undefined)
+    const service = new PromptOptimizerService(videoTaskModel as any, queue as any, iterationLogModel as any)
     const result = await service.retryWithOptimizedPrompt(taskId)
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       taskId,
       failedStep: 'generate-copy',
       optimizedPrompt: 'Optimized copy prompt',
       retryQueued: true,
+      strategy: 'retry_optimized',
     })
     expect(queue.add).toHaveBeenCalledWith(
       'generate-copy',
@@ -148,16 +187,16 @@ describe('PromptOptimizerService', () => {
         },
       },
       {
-        jobId: expect.stringContaining(taskObjectId.toString() + ':generate-copy:optimized:'),
+        jobId: expect.stringContaining(`${taskObjectId.toString()}:generate-copy:optimized:`),
       },
     )
     expect(videoTaskModel.findByIdAndUpdate).toHaveBeenCalledWith(
       taskObjectId,
       expect.objectContaining({
         $set: expect.objectContaining({
-          status: VideoTaskStatus.GENERATING_COPY,
-          errorMessage: '',
-          completedAt: null,
+          'status': VideoTaskStatus.GENERATING_COPY,
+          'errorMessage': '',
+          'completedAt': null,
           'metadata.failedStep': null,
           'metadata.pipelineContext': {
             prompts: {
