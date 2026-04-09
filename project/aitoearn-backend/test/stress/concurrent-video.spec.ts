@@ -3,25 +3,106 @@ import { Types } from 'mongoose'
 vi.mock('@yikart/mongodb', () => {
   class Brand {}
   class Invoice {}
+  class Organization {}
   class Pipeline {}
+  class ProductionBatch {}
   class PaymentOrder {}
+  class Subscription {}
   class VideoPack {}
   class VideoTask {}
 
+  const roleRanks: Record<string, number> = {
+    super_admin: 400,
+    admin: 300,
+    editor: 200,
+    viewer: 100,
+  }
+
   return {
+    BillingMode: {
+      QUOTA: 'quota',
+      POSTPAID: 'postpaid',
+      BYOK: 'byok',
+    },
     Brand,
     Invoice,
+    InvoiceStatus: {
+      DRAFT: 'draft',
+      ISSUED: 'issued',
+      PAID: 'paid',
+      OVERDUE: 'overdue',
+      VOID: 'void',
+    },
+    Organization,
+    OrgStatus: {
+      ACTIVE: 'active',
+      SUSPENDED: 'suspended',
+      TRIAL: 'trial',
+    },
+    OrgType: {
+      INDIVIDUAL: 'individual',
+      TEAM: 'team',
+      PROFESSIONAL: 'professional',
+      ENTERPRISE: 'enterprise',
+    },
     PackStatus: {
       ACTIVE: 'active',
       DEPLETED: 'depleted',
       EXPIRED: 'expired',
       REFUNDED: 'refunded',
     },
+    PackType: {
+      SINGLE: 'single',
+      PACK_10: 'pack_10',
+      PACK_30: 'pack_30',
+      PACK_100: 'pack_100',
+    },
+    PaymentMethod: {
+      WECHAT_NATIVE: 'wechat_native',
+      WECHAT_JSAPI: 'wechat_jsapi',
+      ALIPAY: 'alipay',
+    },
     PaymentOrder,
+    PaymentProductType: {
+      VIDEO_PACK: 'video_pack',
+      SUBSCRIPTION: 'subscription',
+      ADDON: 'addon',
+    },
     Pipeline,
+    ProductionBatch,
+    ProductionBatchStatus: {
+      PENDING: 'pending',
+      PROCESSING: 'processing',
+      PARTIAL: 'partial',
+      COMPLETED: 'completed',
+      FAILED: 'failed',
+      CANCELLED: 'cancelled',
+    },
+    Subscription,
+    SubscriptionPlan: {
+      TEAM: 'team',
+      PRO: 'pro',
+      FLAGSHIP: 'flagship',
+    },
+    SubscriptionStatus: {
+      ACTIVE: 'active',
+      PAST_DUE: 'past_due',
+      CANCELLED: 'cancelled',
+      EXPIRED: 'expired',
+    },
+    UserRole: {
+      SUPER_ADMIN: 'super_admin',
+      ENTERPRISE_ADMIN: 'admin',
+      ADMIN: 'admin',
+      OPERATOR: 'editor',
+      EDITOR: 'editor',
+      EMPLOYEE: 'viewer',
+      VIEWER: 'viewer',
+    },
     VideoPack,
     VideoTask,
     VideoTaskStatus: {
+      DRAFT: 'draft',
       PENDING: 'pending',
       ANALYZING: 'analyzing',
       EDITING: 'editing',
@@ -37,13 +118,15 @@ vi.mock('@yikart/mongodb', () => {
       REMIX: 'remix',
       NEW_CONTENT: 'new_content',
     },
+    userRoleSatisfies: (role: string | null | undefined, requiredRole: string | null | undefined) =>
+      (roleRanks[role || 'viewer'] || roleRanks['viewer']) >= (roleRanks[requiredRole || 'viewer'] || roleRanks['viewer']),
   }
 })
 
 import { PackStatus, VideoTaskType } from '@yikart/mongodb'
 import { BillingService } from '../../apps/aitoearn-server/src/core/mediaclaw/billing/billing.service'
 import { TaskMgmtService } from '../../apps/aitoearn-server/src/core/mediaclaw/task-mgmt/task-mgmt.service'
-import { createExecQuery } from '../support/query'
+import { createChainQuery, createExecQuery } from '../support/query'
 
 function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -107,11 +190,45 @@ describe('MediaClaw Concurrent Video Stress', () => {
     await expect(billingService.deductCredit('stress-user', 'task-overflow', 1)).resolves.toBe(false)
 
     const queuedJobIds: string[] = []
+    const createdTaskDocs: Array<Record<string, any>> = []
+    const batchDocs = new Map<string, Record<string, any>>()
     const videoTaskModel = {
-      create: vi.fn().mockImplementation(async (payload: Record<string, any>) => ({
-        ...payload,
-        toObject: () => ({ ...payload }),
-      })),
+      create: vi.fn().mockImplementation(async (payload: Record<string, any>) => {
+        const task = {
+          ...payload,
+          toObject: () => ({ ...payload }),
+        }
+        createdTaskDocs.push(task)
+        return task
+      }),
+      find: vi.fn().mockImplementation((query: Record<string, any>) => createChainQuery(
+        createdTaskDocs.filter(task => task.batchId?.toString() === query.batchId?.toString()),
+      )),
+    }
+    const productionBatchModel = {
+      create: vi.fn().mockImplementation(async (payload: Record<string, any>) => {
+        const batch = {
+          _id: new Types.ObjectId(),
+          ...payload,
+        }
+        batchDocs.set(batch._id.toString(), batch)
+        return batch
+      }),
+      findById: vi.fn().mockImplementation((id: Types.ObjectId | string) =>
+        createChainQuery(batchDocs.get(id.toString()) || null)),
+      findByIdAndUpdate: vi.fn().mockImplementation((id: Types.ObjectId | string, update: Record<string, any>) => {
+        const existing = batchDocs.get(id.toString())
+        if (!existing) {
+          return createChainQuery(null)
+        }
+
+        const next = {
+          ...existing,
+          ...(update.$set || {}),
+        }
+        batchDocs.set(id.toString(), next)
+        return createChainQuery(next)
+      }),
     }
     const queue = {
       add: vi.fn().mockImplementation(async (_name: string, _data: Record<string, any>, options: { jobId: string }) => {
@@ -122,6 +239,7 @@ describe('MediaClaw Concurrent Video Stress', () => {
       videoTaskModel as any,
       {} as any,
       {} as any,
+      productionBatchModel as any,
       { deductCredit: vi.fn().mockResolvedValue(true) } as any,
       queue as any,
     )

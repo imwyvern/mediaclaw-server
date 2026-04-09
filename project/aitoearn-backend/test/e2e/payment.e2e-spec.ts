@@ -7,10 +7,45 @@ vi.mock('axios', () => ({
   },
 }))
 vi.mock('@yikart/mongodb', () => {
+  class Invoice {}
+  class Organization {}
   class PaymentOrder {}
+  class Subscription {}
   class VideoPack {}
 
+  const roleRanks: Record<string, number> = {
+    super_admin: 400,
+    admin: 300,
+    editor: 200,
+    viewer: 100,
+  }
+
   return {
+    BillingMode: {
+      QUOTA: 'quota',
+      POSTPAID: 'postpaid',
+      BYOK: 'byok',
+    },
+    Invoice,
+    InvoiceStatus: {
+      DRAFT: 'draft',
+      ISSUED: 'issued',
+      PAID: 'paid',
+      OVERDUE: 'overdue',
+      VOID: 'void',
+    },
+    Organization,
+    OrgStatus: {
+      ACTIVE: 'active',
+      SUSPENDED: 'suspended',
+      TRIAL: 'trial',
+    },
+    OrgType: {
+      INDIVIDUAL: 'individual',
+      TEAM: 'team',
+      PROFESSIONAL: 'professional',
+      ENTERPRISE: 'enterprise',
+    },
     PackStatus: {
       ACTIVE: 'active',
       DEPLETED: 'depleted',
@@ -42,6 +77,29 @@ vi.mock('@yikart/mongodb', () => {
       EXPIRED: 'expired',
     },
     VideoPack,
+    Subscription,
+    SubscriptionPlan: {
+      TEAM: 'team',
+      PRO: 'pro',
+      FLAGSHIP: 'flagship',
+    },
+    SubscriptionStatus: {
+      ACTIVE: 'active',
+      PAST_DUE: 'past_due',
+      CANCELLED: 'cancelled',
+      EXPIRED: 'expired',
+    },
+    UserRole: {
+      SUPER_ADMIN: 'super_admin',
+      ENTERPRISE_ADMIN: 'admin',
+      ADMIN: 'admin',
+      OPERATOR: 'editor',
+      EDITOR: 'editor',
+      EMPLOYEE: 'viewer',
+      VIEWER: 'viewer',
+    },
+    userRoleSatisfies: (role: string | null | undefined, requiredRole: string | null | undefined) =>
+      (roleRanks[role || 'viewer'] || roleRanks['viewer']) >= (roleRanks[requiredRole || 'viewer'] || roleRanks['viewer']),
   }
 })
 
@@ -123,6 +181,9 @@ describe('MediaClaw Payment E2E', () => {
     const service = new XorPayService(
       orderModel as any,
       videoPackModel as any,
+      {} as any,
+      {} as any,
+      {} as any,
       distributionService as any,
     )
 
@@ -171,6 +232,9 @@ describe('MediaClaw Payment E2E', () => {
     const service = new XorPayService(
       orderModel as any,
       videoPackModel as any,
+      {} as any,
+      {} as any,
+      {} as any,
       distributionService as any,
     )
 
@@ -202,6 +266,9 @@ describe('MediaClaw Payment E2E', () => {
 
     const service = new XorPayService(
       orderModel as any,
+      {} as any,
+      {} as any,
+      {} as any,
       {} as any,
       {} as any,
     )

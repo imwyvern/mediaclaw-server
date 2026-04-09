@@ -5,17 +5,72 @@ import { Types } from 'mongoose'
 vi.mock('@yikart/mongodb', () => {
   class ApiKey {}
   class Brand {}
+  class Invoice {}
+  class Organization {}
   class PaymentOrder {}
   class Pipeline {}
   class PlatformAccount {}
   class ProductionBatch {}
   class PublishRecord {}
+  class Subscription {}
   class VideoPack {}
   class VideoTask {}
 
+  const normalizeUserRole = (role: string | null | undefined) => {
+    if (!role) {
+      return 'viewer'
+    }
+
+    if (role === 'super_admin') {
+      return 'super_admin'
+    }
+
+    if (role === 'admin') {
+      return 'admin'
+    }
+
+    if (role === 'editor') {
+      return 'editor'
+    }
+
+    return 'viewer'
+  }
+
+  const roleRanks: Record<string, number> = {
+    super_admin: 400,
+    admin: 300,
+    editor: 200,
+    viewer: 100,
+  }
+
   return {
     ApiKey,
+    BillingMode: {
+      QUOTA: 'quota',
+      POSTPAID: 'postpaid',
+      BYOK: 'byok',
+    },
     Brand,
+    Invoice,
+    InvoiceStatus: {
+      DRAFT: 'draft',
+      ISSUED: 'issued',
+      PAID: 'paid',
+      OVERDUE: 'overdue',
+      VOID: 'void',
+    },
+    Organization,
+    OrgStatus: {
+      ACTIVE: 'active',
+      SUSPENDED: 'suspended',
+      TRIAL: 'trial',
+    },
+    OrgType: {
+      INDIVIDUAL: 'individual',
+      TEAM: 'team',
+      PROFESSIONAL: 'professional',
+      ENTERPRISE: 'enterprise',
+    },
     PackStatus: {
       ACTIVE: 'active',
       DEPLETED: 'depleted',
@@ -63,12 +118,30 @@ vi.mock('@yikart/mongodb', () => {
     ProductionBatch,
     PublishRecord,
     UserRole: {
+      SUPER_ADMIN: 'super_admin',
+      ENTERPRISE_ADMIN: 'admin',
       ADMIN: 'admin',
+      OPERATOR: 'editor',
+      EDITOR: 'editor',
+      EMPLOYEE: 'viewer',
       VIEWER: 'viewer',
+    },
+    Subscription,
+    SubscriptionPlan: {
+      TEAM: 'team',
+      PRO: 'pro',
+      FLAGSHIP: 'flagship',
+    },
+    SubscriptionStatus: {
+      ACTIVE: 'active',
+      PAST_DUE: 'past_due',
+      CANCELLED: 'cancelled',
+      EXPIRED: 'expired',
     },
     VideoPack,
     VideoTask,
     VideoTaskStatus: {
+      DRAFT: 'draft',
       PENDING: 'pending',
       ANALYZING: 'analyzing',
       EDITING: 'editing',
@@ -84,6 +157,9 @@ vi.mock('@yikart/mongodb', () => {
       REMIX: 'remix',
       NEW_CONTENT: 'new_content',
     },
+    normalizeUserRole,
+    userRoleSatisfies: (role: string | null | undefined, requiredRole: string | null | undefined) =>
+      (roleRanks[normalizeUserRole(role)] || roleRanks['viewer']) >= (roleRanks[normalizeUserRole(requiredRole)] || roleRanks['viewer']),
   }
 })
 
@@ -157,6 +233,9 @@ describe('MediaClaw Security Audit', () => {
 
   it('应拒绝缺少签名令牌的状态变更回调', async () => {
     const service = new XorPayService(
+      {} as any,
+      {} as any,
+      {} as any,
       {} as any,
       {} as any,
       {} as any,
@@ -244,7 +323,10 @@ describe('MediaClaw Security Audit', () => {
     const apiKeyUser = await apiKeyService.validate('mc_live_boundary_key_123456')
 
     const guard = new PermissionGuard({
-      getAllAndOverride: vi.fn().mockReturnValue([UserRole.ADMIN]),
+      getAllAndOverride: vi.fn()
+        .mockReturnValueOnce(undefined)
+        .mockReturnValueOnce(undefined)
+        .mockReturnValueOnce([UserRole.ADMIN]),
     } as any)
 
     const context = {

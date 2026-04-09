@@ -14,6 +14,8 @@ export function createExecQuery<T>(value: T | (() => T | Promise<T>)) {
     skip: vi.fn(),
     limit: vi.fn(),
     lean: vi.fn(),
+    select: vi.fn(),
+    populate: vi.fn(),
     exec: vi.fn().mockImplementation(async () => resolveValue(value)),
   }
 
@@ -21,6 +23,8 @@ export function createExecQuery<T>(value: T | (() => T | Promise<T>)) {
   query.skip.mockReturnValue(query)
   query.limit.mockReturnValue(query)
   query.lean.mockReturnValue(query)
+  query.select.mockReturnValue(query)
+  query.populate.mockReturnValue(query)
 
   return query
 }

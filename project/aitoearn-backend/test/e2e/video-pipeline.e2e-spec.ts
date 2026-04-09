@@ -12,6 +12,7 @@ vi.mock('@yikart/mongodb', () => {
     ProductionBatch,
     VideoTask,
     VideoTaskStatus: {
+      DRAFT: 'draft',
       PENDING: 'pending',
       ANALYZING: 'analyzing',
       EDITING: 'editing',
@@ -26,6 +27,17 @@ vi.mock('@yikart/mongodb', () => {
       BRAND_REPLACE: 'brand_replace',
       REMIX: 'remix',
       NEW_CONTENT: 'new_content',
+    },
+    NotificationEvent: {
+      TASK_COMPLETED: 'task_completed',
+    },
+    ProductionBatchStatus: {
+      PENDING: 'pending',
+      PROCESSING: 'processing',
+      PARTIAL: 'partial',
+      COMPLETED: 'completed',
+      FAILED: 'failed',
+      CANCELLED: 'cancelled',
     },
   }
 })
@@ -64,8 +76,31 @@ function createVideoTaskDocument(overrides: Record<string, unknown> = {}) {
 
 describe('MediaClaw Video Pipeline E2E', () => {
   it('应创建视频任务并写入 BullMQ 队列', async () => {
+    const createdTasks: Array<Record<string, unknown>> = []
+    const batchDoc = {
+      _id: new Types.ObjectId(),
+      batchName: 'auto-created-batch',
+      totalTasks: 1,
+      completedTasks: 0,
+      failedTasks: 0,
+      startedAt: new Date('2026-03-30T08:00:00.000Z'),
+      summary: {
+        autoCreated: true,
+        source: 'task-mgmt',
+      },
+    }
     const videoTaskModel = {
-      create: vi.fn().mockImplementation(async (payload: Record<string, unknown>) => createVideoTaskDocument(payload)),
+      create: vi.fn().mockImplementation(async (payload: Record<string, unknown>) => {
+        const task = createVideoTaskDocument(payload)
+        createdTasks.push(task)
+        return task
+      }),
+      find: vi.fn().mockReturnValue(createChainQuery(createdTasks)),
+    }
+    const productionBatchModel = {
+      create: vi.fn().mockResolvedValue(batchDoc),
+      findById: vi.fn().mockReturnValue(createChainQuery(batchDoc)),
+      findByIdAndUpdate: vi.fn().mockReturnValue(createChainQuery(batchDoc)),
     }
     const billingService = {
       deductCredit: vi.fn().mockResolvedValue(true),
@@ -78,6 +113,7 @@ describe('MediaClaw Video Pipeline E2E', () => {
       videoTaskModel as any,
       {} as any,
       {} as any,
+      productionBatchModel as any,
       billingService as any,
       queue as any,
     )
@@ -157,10 +193,26 @@ describe('MediaClaw Video Pipeline E2E', () => {
     const billingService = {
       deductCredit: vi.fn().mockResolvedValue(true),
     }
+    const usageService = {
+      chargeVideo: vi.fn().mockResolvedValue({
+        usageHistoryId: 'usage-1',
+        packId: null,
+        units: 1,
+      }),
+      refundVideoCharge: vi.fn().mockResolvedValue(undefined),
+    }
 
     const videoService = new VideoService(
       videoTaskModel as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      usageService as any,
       billingService as any,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       queue as any,
     )
 
@@ -174,12 +226,16 @@ describe('MediaClaw Video Pipeline E2E', () => {
 
     const processorVideoService = {
       getTask: vi.fn().mockResolvedValue(createdTask),
+      startIterationStep: vi.fn().mockResolvedValue(undefined),
       updateStatus: vi.fn()
         .mockResolvedValueOnce(createdTask)
         .mockResolvedValueOnce({
           ...createdTask,
           status: VideoTaskStatus.COMPLETED,
         }),
+      completeIterationStep: vi.fn().mockResolvedValue(undefined),
+      updateTaskMetadata: vi.fn().mockResolvedValue(undefined),
+      failIterationStep: vi.fn().mockResolvedValue(undefined),
       recordRetry: vi.fn(),
     }
     const copyService = {
@@ -191,23 +247,37 @@ describe('MediaClaw Video Pipeline E2E', () => {
     const distributionService = {
       notifyTaskComplete: vi.fn().mockResolvedValue(undefined),
     }
+    const pipelineService = {
+      runQualityCheck: vi.fn().mockResolvedValue({
+        metrics: {
+          overallScore: 95,
+        },
+      }),
+      cleanupWorkspace: vi.fn().mockResolvedValue(undefined),
+    }
 
     const processor = new VideoWorkerProcessor(
       queue as any,
       processorVideoService as any,
       copyService as any,
       distributionService as any,
+      pipelineService as any,
     )
-    vi.spyOn(processor as any, 'sleep').mockResolvedValue(undefined)
 
     await processor.process({
-      name: 'generate-copy',
-      data: { taskId: createdTask._id.toString() },
+      name: 'quality-check',
+      data: {
+        taskId: createdTask._id.toString(),
+        context: {
+          outputVideoUrl: 'https://cdn.example.com/output.mp4',
+        },
+      },
       attemptsMade: 0,
       opts: { attempts: 1 },
     } as any)
 
-    expect(billingService.deductCredit).toHaveBeenCalledTimes(1)
+    expect(usageService.chargeVideo).toHaveBeenCalledTimes(1)
+    expect(billingService.deductCredit).toHaveBeenCalledTimes(0)
     expect(distributionService.notifyTaskComplete).toHaveBeenCalledWith(expect.objectContaining({
       status: VideoTaskStatus.COMPLETED,
     }))
