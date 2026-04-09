@@ -186,10 +186,19 @@ export class ChatService {
    * @param params 参数
    * @param userId 用户ID
    * @param userType 用户类型
-   * @param modelConfig 模型配置，包含 name 和 pricing
+   * @param modelConfig 模型配置
+   * @param modelConfig.name 模型名称
+   * @param modelConfig.pricing 模型计费配置
    * @param startedAt 开始时间
    * @param usage token 使用情况
+   * @param usage.input_tokens 输入 token 数
+   * @param usage.output_tokens 输出 token 数
+   * @param usage.total_tokens 总 token 数
+   * @param usage.input_token_details 输入 token 细分
+   * @param usage.output_token_details 输出 token 细分
    * @param result 响应结果
+   * @param result.model 响应模型名
+   * @param result.usage 响应附带的 usage 信息
    * @returns 计算出的积分
    */
   private async handleCompletion(

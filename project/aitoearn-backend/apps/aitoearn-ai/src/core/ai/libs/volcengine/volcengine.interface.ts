@@ -1352,7 +1352,7 @@ export interface GetVCreativeTaskResultSuccessResponse {
   /** 场景类型 */
   Scene: string
   /** 其他字段... */
-  [key: string]: any
+  [key: string]: unknown
 }
 
 // 获取 AI 漫剧转绘任务结果响应（失败时）
@@ -1364,7 +1364,7 @@ export interface GetVCreativeTaskResultFailedResponse {
   /** 场景类型 */
   Scene: string
   /** 其他字段... */
-  [key: string]: any
+  [key: string]: unknown
 }
 
 // 获取 AI 漫剧转绘任务结果响应（处理中）
@@ -1374,7 +1374,7 @@ export interface GetVCreativeTaskResultProcessingResponse {
   /** 场景类型 */
   Scene: string
   /** 其他字段... */
-  [key: string]: any
+  [key: string]: unknown
 }
 
 // 获取 AI 漫剧转绘任务结果响应（联合类型）

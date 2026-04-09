@@ -448,7 +448,7 @@ export class ImageService {
 
   /**
    * 获取图片生成模型参数
-   * @param data 查询参数，包含可选的 userId 和 userType，可用于后续个性化模型推荐
+   * @param _data 查询参数，包含可选的 userId 和 userType，可用于后续个性化模型推荐
    */
   async generationModelConfig(_data: ImageGenerationModelsQueryDto) {
     return this.modelsConfigService.config.image.generation
@@ -456,7 +456,7 @@ export class ImageService {
 
   /**
    * 获取图片编辑模型参数
-   * @param data 查询参数，包含可选的 userId 和 userType，可用于后续个性化模型推荐
+   * @param _data 查询参数，包含可选的 userId 和 userType，可用于后续个性化模型推荐
    */
   async editModelConfig(_data: ImageEditModelsQueryDto) {
     return this.modelsConfigService.config.image.edit

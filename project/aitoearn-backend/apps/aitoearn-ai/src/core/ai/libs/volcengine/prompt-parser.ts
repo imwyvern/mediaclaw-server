@@ -233,27 +233,6 @@ function extractSubtitleRecognitionType(prompt: string): SubtitleRecognitionType
   return SubtitleRecognitionType.ASR
 }
 
-/**
- * Check if hard subtitle and source erasure are needed
- * (Reserved for future prompt-based override)
- */
-function _extractSubtitleConfig(prompt: string) {
-  const lowerPrompt = prompt.toLowerCase()
-
-  const needHardSubtitle = lowerPrompt.includes('hard subtitle')
-    || lowerPrompt.includes('burn')
-    || lowerPrompt.includes('embed')
-
-  const needEraseSource = lowerPrompt.includes('erase')
-    || lowerPrompt.includes('remove')
-    || needHardSubtitle
-
-  return {
-    needHardSubtitle,
-    needEraseSource,
-  }
-}
-
 function isTranslationPrompt(prompt: string): boolean {
   const text = prompt.toLowerCase()
 
@@ -326,67 +305,6 @@ export function parseTranslationPrompt(prompt: string): AITranslationSkillParams
   logger.debug('Applied facial translation defaults: hard subtitle + erase source')
 
   return params
-}
-
-/**
- * Parse VCreative (AI editing) prompt
- * Currently disabled, reserved for future use
- */
-function _parseVCreativePrompt(prompt: string): { Text: string } | null {
-  const lowerPrompt = prompt.toLowerCase()
-
-  const mergeKeywords = [
-    'merge',
-    'combine',
-    'mix',
-    'audio',
-    'video',
-    'sound',
-  ]
-
-  const isMerge = mergeKeywords.some(keyword => lowerPrompt.includes(keyword))
-
-  if (isMerge) {
-    logger.debug('Detected merge-related prompt')
-
-    let optimizedText = ''
-
-    if (lowerPrompt.includes('audio') || lowerPrompt.includes('sound')) {
-      optimizedText = 'Merge video visuals with audio from second input'
-    }
-    else if (lowerPrompt.includes('concat') || lowerPrompt.includes('join')) {
-      optimizedText = prompt
-    }
-    else {
-      optimizedText = prompt
-    }
-
-    logger.debug(`VCreative prompt optimized: ${prompt} -> ${optimizedText}`)
-
-    return {
-      Text: optimizedText,
-    }
-  }
-
-  const vCreativeKeywords = [
-    'concat',
-    'trim',
-    'cut',
-    'edit',
-    'image',
-    'generate video',
-  ]
-
-  const isVCreative = vCreativeKeywords.some(keyword => lowerPrompt.includes(keyword))
-
-  if (isVCreative) {
-    logger.debug('Detected VCreative prompt')
-    return {
-      Text: prompt,
-    }
-  }
-
-  return null
 }
 
 /**

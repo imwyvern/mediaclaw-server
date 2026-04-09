@@ -330,7 +330,7 @@ export class GeminiVideoService {
     }
   }
 
-  getOperation(resp: Record<string, any>) {
+  getOperation(resp: Record<string, unknown>) {
     const typedResp = new GenerateVideosOperation()
     Object.assign(typedResp, resp)
     return typedResp
