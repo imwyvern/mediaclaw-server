@@ -127,6 +127,7 @@ export class PublishRecord extends WithTimestampSchema {
   userId: string
 
   @Prop({
+    type: String,
     required: false,
   })
   flowId?: string // 前端传入的流水ID
@@ -158,22 +159,26 @@ export class PublishRecord extends WithTimestampSchema {
   materialId?: string // 草稿ID (广告主线下任务)
 
   @Prop({
+    type: String,
     required: true,
     enum: PublishType,
   })
   type: PublishType
 
   @Prop({
+    type: String,
     required: false,
   })
   title?: string
 
   @Prop({
+    type: String,
     required: false,
   })
   desc?: string // 主要内容
 
   @Prop({
+    type: String,
     required: false,
   })
   accountId?: string
@@ -193,16 +198,19 @@ export class PublishRecord extends WithTimestampSchema {
   accountType: AccountType
 
   @Prop({
+    type: String,
     required: false,
   })
   uid?: string
 
   @Prop({
+    type: String,
     required: false,
   })
   videoUrl?: string
 
   @Prop({
+    type: String,
     required: false,
   })
   coverUrl?: string
@@ -221,6 +229,7 @@ export class PublishRecord extends WithTimestampSchema {
   publishTime: Date
 
   @Prop({
+    type: Number,
     required: true,
     enum: PublishStatus,
     default: PublishStatus.WaitingForPublish,
@@ -228,17 +237,20 @@ export class PublishRecord extends WithTimestampSchema {
   status: PublishStatus
 
   @Prop({
+    type: String,
     required: false,
   })
   queueId?: string
 
   @Prop({
+    type: Boolean,
     required: true,
     default: false,
   })
   inQueue: boolean
 
   @Prop({
+    type: Boolean,
     required: false,
     default: false,
   })
@@ -251,6 +263,7 @@ export class PublishRecord extends WithTimestampSchema {
   errorData?: PublishErrorData
 
   @Prop({
+    type: String,
     required: false,
   })
   errorMsg?: string

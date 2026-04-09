@@ -10,6 +10,7 @@ export class CreditsBalance extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     required: true,
     unique: true,
     index: true,
@@ -17,6 +18,7 @@ export class CreditsBalance extends WithTimestampSchema {
   userId: string
 
   @Prop({
+    type: Number,
     required: true,
     default: 0,
   })

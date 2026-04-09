@@ -11,28 +11,33 @@ export class CreditsRecord extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   userId: string
 
   @Prop({
+    type: Number,
     required: true,
   })
   amount: number // 美分，原始金额，创建后不变，用于统计
 
   @Prop({
+    type: Number,
     required: true,
   })
   balance: number // 美分，该记录剩余的可用余额。新增记录时等于amount，扣减时从balance中扣除，过期时设为0。总余额由CreditsBalance表维护
 
   @Prop({
+    type: String,
     required: true,
     enum: CreditsType,
   })
   type: CreditsType
 
   @Prop({
+    type: String,
     required: false,
   })
   description?: string
@@ -45,6 +50,7 @@ export class CreditsRecord extends WithTimestampSchema {
   metadata?: Record<string, unknown>
 
   @Prop({
+    type: Date,
     required: false,
     index: true,
   })

@@ -9,52 +9,61 @@ export class AiLog extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   userId: string
 
   @Prop({
+    type: String,
     required: true,
     enum: UserType,
   })
   userType: UserType
 
   @Prop({
+    type: String,
     required: false,
     index: true,
   })
   libraryId?: string
 
   @Prop({
+    type: String,
     required: false,
     index: true,
   })
   taskId?: string
 
   @Prop({
+    type: String,
     required: true,
     enum: AiLogType,
   })
   type: AiLogType
 
   @Prop({
+    type: String,
     required: true,
   })
   model: string
 
   @Prop({
+    type: String,
     required: true,
     enum: AiLogChannel,
   })
   channel: AiLogChannel
 
   @Prop({
+    type: String,
     required: false,
   })
   action?: string
 
   @Prop({
+    type: String,
     required: true,
     enum: AiLogStatus,
   })
@@ -67,6 +76,7 @@ export class AiLog extends WithTimestampSchema {
   startedAt: Date
 
   @Prop({
+    type: Number,
     required: false,
   })
   duration?: number
@@ -85,11 +95,12 @@ export class AiLog extends WithTimestampSchema {
 
   @Prop({
     required: false,
-    type: Object,
+    type: String,
   })
   errorMessage?: string
 
   @Prop({
+    type: Number,
     required: true,
   })
   points: number

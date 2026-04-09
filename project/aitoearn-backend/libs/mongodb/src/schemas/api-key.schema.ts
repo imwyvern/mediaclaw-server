@@ -8,19 +8,19 @@ import { WithTimestampSchema } from './timestamp.schema'
 export class ApiKey extends WithTimestampSchema {
   id: string
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: String, required: true, index: true })
   userId: string
 
   @Prop({ type: MongooseSchema.Types.ObjectId, default: null, index: true })
   orgId: MongooseSchema.Types.ObjectId | null
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   name: string
 
-  @Prop({ required: true, unique: true, index: true })
+  @Prop({ type: String, required: true, unique: true, index: true })
   key: string
 
-  @Prop({ default: '', index: true })
+  @Prop({ type: String, default: '', index: true })
   prefix: string
 
   @Prop({ type: [String], default: [] })
@@ -38,7 +38,7 @@ export class ApiKey extends WithTimestampSchema {
   @Prop({ type: Boolean, default: true, index: true })
   isActive: boolean
 
-  @Prop({ default: '' })
+  @Prop({ type: String, default: '' })
   keyHash: string
 }
 

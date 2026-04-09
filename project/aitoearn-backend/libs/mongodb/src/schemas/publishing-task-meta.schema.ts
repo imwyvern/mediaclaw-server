@@ -16,16 +16,16 @@ const YOUTUBE_LICENSES = ['youtube', 'creativeCommon'] as const
 
 @Schema({})
 export class BiliBiliPublishTaskMeta {
-  @Prop({ required: true })
+  @Prop({ type: Number, required: true })
   tid: number
 
-  @Prop({ required: true })
+  @Prop({ type: Number, required: true })
   no_reprint: number
 
-  @Prop({ required: true })
+  @Prop({ type: Number, required: true })
   copyright: number
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   source?: string
 }
 
@@ -34,19 +34,19 @@ export class TiktokPublishTaskMeta {
   @Prop({ type: String, required: true, enum: TIKTOK_PRIVACY_LEVELS })
   privacy_level: (typeof TIKTOK_PRIVACY_LEVELS)[number]
 
-  @Prop({ required: false })
+  @Prop({ type: Boolean, required: false })
   disable_duet?: boolean
 
-  @Prop({ required: false })
+  @Prop({ type: Boolean, required: false })
   disable_stitch?: boolean
 
-  @Prop({ required: false })
+  @Prop({ type: Boolean, required: false })
   disable_comment?: boolean
 
-  @Prop({ required: false })
+  @Prop({ type: Boolean, required: false })
   brand_organic_toggle?: boolean
 
-  @Prop({ required: false })
+  @Prop({ type: Boolean, required: false })
   brand_content_toggle?: boolean
 }
 
@@ -70,82 +70,82 @@ export class YoutubePublishTaskMeta {
   @Prop({ type: String, required: true, enum: YOUTUBE_LICENSES })
   license: (typeof YOUTUBE_LICENSES)[number]
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   categoryId: string
 }
 
 @Schema({})
 export class PinterestPublishTaskMeta {
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   boardId: string
 }
 
 @Schema({})
 export class ThreadsPublishTaskMeta {
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   reply_control?: string
 
-  @Prop({ required: false })
+  @Prop({ type: [String], required: false })
   allowlisted_country_codes?: string[]
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   alt_text?: string
 
-  @Prop({ required: false })
+  @Prop({ type: Boolean, required: false })
   auto_publish_text?: boolean
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   topic_tags?: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   location_id?: string
 }
 
 @Schema({})
 export class WxGzhPublishTaskMeta {
-  @Prop({ required: false })
+  @Prop({ type: Number, required: false })
   open_comment?: number
 
-  @Prop({ required: false })
+  @Prop({ type: Number, required: false })
   only_fans_can_comment?: number
 }
 
 @Schema({})
 export class PublishingTaskMeta {
-  @Prop({ required: false })
+  @Prop({ type: BiliBiliPublishTaskMeta, required: false })
   bilibili?: BiliBiliPublishTaskMeta
 
-  @Prop({ required: false })
+  @Prop({ type: TiktokPublishTaskMeta, required: false })
   tiktok?: TiktokPublishTaskMeta
 
-  @Prop({ required: false })
+  @Prop({ type: FacebookPublishTaskMeta, required: false })
   facebook?: FacebookPublishTaskMeta
 
-  @Prop({ required: false })
+  @Prop({ type: InstagramPublishTaskMeta, required: false })
   instagram?: InstagramPublishTaskMeta
 
-  @Prop({ required: false })
+  @Prop({ type: YoutubePublishTaskMeta, required: false })
   youtube?: YoutubePublishTaskMeta
 
-  @Prop({ required: false })
+  @Prop({ type: PinterestPublishTaskMeta, required: false })
   pinterest?: PinterestPublishTaskMeta
 
-  @Prop({ required: false })
+  @Prop({ type: ThreadsPublishTaskMeta, required: false })
   threads?: ThreadsPublishTaskMeta
 
-  @Prop({ required: false })
+  @Prop({ type: WxGzhPublishTaskMeta, required: false })
   wxGzh?: WxGzhPublishTaskMeta
 }
 
 @Schema({})
 export class PublishErrorData {
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   type: string
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   code: string
 
-  @Prop({ required: true, default: '' })
+  @Prop({ type: String, required: true, default: '' })
   message: string
 
   @Prop({ required: false, type: mongoose.Schema.Types.Mixed })

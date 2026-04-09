@@ -54,6 +54,7 @@ export class Notification extends WithTimestampSchema {
   userId: string
 
   @Prop({
+    type: String,
     enum: UserType,
     index: true,
     required: true,

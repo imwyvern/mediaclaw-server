@@ -6,19 +6,19 @@ import { WithTimestampSchema } from './timestamp.schema'
 export class MaterialAdaptation extends WithTimestampSchema {
   id: string
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: String, required: true, index: true })
   materialId: string
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: String, required: true, index: true })
   userId: string
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: String, required: true, index: true })
   platform: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   title?: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   desc?: string
 
   @Prop({ type: [String], default: [] })

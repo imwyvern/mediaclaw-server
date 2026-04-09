@@ -8,40 +8,40 @@ import { WithTimestampSchema } from './timestamp.schema'
 export class QrCodeArtImage extends WithTimestampSchema {
   id: string
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: String, required: true, index: true })
   userId: string
 
-  @Prop({ required: true, enum: UserType })
+  @Prop({ type: String, required: true, enum: UserType })
   userType: UserType
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: String, required: true, index: true })
   relId: string
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   relType: string
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: String, required: true, index: true })
   logId: string
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   content: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   referenceImageUrl?: string
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   prompt: string
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   model: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   size?: string
 
-  @Prop({ required: true, enum: AiLogStatus, default: AiLogStatus.Generating })
+  @Prop({ type: String, required: true, enum: AiLogStatus, default: AiLogStatus.Generating })
   status: AiLogStatus
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   imageUrl?: string
 }
 

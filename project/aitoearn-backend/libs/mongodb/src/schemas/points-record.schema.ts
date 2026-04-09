@@ -16,38 +16,45 @@ export class PointsRecord extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     required: true,
   })
   userId: string
 
   @Prop({
+    type: Number,
     required: true,
   })
   amount: number
 
   @Prop({
+    type: Number,
     required: true,
   })
   balance: number
 
   @Prop({
+    type: String,
     required: true,
   })
   type: string
 
   @Prop({
+    type: String,
     required: false,
   })
   description?: string
 
   // 这条积分记录是否已被过期积分抵扣
   @Prop({
+    type: Number,
     required: false,
     default: IPointStatus.FREE,
   })
   status: IPointStatus
 
   @Prop({
+    type: Number,
     required: false,
     default: 0,
   })

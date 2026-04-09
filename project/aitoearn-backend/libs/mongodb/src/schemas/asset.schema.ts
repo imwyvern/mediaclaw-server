@@ -35,32 +35,33 @@ export type AssetMetadata = ImageMetadata | VideoMetadata | AudioMetadata
 export class Asset extends WithTimestampSchema {
   id: string
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   userId: string
 
   @Prop({
+    type: String,
     required: true,
     enum: UserType,
     default: UserType.User,
   })
   userType: UserType
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   path: string
 
-  @Prop({ required: true, enum: AssetType })
+  @Prop({ type: String, required: true, enum: AssetType })
   type: AssetType
 
-  @Prop({ required: true, enum: AssetStatus, default: AssetStatus.Pending })
+  @Prop({ type: String, required: true, enum: AssetStatus, default: AssetStatus.Pending })
   status: AssetStatus
 
-  @Prop()
+  @Prop({ type: Number })
   size?: number
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   mimeType: string
 
-  @Prop()
+  @Prop({ type: String })
   filename?: string
 
   @Prop({ type: Object })

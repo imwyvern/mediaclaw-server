@@ -8,7 +8,7 @@ import { WithTimestampSchema } from './timestamp.schema'
   toObject: { virtuals: true },
 })
 export class UserAiItemInfo {
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   defaultModel: string
 
   @Prop({
@@ -55,14 +55,15 @@ export class UserAiInfo {
 })
 export class UserBackData {
   @Prop({
+    type: String,
     required: false,
   })
   phone?: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   wxOpenid?: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   wxUnionid?: string
 }
 
@@ -72,13 +73,14 @@ export class UserBackData {
 })
 export class UserEarnInfo {
   @Prop({
+    type: Number,
     required: true,
     enum: EarnInfoStatus,
     default: EarnInfoStatus.OPEN,
   })
   status: EarnInfoStatus
 
-  @Prop({ required: true })
+  @Prop({ type: Number, required: true })
   cycleInterval: number
 }
 
@@ -111,12 +113,13 @@ export class UserLocation {
 
 export class UserStorage {
   @Prop({
+    type: Number,
     required: true,
     default: 500 * 1024 * 1024,
   })
   total: number // Total Storage (Bytes)
 
-  @Prop({ required: false })
+  @Prop({ type: Date, required: false })
   expiredAt?: Date
 }
 
@@ -125,41 +128,48 @@ export class User extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     required: true,
     default: '',
   })
   name: string
 
   @Prop({
+    type: String,
     required: false,
     index: true,
   })
   mail: string
 
   @Prop({
+    type: String,
     required: false,
   })
   avatar?: string
 
   @Prop({
+    type: String,
     required: false,
     index: true,
   })
   phone?: string
 
   @Prop({
+    type: String,
     required: false,
     select: false,
   })
   password?: string
 
   @Prop({
+    type: String,
     required: false,
     select: false,
   })
   salt?: string
 
   @Prop({
+    type: Number,
     required: true,
     enum: UserStatus,
     default: UserStatus.OPEN,
@@ -167,6 +177,7 @@ export class User extends WithTimestampSchema {
   status: UserStatus
 
   @Prop({
+    type: String,
     required: true,
     enum: UserType,
     default: UserType.CREATOR,
@@ -176,25 +187,26 @@ export class User extends WithTimestampSchema {
 
   // Is Deleted
   @Prop({
+    type: Boolean,
     required: true,
     default: false,
     index: true,
   })
   isDelete: boolean
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   wxOpenid?: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   wxUnionid?: string
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   popularizeCode?: string // My Promotion Code
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   inviteUserId?: string // Inviter User ID
 
-  @Prop({ required: false })
+  @Prop({ type: String, required: false })
   inviteCode?: string // Invite Code Entered
 
   @Prop({ type: Object, required: false, default: {} })
@@ -207,12 +219,14 @@ export class User extends WithTimestampSchema {
   googleAccount?: Record<string, unknown> // Google Account Info
 
   @Prop({
+    type: Number,
     required: true,
     default: 0,
   })
   score: number // Score
 
   @Prop({
+    type: Number,
     required: true,
     default: 0,
   })
@@ -228,6 +242,7 @@ export class User extends WithTimestampSchema {
   storage: UserStorage
 
   @Prop({
+    type: Number,
     required: false,
     default: 0,
   })
@@ -245,10 +260,10 @@ export class User extends WithTimestampSchema {
   @Prop({ type: String, required: false, default: 'en-US' })
   locale?: string // 用户语言偏好 (en-US | zh-CN)
 
-  @Prop({ required: false, index: true })
+  @Prop({ type: String, required: false, index: true })
   placeId?: string
 
-  @Prop({ required: false, index: true })
+  @Prop({ type: String, required: false, index: true })
   libraryId?: string
 }
 

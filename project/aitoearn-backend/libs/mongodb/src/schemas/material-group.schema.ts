@@ -15,12 +15,14 @@ export class MaterialGroup extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   userId: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
     default: UserType.User,
@@ -28,18 +30,21 @@ export class MaterialGroup extends WithTimestampSchema {
   userType: UserType
 
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   name: string
 
   @Prop({
+    type: String,
     required: false,
   })
   desc?: string
 
   // 是否默认
   @Prop({
+    type: Boolean,
     required: true,
     index: true,
     default: false,
@@ -56,11 +61,12 @@ export class MaterialGroup extends WithTimestampSchema {
   })
   platforms: AccountType[]
 
-  @Prop({ required: false, index: true })
+  @Prop({ type: String, required: false, index: true })
   libraryId?: string
 
   // 是否开启推广
   @Prop({
+    type: Boolean,
     required: true,
     default: true,
   })

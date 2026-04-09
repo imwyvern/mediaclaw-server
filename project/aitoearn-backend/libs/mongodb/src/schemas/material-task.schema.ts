@@ -19,18 +19,21 @@ export enum MaterialTaskStatus {
 })
 export class MediaUrlInfo {
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   mediaId: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   url: string
 
   @Prop({
+    type: Number,
     required: true,
     index: true,
     default: 0,
@@ -38,6 +41,7 @@ export class MediaUrlInfo {
   num: number
 
   @Prop({
+    type: String,
     required: true,
   })
   type: MediaType
@@ -54,12 +58,14 @@ export class MaterialTask extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   userId: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
     default: UserType.User,
@@ -67,12 +73,14 @@ export class MaterialTask extends WithTimestampSchema {
   userType: UserType
 
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   groupId: string // Group ID
 
   @Prop({
+    type: String,
     required: true,
     enum: MaterialType,
     index: true,
@@ -80,21 +88,25 @@ export class MaterialTask extends WithTimestampSchema {
   type: MaterialType
 
   @Prop({
+    type: String,
     required: true,
   })
   aiModelTag: string
 
   @Prop({
+    type: String,
     required: true,
   })
   prompt: string // Prompt
 
   @Prop({
+    type: String,
     required: false,
   })
   systemPrompt?: string // System prompt
 
   @Prop({
+    type: String,
     required: false,
   })
   coverGroup?: string
@@ -126,11 +138,13 @@ export class MaterialTask extends WithTimestampSchema {
   mediaUrlMap: MediaUrlInfo[][] // 2D array of media
 
   @Prop({
+    type: Number,
     required: true,
   })
   reNum: number
 
   @Prop({
+    type: Number,
     required: true,
     enum: MaterialTaskStatus,
     default: MaterialTaskStatus.WAIT,
@@ -138,6 +152,7 @@ export class MaterialTask extends WithTimestampSchema {
   status: MaterialTaskStatus
 
   @Prop({
+    type: Boolean,
     required: true,
     default: false,
   })

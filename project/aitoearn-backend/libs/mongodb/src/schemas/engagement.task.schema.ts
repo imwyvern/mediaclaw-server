@@ -28,38 +28,45 @@ export enum EngagementTargetScope {
 export class EngagementTask extends WithTimestampSchema {
   id: string
   @Prop({
+    type: String,
     required: true,
   })
   accountId: string
 
   @Prop({
+    type: String,
     required: true,
   })
   userId: string
 
   @Prop({
+    type: String,
     required: true,
   })
   postId: string
 
   @Prop({
+    type: String,
     required: true,
   })
   platform: string
 
   @Prop({
+    type: String,
     required: true,
     default: '',
   })
   model: string
 
   @Prop({
+    type: String,
     required: false,
     default: '',
   })
   prompt: string
 
   @Prop({
+    type: String,
     required: true,
     enum: EngagementTaskType,
     default: EngagementTaskType.REPLY,
@@ -67,6 +74,7 @@ export class EngagementTask extends WithTimestampSchema {
   taskType: EngagementTaskType
 
   @Prop({
+    type: String,
     required: true,
     enum: EngagementTargetScope,
     default: EngagementTargetScope.ALL,
@@ -80,6 +88,7 @@ export class EngagementTask extends WithTimestampSchema {
   targetIds: string[]
 
   @Prop({
+    type: String,
     required: true,
     enum: EngagementTaskStatus,
     default: EngagementTaskStatus.CREATED,
@@ -87,18 +96,21 @@ export class EngagementTask extends WithTimestampSchema {
   status: EngagementTaskStatus
 
   @Prop({
+    type: Number,
     required: true,
     default: 0,
   })
   subTaskCount: number
 
   @Prop({
+    type: Number,
     required: true,
     default: 0,
   })
   completedSubTaskCount: number
 
   @Prop({
+    type: Number,
     required: true,
     default: 0,
   })
@@ -117,43 +129,51 @@ export class EngagementSubTask extends WithTimestampSchema {
   taskId: string
 
   @Prop({
+    type: String,
     required: true,
   })
   accountId: string
 
   @Prop({
+    type: String,
     required: true,
   })
   userId: string
 
   @Prop({
+    type: String,
     required: true,
   })
   postId: string
 
   @Prop({
+    type: String,
     required: true,
   })
   commentId: string
 
   @Prop({
+    type: String,
     required: true,
     default: '',
   })
   commentContent: string
 
   @Prop({
+    type: String,
     required: false,
     default: '',
   })
   replyContent: string
 
   @Prop({
+    type: String,
     required: true,
   })
   platform: string
 
   @Prop({
+    type: String,
     required: true,
     enum: EngagementTaskStatus,
     default: EngagementTaskStatus.CREATED,

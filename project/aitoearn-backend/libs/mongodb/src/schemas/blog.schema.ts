@@ -7,6 +7,7 @@ export class Blog extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     comment: '内容',
     default: '',
   })

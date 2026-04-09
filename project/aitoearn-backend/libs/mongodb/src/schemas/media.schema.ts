@@ -25,12 +25,14 @@ export class Media extends WithTimestampSchema {
   id: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
   })
   userId: string
 
   @Prop({
+    type: String,
     required: true,
     index: true,
     default: UserType.User,
@@ -38,18 +40,21 @@ export class Media extends WithTimestampSchema {
   userType: UserType
 
   @Prop({
+    type: String,
     required: false,
     index: true,
   })
   groupId?: string // 所属组ID
 
   @Prop({
+    type: String,
     required: false,
     index: true,
   })
   materialGroupId?: string // 所属组ID
 
   @Prop({
+    type: String,
     required: true,
     enum: MediaType,
     index: true,
@@ -57,26 +62,31 @@ export class Media extends WithTimestampSchema {
   type: MediaType
 
   @Prop({
+    type: String,
     required: true,
   })
   url: string
 
   @Prop({
+    type: String,
     required: false,
   })
   thumbUrl?: string // 缩略图
 
   @Prop({
+    type: String,
     required: false,
   })
   title?: string
 
   @Prop({
+    type: String,
     required: false,
   })
   desc?: string
 
   @Prop({
+    type: Number,
     required: true,
     default: 0,
   })
