@@ -1,5 +1,5 @@
-import { Module } from "@nestjs/common";
-import { MongooseModule } from "@nestjs/mongoose";
+import { Module } from '@nestjs/common'
+import { MongooseModule } from '@nestjs/mongoose'
 import {
   Brand,
   BrandSchema,
@@ -15,14 +15,14 @@ import {
   VideoTaskSchema,
   ViralContent,
   ViralContentSchema,
-} from "@yikart/mongodb";
-import { AcquisitionModule } from "../acquisition/acquisition.module";
-import { MediaclawConfigModule } from "../mediaclaw-config.module";
-import { NotificationModule } from '../notification/notification.module';
-import { ContentRemixService } from "./content-remix.service";
-import { DiscoveryController } from "./discovery.controller";
-import { DiscoveryNotificationService } from "./discovery-notification.service";
-import { DiscoveryService } from "./discovery.service";
+} from '@yikart/mongodb'
+import { AcquisitionModule } from '../acquisition/acquisition.module'
+import { MediaclawConfigModule } from '../mediaclaw-config.module'
+import { NotificationModule } from '../notification/notification.module'
+import { ContentRemixService } from './content-remix.service'
+import { DiscoveryNotificationService } from './discovery-notification.service'
+import { DiscoveryController } from './discovery.controller'
+import { DiscoveryService } from './discovery.service'
 
 @Module({
   imports: [

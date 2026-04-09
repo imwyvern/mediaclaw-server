@@ -1,41 +1,41 @@
-import { Body, Get, Post, Query } from "@nestjs/common";
-import { GetToken } from "@yikart/aitoearn-auth";
-import { MediaClawApiController } from "../mediaclaw-api.decorator";
-import { MediaClawAuthUser } from "../mediaclaw-auth.types";
-import { ContentRemixService } from "./content-remix.service";
-import { DiscoveryService } from "./discovery.service";
+import { Body, Get, Post, Query } from '@nestjs/common'
+import { GetToken } from '@yikart/aitoearn-auth'
+import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawAuthUser } from '../mediaclaw-auth.types'
+import { ContentRemixService } from './content-remix.service'
+import { DiscoveryService } from './discovery.service'
 
-@MediaClawApiController("api/v1/discovery")
+@MediaClawApiController('api/v1/discovery')
 export class DiscoveryController {
   constructor(
     private readonly discoveryService: DiscoveryService,
     private readonly contentRemixService: ContentRemixService,
   ) {}
 
-  @Get("pool")
+  @Get('pool')
   async getRecommendationPool(
     @GetToken() user: MediaClawAuthUser,
-    @Query("limit") limit = "10",
-    @Query("industry") industry?: string,
+    @Query('limit') limit = '10',
+    @Query('industry') industry?: string,
   ) {
     return this.discoveryService.getRecommendationPool(
       user.orgId || user.id,
       Number(limit),
       industry,
-    );
+    )
   }
 
-  @Post("score")
+  @Post('score')
   async calculateViralScore(
     @Body()
     body: {
-      views?: number;
-      likes?: number;
-      comments?: number;
-      shares?: number;
-      publishedAt?: string;
-      videoKeywords?: string[];
-      industryKeywords?: string[];
+      views?: number
+      likes?: number
+      comments?: number
+      shares?: number
+      publishedAt?: string
+      videoKeywords?: string[]
+      industryKeywords?: string[]
     },
   ) {
     return {
@@ -50,39 +50,39 @@ export class DiscoveryController {
         body.publishedAt,
         body.industryKeywords || [],
       ),
-    };
+    }
   }
 
-  @Post("mark-remixed")
-  async markRemixed(@Body() body: { contentId?: string; taskId?: string }) {
+  @Post('mark-remixed')
+  async markRemixed(@Body() body: { contentId?: string, taskId?: string }) {
     return this.discoveryService.markRemixed(
-      body.contentId || "",
-      body.taskId || "",
-    );
+      body.contentId || '',
+      body.taskId || '',
+    )
   }
 
-  @Post("analyze-viral-elements")
+  @Post('analyze-viral-elements')
   async analyzeViralElements(@Body() body: { contentId?: string }) {
-    return this.contentRemixService.analyzeViralElements(body.contentId || "");
+    return this.contentRemixService.analyzeViralElements(body.contentId || '')
   }
 
-  @Post("generate-remix-brief")
+  @Post('generate-remix-brief')
   async generateRemixBrief(
-    @Body() body: { contentId?: string; brandId?: string },
+    @Body() body: { contentId?: string, brandId?: string },
   ) {
     return this.contentRemixService.generateRemixBrief(
-      body.contentId || "",
-      body.brandId || "",
-    );
+      body.contentId || '',
+      body.brandId || '',
+    )
   }
 
-  @Post("apply-remix-insights")
+  @Post('apply-remix-insights')
   async applyRemixInsights(
-    @Body() body: { contentId?: string; pipelineId?: string },
+    @Body() body: { contentId?: string, pipelineId?: string },
   ) {
     return this.contentRemixService.applyRemixInsights(
-      body.contentId || "",
-      body.pipelineId || "",
-    );
+      body.contentId || '',
+      body.pipelineId || '',
+    )
   }
 }
