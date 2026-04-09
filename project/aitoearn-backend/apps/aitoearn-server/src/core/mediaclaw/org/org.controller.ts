@@ -10,14 +10,117 @@ import {
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import {
-  Organization,
-  OrganizationEnterpriseProfile,
   OrganizationModelPreferenceKey,
   UserRole,
 } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
 import { OrgService } from './org.service'
+
+class EnterpriseProfileDto {
+  @IsOptional()
+  @IsString()
+  companyName?: string
+
+  @IsOptional()
+  @IsString()
+  businessLicenseUrl?: string
+
+  @IsOptional()
+  @IsString()
+  unifiedSocialCreditCode?: string
+
+  @IsOptional()
+  @IsString()
+  legalRepresentative?: string
+
+  @IsOptional()
+  @IsString()
+  registeredAddress?: string
+
+  @IsOptional()
+  @IsString()
+  industry?: string
+
+  @IsOptional()
+  @IsString()
+  officialWebsite?: string
+
+  @IsOptional()
+  @IsString()
+  description?: string
+}
+
+class InviteOrgMemberDto {
+  @IsString()
+  phone: string
+
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole
+}
+
+class UpdateOrgMemberRoleDto {
+  @IsEnum(UserRole)
+  role: UserRole
+}
+
+class UpsertOrganizationDto {
+  @IsOptional()
+  @IsString()
+  name?: string
+
+  @IsOptional()
+  @IsString()
+  contactName?: string
+
+  @IsOptional()
+  @IsString()
+  contactPhone?: string
+
+  @IsOptional()
+  @IsString()
+  contactEmail?: string
+
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, unknown>
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EnterpriseProfileDto)
+  enterpriseProfile?: EnterpriseProfileDto
+}
+
+class UpdateModelPreferencesDto {
+  @IsOptional()
+  @IsString()
+  chat?: string | null
+
+  @IsOptional()
+  @IsString()
+  copy?: string | null
+
+  @IsOptional()
+  @IsString()
+  frameEdit?: string | null
+
+  @IsOptional()
+  @IsString()
+  videoGen?: string | null
+
+  @IsOptional()
+  @IsString()
+  analysis?: string | null
+}
 
 @UseGuards(PermissionGuard)
 @Roles(UserRole.ENTERPRISE_ADMIN)
@@ -48,7 +151,7 @@ export class OrgController {
   @Post('members/invite')
   async inviteMember(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body() body: { phone: string, role?: UserRole },
+    @Body() body: InviteOrgMemberDto,
   ) {
     return this.orgService.inviteMember(
       this.resolveOrgId(user),
@@ -62,9 +165,9 @@ export class OrgController {
   async updateMemberRole(
     @GetToken() user: { orgId?: string, id?: string },
     @Param('userId') userId: string,
-    @Body('role') role: UserRole,
+    @Body() body: UpdateOrgMemberRoleDto,
   ) {
-    return this.orgService.updateMemberRole(this.resolveOrgId(user), userId, role)
+    return this.orgService.updateMemberRole(this.resolveOrgId(user), userId, body.role)
   }
 
   @Delete('members/:userId')
@@ -86,9 +189,9 @@ export class OrgController {
   @Post()
   async create(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body() body: Partial<Organization> & { enterpriseProfile?: Partial<OrganizationEnterpriseProfile> },
+    @Body() body: UpsertOrganizationDto,
   ) {
-    return this.orgService.createForCurrentOrg(this.resolveOrgId(user), body)
+    return this.orgService.createForCurrentOrg(this.resolveOrgId(user), this.toOrganizationPayload(body))
   }
 
   @Get(':id')
@@ -103,27 +206,34 @@ export class OrgController {
   @Patch()
   async updateCurrent(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body() body: Partial<Organization> & { enterpriseProfile?: Partial<OrganizationEnterpriseProfile> },
+    @Body() body: UpsertOrganizationDto,
   ) {
-    return this.orgService.update(this.resolveOrgId(user), body)
+    return this.orgService.update(this.resolveOrgId(user), this.toOrganizationPayload(body))
   }
 
   @Patch('model-preferences')
   async updateModelPreferences(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body() body: Partial<Record<OrganizationModelPreferenceKey, string | null | undefined>>,
+    @Body() body: UpdateModelPreferencesDto,
   ) {
-    return this.orgService.updateModelPreferences(this.resolveOrgId(user), body)
+    const preferences: Partial<Record<OrganizationModelPreferenceKey, string | null | undefined>> = {
+      chat: body.chat,
+      copy: body.copy,
+      frameEdit: body.frameEdit,
+      videoGen: body.videoGen,
+      analysis: body.analysis,
+    }
+    return this.orgService.updateModelPreferences(this.resolveOrgId(user), preferences)
   }
 
   @Patch(':id')
   async update(
     @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
-    @Body() body: Partial<Organization> & { enterpriseProfile?: Partial<OrganizationEnterpriseProfile> },
+    @Body() body: UpsertOrganizationDto,
   ) {
     this.assertOwnedOrg(user, id)
-    return this.orgService.update(this.resolveOrgId(user), body)
+    return this.orgService.update(this.resolveOrgId(user), this.toOrganizationPayload(body))
   }
 
   private resolveOrgId(user: { orgId?: string, id?: string }) {
@@ -140,5 +250,13 @@ export class OrgController {
     if (requestedOrgId !== currentOrgId) {
       throw new ForbiddenException('Cannot access another organization')
     }
+  }
+
+  private toOrganizationPayload(body: UpsertOrganizationDto) {
+    return {
+      ...body,
+      ...(body.enterpriseProfile ? { enterpriseProfile: { ...body.enterpriseProfile } } : {}),
+      ...(body.settings ? { settings: { ...body.settings } } : {}),
+    } as any
   }
 }

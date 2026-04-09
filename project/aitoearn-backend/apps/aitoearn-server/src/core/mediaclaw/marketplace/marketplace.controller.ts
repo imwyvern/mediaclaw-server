@@ -1,10 +1,64 @@
 import { Body, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MarketplaceCurrency, UserRole } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsArray,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { PermissionGuard, Roles } from '../permission.guard'
 import { MarketplaceService } from './marketplace.service'
+
+class PublishMarketplaceTemplateDto {
+  @IsString()
+  pipelineTemplateId: string
+
+  @IsOptional()
+  @IsString()
+  title?: string
+
+  @IsOptional()
+  @IsString()
+  description?: string
+
+  @IsOptional()
+  @IsString()
+  thumbnailUrl?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[]
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  price?: number
+
+  @IsOptional()
+  @IsEnum(MarketplaceCurrency)
+  currency?: MarketplaceCurrency
+}
+
+class TemplateIdDto {
+  @IsString()
+  templateId: string
+}
+
+class RateTemplateDto extends TemplateIdDto {
+  @Type(() => Number)
+  @IsNumber()
+  rating: number
+
+  @IsOptional()
+  @IsString()
+  review?: string
+}
 
 @MediaClawApiController('api/v1/marketplace')
 export class MarketplaceController {
@@ -13,15 +67,7 @@ export class MarketplaceController {
   @Post('publish')
   async publish(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      pipelineTemplateId: string
-      title?: string
-      description?: string
-      thumbnailUrl?: string
-      tags?: string[]
-      price?: number
-      currency?: MarketplaceCurrency
-    },
+    @Body() body: PublishMarketplaceTemplateDto,
   ) {
     return this.marketplaceService.publishTemplate(
       user.orgId || user.id,
@@ -34,7 +80,7 @@ export class MarketplaceController {
   @Post('purchase')
   async purchase(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: { templateId: string },
+    @Body() body: TemplateIdDto,
   ) {
     return this.marketplaceService.purchaseTemplate(user.orgId || user.id, body.templateId)
   }
@@ -42,11 +88,7 @@ export class MarketplaceController {
   @Post('rate')
   async rate(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      templateId: string
-      rating: number
-      review?: string
-    },
+    @Body() body: RateTemplateDto,
   ) {
     return this.marketplaceService.rateTemplate(
       user.orgId || user.id,
@@ -61,7 +103,7 @@ export class MarketplaceController {
   @Post('feature')
   async feature(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: { templateId: string },
+    @Body() body: TemplateIdDto,
   ) {
     return this.marketplaceService.featureTemplate(body.templateId)
   }

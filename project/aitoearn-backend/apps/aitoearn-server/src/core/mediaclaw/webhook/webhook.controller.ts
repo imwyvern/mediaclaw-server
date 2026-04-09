@@ -1,19 +1,70 @@
 import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { Type } from 'class-transformer'
+import {
+  IsArray,
+  IsBoolean,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { WebhookService } from './webhook.service'
 
-interface WebhookUpdateBody {
+class CreateWebhookDto {
+  @IsOptional()
+  @IsString()
   name?: string
-  url?: string
+
+  @IsString()
+  url: string
+
+  @IsOptional()
+  @IsString()
   secret?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   events?: string[]
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
   isActive?: boolean
 }
 
-interface WebhookTestBody {
+class UpdateWebhookDto {
+  @IsOptional()
+  @IsString()
+  name?: string
+
+  @IsOptional()
+  @IsString()
+  url?: string
+
+  @IsOptional()
+  @IsString()
+  secret?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  events?: string[]
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isActive?: boolean
+}
+
+class TestWebhookDto {
+  @IsString()
   event: string
+
+  @IsOptional()
+  @IsObject()
   payload?: Record<string, unknown>
 }
 
@@ -24,13 +75,7 @@ export class WebhookController {
   @Post()
   async create(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      name?: string
-      url: string
-      secret?: string
-      events?: string[]
-      isActive?: boolean
-    },
+    @Body() body: CreateWebhookDto,
   ) {
     return this.webhookService.register(
       user.orgId || user.id,
@@ -58,7 +103,7 @@ export class WebhookController {
   async update(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: WebhookUpdateBody,
+    @Body() body: UpdateWebhookDto,
   ) {
     return this.webhookService.update(user.orgId || user.id, id, body)
   }
@@ -72,7 +117,7 @@ export class WebhookController {
   async test(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: WebhookTestBody,
+    @Body() body: TestWebhookDto,
   ) {
     return this.webhookService.testDelivery(
       user.orgId || user.id,

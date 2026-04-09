@@ -1,7 +1,53 @@
 import { Body, Get, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import {
+  IsArray,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { DedupBatchItem, DedupService } from './dedup.service'
+
+class CheckDuplicateDto {
+  @IsString()
+  content: string
+
+  @IsOptional()
+  @IsString()
+  contentType?: string
+}
+
+class DedupContentV2Dto {
+  @IsOptional()
+  @IsString()
+  projectId?: string
+
+  @IsString()
+  contentUrl: string
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string
+}
+
+class DedupBatchRequestDto {
+  @IsOptional()
+  @IsString()
+  projectId?: string
+
+  @IsOptional()
+  @IsString()
+  batchId?: string
+
+  @IsOptional()
+  @IsArray()
+  items?: DedupBatchItem[]
+}
+
+class RegisterContentV2Dto extends DedupContentV2Dto {
+  @IsString()
+  recordId: string
+}
 
 @MediaClawApiController('api/v1/dedup')
 export class DedupController {
@@ -10,10 +56,7 @@ export class DedupController {
   @Post('check')
   async checkDuplicate(
     @GetToken() user: { id: string, orgId?: string | null },
-    @Body() body: {
-      content?: string
-      contentType?: string
-    },
+    @Body() body: CheckDuplicateDto,
   ) {
     return this.dedupService.checkDuplicate(
       user.orgId || user.id,
@@ -25,16 +68,12 @@ export class DedupController {
   @Post('check-v2')
   async checkDuplicateV2(
     @GetToken() user: { id: string, orgId?: string | null },
-    @Body() body: {
-      projectId?: string
-      contentUrl?: string
-      imageUrl?: string
-    },
+    @Body() body: DedupContentV2Dto,
   ) {
     return this.dedupService.checkDuplicateV2(
       user.orgId || user.id,
       body.projectId || user.orgId || user.id,
-      body.contentUrl || '',
+      body.contentUrl,
       body.imageUrl,
     )
   }
@@ -42,11 +81,7 @@ export class DedupController {
   @Post('batch')
   async batchCheck(
     @GetToken() user: { id: string, orgId?: string | null },
-    @Body() body: {
-      projectId?: string
-      batchId?: string
-      items?: DedupBatchItem[]
-    },
+    @Body() body: DedupBatchRequestDto,
   ) {
     if (body.batchId?.trim()) {
       return this.dedupService.batchCheckDuplicateByBatch(
@@ -66,19 +101,14 @@ export class DedupController {
   @Post('register-v2')
   async registerContentV2(
     @GetToken() user: { id: string, orgId?: string | null },
-    @Body() body: {
-      projectId?: string
-      contentUrl?: string
-      imageUrl?: string
-      recordId?: string
-    },
+    @Body() body: RegisterContentV2Dto,
   ) {
     return this.dedupService.registerContentV2(
       user.orgId || user.id,
       body.projectId || user.orgId || user.id,
-      body.contentUrl || '',
+      body.contentUrl,
       body.imageUrl,
-      body.recordId || '',
+      body.recordId,
     )
   }
 

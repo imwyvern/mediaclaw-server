@@ -1,9 +1,121 @@
 import { Body, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { VideoTaskStatus } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsArray,
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator'
 import { Response } from 'express'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { ContentMgmtService } from './content-mgmt.service'
+
+class SetStylePreferencesDto {
+  @IsOptional()
+  @IsString()
+  orgId?: string
+
+  @IsObject()
+  preferences: Record<string, unknown>
+}
+
+class CopyUpdateDto {
+  @IsOptional()
+  @IsString()
+  title?: string
+
+  @IsOptional()
+  @IsString()
+  subtitle?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  hashtags?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  blueWords?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  commentGuides?: string[]
+}
+
+class BatchEditCopyDto {
+  @IsArray()
+  @IsString({ each: true })
+  contentIds: string[]
+
+  @ValidateNested()
+  @Type(() => CopyUpdateDto)
+  updates: CopyUpdateDto
+}
+
+class ContentExportFiltersDto {
+  @IsOptional()
+  @IsString()
+  status?: VideoTaskStatus
+
+  @IsOptional()
+  @IsString()
+  publishStatus?: string
+
+  @IsOptional()
+  @IsString()
+  brandId?: string
+
+  @IsOptional()
+  @IsString()
+  startDate?: string
+
+  @IsOptional()
+  @IsString()
+  endDate?: string
+}
+
+class ExportContentDto {
+  @IsOptional()
+  @IsString()
+  orgId?: string
+
+  @IsString()
+  format: string
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ContentExportFiltersDto)
+  filters?: ContentExportFiltersDto
+}
+
+class ApproveContentDto {
+  @IsOptional()
+  @IsString()
+  comment?: string
+}
+
+class ReviewContentDto {
+  @IsIn(['approve', 'reject', 'changes_requested'])
+  action: 'approve' | 'reject' | 'changes_requested'
+
+  @IsOptional()
+  @IsString()
+  comment?: string
+}
+
+class PublishContentDto {
+  @IsString()
+  platform: string
+
+  @IsString()
+  publishUrl: string
+}
 
 @MediaClawApiController('api/v1/content')
 export class ContentMgmtController {
@@ -12,11 +124,7 @@ export class ContentMgmtController {
   @Put('style-preferences')
   async setStylePreferences(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body()
-    body: {
-      orgId?: string
-      preferences: Record<string, unknown>
-    },
+    @Body() body: SetStylePreferencesDto,
   ) {
     return this.contentMgmtService.setStylePreferences(
       user.orgId || user.id || '',
@@ -61,17 +169,7 @@ export class ContentMgmtController {
   @Post('batch-edit')
   async batchEditCopy(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body()
-    body: {
-      contentIds: string[]
-      updates: {
-        title?: string
-        subtitle?: string
-        hashtags?: string[]
-        blueWords?: string[]
-        commentGuides?: string[]
-      }
-    },
+    @Body() body: BatchEditCopyDto,
   ) {
     return this.contentMgmtService.batchEditCopy(user.orgId || user.id || '', body.contentIds, body.updates)
   }
@@ -79,18 +177,7 @@ export class ContentMgmtController {
   @Post('export')
   async exportContent(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body()
-    body: {
-      orgId?: string
-      format: string
-      filters?: {
-        status?: VideoTaskStatus
-        publishStatus?: string
-        brandId?: string
-        startDate?: string
-        endDate?: string
-      }
-    },
+    @Body() body: ExportContentDto,
   ) {
     return this.contentMgmtService.exportContent(
       user.orgId || user.id || '',
@@ -121,14 +208,7 @@ export class ContentMgmtController {
   async editCopy(
     @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
-    @Body()
-    body: {
-      title?: string
-      subtitle?: string
-      hashtags?: string[]
-      blueWords?: string[]
-      commentGuides?: string[]
-    },
+    @Body() body: CopyUpdateDto,
   ) {
     return this.contentMgmtService.editCopy(
       user.orgId || user.id || '',
@@ -145,7 +225,7 @@ export class ContentMgmtController {
   async approveContent(
     @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
-    @Body() body: { comment?: string },
+    @Body() body: ApproveContentDto,
   ) {
     return this.contentMgmtService.approveContent(
       user.orgId || user.id || '',
@@ -159,7 +239,7 @@ export class ContentMgmtController {
   async reviewContent(
     @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
-    @Body() body: { action: 'approve' | 'reject' | 'changes_requested', comment?: string },
+    @Body() body: ReviewContentDto,
   ) {
     return this.contentMgmtService.reviewContent(
       user.orgId || user.id || '',
@@ -173,11 +253,7 @@ export class ContentMgmtController {
   async markPublished(
     @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
-    @Body()
-    body: {
-      platform: string
-      publishUrl: string
-    },
+    @Body() body: PublishContentDto,
   ) {
     return this.contentMgmtService.markPublished(
       user.orgId || user.id || '',
@@ -192,11 +268,7 @@ export class ContentMgmtController {
   async markPublishedAlias(
     @GetToken() user: { orgId?: string, id?: string },
     @Param('id') id: string,
-    @Body()
-    body: {
-      platform: string
-      publishUrl: string
-    },
+    @Body() body: PublishContentDto,
   ) {
     return this.contentMgmtService.markPublished(
       user.orgId || user.id || '',

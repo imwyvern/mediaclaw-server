@@ -1,9 +1,44 @@
 import { Body, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
+import {
+  IsArray,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiKeyGuard } from '../apikey/apikey.guard'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { SkillService } from './skill.service'
+
+class RegisterSkillAgentDto {
+  @IsString()
+  agentId: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  capabilities?: string[]
+}
+
+class SubmitSkillFeedbackDto {
+  @IsString()
+  agentId: string
+
+  @IsString()
+  taskId: string
+
+  @IsObject()
+  feedback: Record<string, unknown>
+}
+
+class ConfirmSkillDeliveryDto {
+  @IsString()
+  agentId: string
+
+  @IsString()
+  taskId: string
+}
 
 @Public()
 @UseGuards(MediaClawApiKeyGuard)
@@ -14,7 +49,7 @@ export class SkillController {
   @Post('register')
   async register(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: { agentId: string, capabilities?: string[] },
+    @Body() body: RegisterSkillAgentDto,
   ) {
     return this.skillService.registerAgent(body.agentId, body.capabilities || [], {
       orgId: user.orgId || user.id,
@@ -41,7 +76,7 @@ export class SkillController {
   @Post('feedback')
   async submitFeedback(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: { agentId: string, taskId: string, feedback: Record<string, unknown> },
+    @Body() body: SubmitSkillFeedbackDto,
   ) {
     return this.skillService.submitFeedback(body.agentId, body.taskId, body.feedback, {
       orgId: user.orgId || user.id,
@@ -60,7 +95,7 @@ export class SkillController {
   @Post('confirm-delivery')
   async confirmDelivery(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: { agentId: string, taskId: string },
+    @Body() body: ConfirmSkillDeliveryDto,
   ) {
     return this.skillService.confirmDelivery(body.agentId, body.taskId, {
       orgId: user.orgId || user.id,

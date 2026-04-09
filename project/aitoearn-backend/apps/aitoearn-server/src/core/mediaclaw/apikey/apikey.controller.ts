@@ -1,8 +1,37 @@
 import { Body, Delete, Get, Param, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import {
+  IsArray,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { MediaClawApiKeyService } from './apikey.service'
+
+class CreateApiKeyDto {
+  @IsString()
+  name: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  permissions?: string[]
+
+  @IsOptional()
+  @IsString()
+  expiresAt?: string | null
+}
+
+class ValidateApiKeyDto {
+  @IsOptional()
+  @IsString()
+  key?: string
+
+  @IsOptional()
+  @IsString()
+  prefix?: string
+}
 
 @MediaClawApiController('api/v1/apikey')
 export class MediaClawApiKeyController {
@@ -11,11 +40,7 @@ export class MediaClawApiKeyController {
   @Post()
   async create(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      name: string
-      permissions?: string[]
-      expiresAt?: string | null
-    },
+    @Body() body: CreateApiKeyDto,
   ) {
     return this.apiKeyService.create(user.id, {
       name: body.name,
@@ -34,10 +59,7 @@ export class MediaClawApiKeyController {
   @Post('validate')
   async validateKey(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      key?: string
-      prefix?: string
-    },
+    @Body() body: ValidateApiKeyDto,
   ) {
     return this.apiKeyService.validateOwnedKey(user.id, body)
   }

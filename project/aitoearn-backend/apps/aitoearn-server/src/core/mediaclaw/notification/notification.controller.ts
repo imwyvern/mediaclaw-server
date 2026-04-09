@@ -1,15 +1,63 @@
 import { Body, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { NotificationChannel, NotificationEvent } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { NotificationService } from './notification.service'
 
-interface NotificationConfigPayload {
+class NotificationConfigDto {
+  @IsEnum(NotificationChannel)
   channel: NotificationChannel
+
+  @IsOptional()
+  @IsString()
   name?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsEnum(NotificationEvent, { each: true })
   events?: NotificationEvent[]
+
+  @IsOptional()
+  @IsObject()
   config?: Record<string, unknown>
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isActive?: boolean
+}
+
+class UpdateNotificationConfigDto {
+  @IsOptional()
+  @IsEnum(NotificationChannel)
+  channel?: NotificationChannel
+
+  @IsOptional()
+  @IsString()
+  name?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsEnum(NotificationEvent, { each: true })
+  events?: NotificationEvent[]
+
+  @IsOptional()
+  @IsObject()
+  config?: Record<string, unknown>
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
   isActive?: boolean
 }
 
@@ -20,7 +68,7 @@ export class NotificationController {
   @Post()
   async create(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: NotificationConfigPayload,
+    @Body() body: NotificationConfigDto,
   ) {
     return this.notificationService.createConfig(user.orgId || user.id, body)
   }
@@ -52,7 +100,7 @@ export class NotificationController {
   async update(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: Partial<NotificationConfigPayload>,
+    @Body() body: UpdateNotificationConfigDto,
   ) {
     return this.notificationService.updateConfig(user.orgId || user.id, id, body)
   }

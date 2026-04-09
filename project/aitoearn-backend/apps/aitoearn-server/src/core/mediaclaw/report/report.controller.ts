@@ -1,9 +1,83 @@
 import { Body, Delete, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { ReportType } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { ReportService } from './report.service'
+
+class ReportPeriodDto {
+  @IsString()
+  start: string
+
+  @IsString()
+  end: string
+}
+
+class GenerateReportDto {
+  @IsEnum(ReportType)
+  type: ReportType
+
+  @ValidateNested()
+  @Type(() => ReportPeriodDto)
+  period: ReportPeriodDto
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  formats?: string[]
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  waitForCompletion?: boolean
+}
+
+class ScheduleReportDto {
+  @IsOptional()
+  @IsEnum(ReportType)
+  type?: ReportType
+
+  @IsOptional()
+  @IsString()
+  frequency?: string
+
+  @IsOptional()
+  @IsString()
+  cron?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  formats?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  recipients?: string[]
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isActive?: boolean
+
+  @IsOptional()
+  @IsString()
+  timezone?: string
+
+  @IsOptional()
+  @IsObject()
+  filters?: Record<string, any>
+}
 
 @MediaClawApiController('api/v1/reports')
 export class ReportController {
@@ -12,15 +86,7 @@ export class ReportController {
   @Post('generate')
   async generate(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      type: ReportType
-      period: {
-        start: string
-        end: string
-      }
-      formats?: string[]
-      waitForCompletion?: boolean
-    },
+    @Body() body: GenerateReportDto,
   ) {
     return this.reportService.generateReport(
       user.orgId || user.id,
@@ -36,7 +102,7 @@ export class ReportController {
   @Post('schedule')
   async schedule(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: Record<string, any>,
+    @Body() body: ScheduleReportDto,
   ) {
     return this.reportService.scheduleAutoReport(user.orgId || user.id, body)
   }

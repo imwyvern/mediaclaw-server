@@ -1,10 +1,54 @@
 import { BadRequestException, Body, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
+import { Type } from 'class-transformer'
+import {
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiKeyGuard } from '../apikey/apikey.guard'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { ConversationUsageService } from './conversation-usage.service'
 import { UsageService } from './usage.service'
+
+class TrackConversationDto {
+  @IsOptional()
+  @IsString()
+  sessionId?: string
+
+  @IsOptional()
+  @IsString()
+  model?: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  inputTokens?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  outputTokens?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  totalTokens?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  estimatedCost?: number
+
+  @IsOptional()
+  @IsString()
+  intent?: string
+
+  @IsOptional()
+  @IsString()
+  createdAt?: string
+}
 
 @MediaClawApiController('api/v1/usage')
 export class UsageApiController {
@@ -108,16 +152,7 @@ export class UsageApiController {
   @Post('track-conversation')
   async trackConversation(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      sessionId?: string
-      model?: string
-      inputTokens?: number
-      outputTokens?: number
-      totalTokens?: number
-      estimatedCost?: number
-      intent?: string
-      createdAt?: string
-    },
+    @Body() body: TrackConversationDto,
   ) {
     return this.conversationUsageService.track(
       {

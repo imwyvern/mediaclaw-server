@@ -9,9 +9,29 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { OrgStatus, OrgType, UserRole } from '@yikart/mongodb'
+import { IsEnum, IsOptional, IsString } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
 import { ClientMgmtService } from './client-mgmt.service'
+
+class UpdateOrgStatusDto {
+  @IsEnum(OrgStatus)
+  status: OrgStatus
+}
+
+class UpdateClientMemberRoleDto {
+  @IsEnum(UserRole)
+  role: UserRole
+}
+
+class InviteClientMemberDto {
+  @IsString()
+  phone: string
+
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole
+}
 
 @UseGuards(PermissionGuard)
 @Roles(UserRole.SUPER_ADMIN)
@@ -49,9 +69,9 @@ export class ClientMgmtController {
   @Patch(':orgId/status')
   async updateOrgStatus(
     @Param('orgId') orgId: string,
-    @Body('status') status: OrgStatus,
+    @Body() body: UpdateOrgStatusDto,
   ) {
-    return this.clientMgmtService.updateOrgStatus(orgId, status)
+    return this.clientMgmtService.updateOrgStatus(orgId, body.status)
   }
 
   @Get(':orgId/members')
@@ -63,9 +83,9 @@ export class ClientMgmtController {
   async updateMemberRole(
     @Param('orgId') orgId: string,
     @Param('userId') userId: string,
-    @Body('role') role: UserRole,
+    @Body() body: UpdateClientMemberRoleDto,
   ) {
-    return this.clientMgmtService.updateMemberRole(orgId, userId, role)
+    return this.clientMgmtService.updateMemberRole(orgId, userId, body.role)
   }
 
   @Delete(':orgId/members/:userId')
@@ -79,10 +99,7 @@ export class ClientMgmtController {
   @Post(':orgId/invite')
   async inviteMember(
     @Param('orgId') orgId: string,
-    @Body() body: {
-      phone: string
-      role?: UserRole
-    },
+    @Body() body: InviteClientMemberDto,
   ) {
     return this.clientMgmtService.inviteMember(orgId, body.phone, body.role)
   }

@@ -1,6 +1,12 @@
 import { Body, Get, Param, Post, Query } from '@nestjs/common'
+import { IsString } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { AcquisitionService } from './acquisition.service'
+
+class SourceVideoDto {
+  @IsString()
+  videoUrl: string
+}
 
 @MediaClawApiController('api/v1/acquisition')
 export class AcquisitionController {
@@ -29,7 +35,7 @@ export class AcquisitionController {
   }
 
   @Post('source')
-  async getSourceVideo(@Body() body: { videoUrl?: string }) {
-    return this.acquisitionService.getSourceVideo(body.videoUrl || '')
+  async getSourceVideo(@Body() body: SourceVideoDto) {
+    return this.acquisitionService.getSourceVideo(body.videoUrl)
   }
 }

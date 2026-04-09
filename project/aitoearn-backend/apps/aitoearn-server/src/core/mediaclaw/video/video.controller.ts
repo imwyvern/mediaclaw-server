@@ -1,21 +1,94 @@
 import { Body, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { VideoTaskStatus, VideoTaskType } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsArray,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { VideoService } from './video.service'
 
-interface VideoTaskInputSource {
+class VideoTaskInputSourceValidatedDto {
+  @IsOptional()
+  @IsString()
   type?: string
+
+  @IsOptional()
+  @IsString()
   url?: string
+
+  @IsOptional()
+  @IsString()
   videoId?: string
 }
 
-interface VideoCopyUpdateInput {
+class CreateVideoTaskDto {
+  @IsOptional()
+  @IsString()
+  brandId?: string
+
+  @IsOptional()
+  @IsString()
+  pipelineId?: string
+
+  @IsEnum(VideoTaskType)
+  taskType: VideoTaskType
+
+  @IsString()
+  sourceVideoUrl: string
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VideoTaskInputSourceValidatedDto)
+  source?: VideoTaskInputSourceValidatedDto
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>
+}
+
+class CreateVideoBatchTaskDto extends CreateVideoTaskDto {}
+
+class CreateVideoBatchDto {
+  @IsOptional()
+  @IsString()
+  brandId?: string
+
+  @IsString()
+  batchName: string
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateVideoBatchTaskDto)
+  tasks: CreateVideoBatchTaskDto[]
+}
+
+class VideoCopyUpdateDto {
+  @IsOptional()
+  @IsString()
   title?: string
+
+  @IsOptional()
+  @IsString()
   subtitle?: string
+
+  @IsOptional()
+  @IsString()
   description?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   hashtags?: string[]
+
+  @IsOptional()
+  @IsString()
   commentGuide?: string
 }
 
@@ -24,30 +97,12 @@ export class VideoController {
   constructor(private readonly videoService: VideoService) {}
 
   @Post()
-  async createTask(@GetToken() user: MediaClawAuthUser, @Body() body: {
-    brandId?: string
-    pipelineId?: string
-    taskType: VideoTaskType
-    sourceVideoUrl: string
-    source?: VideoTaskInputSource
-    metadata?: Record<string, unknown>
-  }) {
+  async createTask(@GetToken() user: MediaClawAuthUser, @Body() body: CreateVideoTaskDto) {
     return this.videoService.createTask(user.orgId || user.id, user.id, body)
   }
 
   @Post(['batch', 'batches'])
-  async createBatch(@GetToken() user: MediaClawAuthUser, @Body() body: {
-    brandId?: string
-    batchName: string
-    tasks: Array<{
-      brandId?: string
-      pipelineId?: string
-      taskType: VideoTaskType
-      sourceVideoUrl: string
-      source?: VideoTaskInputSource
-      metadata?: Record<string, unknown>
-    }>
-  }) {
+  async createBatch(@GetToken() user: MediaClawAuthUser, @Body() body: CreateVideoBatchDto) {
     return this.videoService.createBatch(user.orgId || user.id, user.id, body)
   }
 
@@ -86,7 +141,7 @@ export class VideoController {
   async editCopy(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: VideoCopyUpdateInput,
+    @Body() body: VideoCopyUpdateDto,
   ) {
     return this.videoService.editCopy(user.orgId || user.id, id, body)
   }

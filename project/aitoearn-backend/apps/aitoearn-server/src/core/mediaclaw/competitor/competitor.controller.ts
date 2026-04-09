@@ -7,9 +7,18 @@ import {
   Query,
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { IsString } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { CompetitorService } from './competitor.service'
+
+class AddCompetitorDto {
+  @IsString()
+  platform: string
+
+  @IsString()
+  accountUrl: string
+}
 
 @MediaClawApiController('api/v1/competitors')
 export class CompetitorController {
@@ -18,11 +27,7 @@ export class CompetitorController {
   @Post()
   async addCompetitor(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      orgId?: string
-      platform: string
-      accountUrl: string
-    },
+    @Body() body: AddCompetitorDto,
   ) {
     return this.competitorService.addCompetitor(
       user.orgId || user.id,

@@ -1,10 +1,124 @@
 import { Body, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { UserRole } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
 import { McAuthService } from './auth.service'
 import { EnterpriseAuthService } from './enterprise-auth.service'
+
+class SendSmsDto {
+  @IsString()
+  phone: string
+}
+
+class VerifySmsDto {
+  @IsString()
+  phone: string
+
+  @IsString()
+  code: string
+}
+
+class WechatCallbackDto {
+  @IsString()
+  code: string
+}
+
+class RefreshTokenDto {
+  @IsString()
+  refreshToken: string
+}
+
+class RegisterEnterpriseDto {
+  @IsString()
+  orgName: string
+
+  @IsString()
+  adminPhone: string
+
+  @IsString()
+  code: string
+
+  @IsOptional()
+  @IsString()
+  adminName?: string
+
+  @IsOptional()
+  @IsString()
+  contactEmail?: string
+
+  @IsOptional()
+  @IsString()
+  contactName?: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  monthlyQuota?: number
+
+  @IsOptional()
+  @IsString()
+  companyName?: string
+
+  @IsOptional()
+  @IsString()
+  businessLicenseUrl?: string
+
+  @IsOptional()
+  @IsString()
+  unifiedSocialCreditCode?: string
+
+  @IsOptional()
+  @IsString()
+  legalRepresentative?: string
+
+  @IsOptional()
+  @IsString()
+  registeredAddress?: string
+
+  @IsOptional()
+  @IsString()
+  industry?: string
+
+  @IsOptional()
+  @IsString()
+  officialWebsite?: string
+
+  @IsOptional()
+  @IsString()
+  description?: string
+}
+
+class InviteEnterpriseMemberDto {
+  @IsString()
+  phone: string
+
+  @IsEnum(UserRole)
+  role: UserRole
+}
+
+class AcceptInviteDto {
+  @IsString()
+  token: string
+
+  @IsString()
+  phone: string
+
+  @IsString()
+  code: string
+}
+
+class SwitchOrgDto {
+  @IsString()
+  orgId: string
+}
 
 @MediaClawApiController('api/v1/auth')
 export class McAuthController {
@@ -15,13 +129,13 @@ export class McAuthController {
 
   @Public()
   @Post('sms/send')
-  async sendSms(@Body('phone') phone: string) {
-    return this.authService.sendSmsCode(phone)
+  async sendSms(@Body() body: SendSmsDto) {
+    return this.authService.sendSmsCode(body.phone)
   }
 
   @Public()
   @Post('sms/verify')
-  async verifySms(@Body() body: { phone: string, code: string }) {
+  async verifySms(@Body() body: VerifySmsDto) {
     return this.authService.verifySmsCode(body.phone, body.code)
   }
 
@@ -43,39 +157,22 @@ export class McAuthController {
   @Public()
   @Post('wechat/callback')
   async wechatCallback(
-    @Body('code') codeFromBody?: string,
+    @Body() body: WechatCallbackDto,
     @Query('code') codeFromQuery?: string,
   ) {
-    return this.authService.wechatCallback(codeFromBody || codeFromQuery || '')
+    return this.authService.wechatCallback(body.code || codeFromQuery || '')
   }
 
   @Public()
   @Post('refresh')
-  async refresh(@Body('refreshToken') refreshToken: string) {
-    return this.authService.refreshToken(refreshToken)
+  async refresh(@Body() body: RefreshTokenDto) {
+    return this.authService.refreshToken(body.refreshToken)
   }
 
   @Public()
   @Post('enterprise/register')
   async registerEnterprise(
-    @Body()
-    body: {
-      orgName: string
-      adminPhone: string
-      code: string
-      adminName?: string
-      contactEmail?: string
-      contactName?: string
-      monthlyQuota?: number
-      companyName?: string
-      businessLicenseUrl?: string
-      unifiedSocialCreditCode?: string
-      legalRepresentative?: string
-      registeredAddress?: string
-      industry?: string
-      officialWebsite?: string
-      description?: string
-    },
+    @Body() body: RegisterEnterpriseDto,
   ) {
     return this.enterpriseAuthService.registerEnterprise(body)
   }
@@ -85,12 +182,7 @@ export class McAuthController {
   @Post('enterprise/invite')
   async inviteByPhone(
     @GetToken() user: { id: string, orgId?: string },
-    @Body()
-    body: {
-      orgId?: string
-      phone: string
-      role: UserRole
-    },
+    @Body() body: InviteEnterpriseMemberDto,
   ) {
     return this.enterpriseAuthService.inviteByPhone(
       user.orgId || '',
@@ -109,23 +201,16 @@ export class McAuthController {
 
   @Public()
   @Post('enterprise/accept-invite')
-  async acceptInvite(
-    @Body()
-    body: {
-      token: string
-      phone: string
-      code: string
-    },
-  ) {
+  async acceptInvite(@Body() body: AcceptInviteDto) {
     return this.enterpriseAuthService.acceptInvite(body.token, body.phone, body.code)
   }
 
   @Post('switch-org')
   async switchOrg(
     @GetToken() user: { id: string },
-    @Body('orgId') orgId: string,
+    @Body() body: SwitchOrgDto,
   ) {
-    return this.enterpriseAuthService.switchOrg(user.id, orgId)
+    return this.enterpriseAuthService.switchOrg(user.id, body.orgId)
   }
 
   @Get('my-orgs')

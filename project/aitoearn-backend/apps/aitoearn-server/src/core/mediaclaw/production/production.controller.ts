@@ -1,8 +1,65 @@
 import { Body, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
+import { Type } from 'class-transformer'
+import {
+  IsArray,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { ProductionOrchestratorService } from './production-orchestrator.service'
+
+class CreateProductionBatchDto {
+  @IsOptional()
+  @IsString()
+  batchName?: string
+
+  @IsOptional()
+  @IsString()
+  templateId?: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  count?: number
+
+  @IsOptional()
+  @IsString()
+  pipelineId?: string
+
+  @IsOptional()
+  @IsString()
+  brandId?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  brandAssets?: string[]
+
+  @IsOptional()
+  @IsObject()
+  styleOverrides?: Record<string, unknown>
+
+  @IsOptional()
+  @IsString()
+  referenceVideoUrl?: string
+
+  @IsOptional()
+  @IsObject()
+  scheduleContext?: Record<string, unknown>
+
+  @IsOptional()
+  @IsArray()
+  @IsObject({ each: true })
+  taskPlan?: Array<Record<string, unknown>>
+
+  @IsOptional()
+  @IsObject()
+  config?: Record<string, unknown>
+}
 
 @MediaClawApiController('api/v1/production')
 export class ProductionController {
@@ -11,20 +68,7 @@ export class ProductionController {
   @Post('batches')
   async createBatch(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body()
-    body: {
-      batchName?: string
-      templateId?: string
-      count?: number
-      pipelineId?: string
-      brandId?: string
-      brandAssets?: string[]
-      styleOverrides?: Record<string, unknown>
-      referenceVideoUrl?: string
-      scheduleContext?: Record<string, unknown>
-      taskPlan?: Array<Record<string, unknown>>
-      config?: Record<string, unknown>
-    },
+    @Body() body: CreateProductionBatchDto,
   ) {
     return this.productionOrchestratorService.createBatch(
       user.orgId || user.id || '',

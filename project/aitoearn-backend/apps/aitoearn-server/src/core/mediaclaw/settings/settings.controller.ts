@@ -1,8 +1,33 @@
 import { Body, Delete, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { OrgApiKeyProvider } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { ByokService } from './byok.service'
+
+class SetApiKeyDto {
+  @IsEnum(OrgApiKeyProvider)
+  provider: OrgApiKeyProvider
+
+  @IsOptional()
+  @IsString()
+  key?: string
+
+  @IsOptional()
+  @IsString()
+  apiKey?: string
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  validateNow?: boolean
+}
 
 @MediaClawApiController(['api/v1/settings/api-keys', 'api/v1/settings/apikeys'])
 export class SettingsController {
@@ -11,12 +36,7 @@ export class SettingsController {
   @Post()
   async setApiKey(
     @GetToken() user: { id: string, orgId?: string | null },
-    @Body() body: {
-      provider: OrgApiKeyProvider
-      key?: string
-      apiKey?: string
-      validateNow?: boolean
-    },
+    @Body() body: SetApiKeyDto,
   ) {
     return this.byokService.addKey(user.orgId || user.id, body)
   }

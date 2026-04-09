@@ -12,9 +12,26 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { BrandAssetType } from '@yikart/mongodb'
+import { IsEnum, IsObject, IsOptional, IsString } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { AssetService } from './asset.service'
+
+class UploadAssetDto {
+  @IsString()
+  brandId: string
+
+  @IsEnum(BrandAssetType)
+  type: BrandAssetType
+
+  @IsOptional()
+  @IsString()
+  fileUrl?: string
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>
+}
 
 @MediaClawApiController(['api/v1/assets', 'api/v1/asset'])
 export class AssetController {
@@ -31,12 +48,7 @@ export class AssetController {
         mimetype?: string
       }
       | undefined,
-    @Body() body: {
-      brandId: string
-      type: BrandAssetType
-      fileUrl?: string
-      metadata?: Record<string, any>
-    },
+    @Body() body: UploadAssetDto,
   ) {
     return this.assetService.uploadAsset(user.orgId || user.id, body.brandId, body.type, {
       fileUrl: body.fileUrl,

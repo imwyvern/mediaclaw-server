@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Get,
   Headers,
@@ -71,6 +72,10 @@ export class XorPayController {
     @Body() body: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
   ) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('callback body must be an object')
+    }
+
     const signature = this.pickFirstHeaderValue(
       headers['x-xorpay-signature'],
       headers['x-signature'],

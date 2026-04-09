@@ -9,9 +9,64 @@ import {
 } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { VideoTaskStatus, VideoTaskType } from '@yikart/mongodb'
+import {
+  IsArray,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  ValidateIf,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { TaskMgmtService } from './task-mgmt.service'
+
+class CreateManagedTaskDto {
+  @IsOptional()
+  @IsString()
+  brandId?: string
+
+  @IsOptional()
+  @IsString()
+  pipelineId?: string
+
+  @IsEnum(VideoTaskType)
+  taskType: VideoTaskType
+
+  @IsOptional()
+  @IsString()
+  sourceVideoUrl?: string
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>
+}
+
+class BatchDownloadTasksDto {
+  @IsArray()
+  @IsString({ each: true })
+  taskIds: string[]
+}
+
+class UpdateManagedTaskDto {
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  brandId?: string | null
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  pipelineId?: string | null
+
+  @IsOptional()
+  @IsString()
+  sourceVideoUrl?: string
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>
+}
 
 @MediaClawApiController('api/v1/tasks')
 export class TaskMgmtController {
@@ -20,14 +75,7 @@ export class TaskMgmtController {
   @Post()
   async createTask(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      orgId?: string
-      brandId?: string
-      pipelineId?: string
-      taskType: VideoTaskType
-      sourceVideoUrl?: string
-      metadata?: Record<string, unknown>
-    },
+    @Body() body: CreateManagedTaskDto,
   ) {
     const orgId = user.orgId || user.id
     return this.taskMgmtService.createTask(orgId, {
@@ -46,8 +94,8 @@ export class TaskMgmtController {
   }
 
   @Post('batch-download')
-  async batchDownload(@GetToken() user: MediaClawAuthUser, @Body('taskIds') taskIds: string[]) {
-    return this.taskMgmtService.batchDownload(user.orgId || user.id, taskIds)
+  async batchDownload(@GetToken() user: MediaClawAuthUser, @Body() body: BatchDownloadTasksDto) {
+    return this.taskMgmtService.batchDownload(user.orgId || user.id, body.taskIds)
   }
 
   @Get()
@@ -80,12 +128,7 @@ export class TaskMgmtController {
   async updateTask(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
-    @Body() body: {
-      brandId?: string | null
-      pipelineId?: string | null
-      sourceVideoUrl?: string
-      metadata?: Record<string, unknown>
-    },
+    @Body() body: UpdateManagedTaskDto,
   ) {
     return this.taskMgmtService.updateTask(user.orgId || user.id, id, body)
   }

@@ -1,6 +1,23 @@
 import { Body, Get, Param, Post } from '@nestjs/common'
+import { Allow, IsOptional, IsString } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PromptOptimizerService } from './prompt-optimizer.service'
+
+class AnalyzeFailureDto {
+  @IsString()
+  videoTaskId: string
+
+  @IsString()
+  stage: string
+
+  @IsOptional()
+  @IsString()
+  prompt?: string
+
+  @IsOptional()
+  @Allow()
+  error?: unknown
+}
 
 @MediaClawApiController('api/v1/optimizer')
 export class PromptOptimizerController {
@@ -9,12 +26,7 @@ export class PromptOptimizerController {
   ) {}
 
   @Post('analyze')
-  async analyzeFailure(@Body() body: {
-    videoTaskId: string
-    stage: string
-    prompt?: string
-    error?: unknown
-  }) {
+  async analyzeFailure(@Body() body: AnalyzeFailureDto) {
     const analysis = await this.promptOptimizerService.analyzeFailure(
       body.videoTaskId,
       body.stage,

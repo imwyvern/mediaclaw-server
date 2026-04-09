@@ -1,10 +1,71 @@
 import { Body, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { ReportType } from '@yikart/mongodb'
+import { Type } from 'class-transformer'
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator'
 
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { ReportService } from '../report/report.service'
 import { AnalyticsService } from './analytics.service'
+
+class RefreshAnalyticsDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  limit?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  period?: number
+}
+
+class AnalyticsReportPeriodDto {
+  @IsOptional()
+  @IsString()
+  start?: string
+
+  @IsOptional()
+  @IsString()
+  end?: string
+}
+
+class GenerateAnalyticsReportDto {
+  @IsOptional()
+  @IsEnum(ReportType)
+  type?: ReportType
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AnalyticsReportPeriodDto)
+  period?: AnalyticsReportPeriodDto
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  formats?: string[]
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  waitForCompletion?: boolean
+
+  @IsOptional()
+  @IsString()
+  startDate?: string
+
+  @IsOptional()
+  @IsString()
+  endDate?: string
+}
 
 @MediaClawApiController('api/v1/analytics')
 export class AnalyticsController {
@@ -80,7 +141,7 @@ export class AnalyticsController {
   @Post('refresh')
   async refreshAnalytics(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body() body: { limit?: number, period?: number },
+    @Body() body: RefreshAnalyticsDto,
   ) {
     return this.analyticsService.refreshAnalytics(
       user.orgId || user.id || '',
@@ -161,18 +222,7 @@ export class AnalyticsController {
   @Post('report')
   async generateReport(
     @GetToken() user: { orgId?: string, id?: string },
-    @Body()
-    body: {
-      type?: ReportType
-      period?: {
-        start?: string
-        end?: string
-      }
-      formats?: string[]
-      waitForCompletion?: boolean
-      startDate?: string
-      endDate?: string
-    },
+    @Body() body: GenerateAnalyticsReportDto,
   ) {
     const periodEnd = body.period?.end || body.endDate || new Date().toISOString()
     const periodStart = body.period?.start

@@ -1,9 +1,36 @@
 import { Body, Delete, Get, Param, Post, Query } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { PlatformAccountPlatform } from '@yikart/mongodb'
+import {
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { PlatformAccountService } from './platform-account.service'
+
+class CreatePlatformAccountDto {
+  @IsEnum(PlatformAccountPlatform)
+  platform: PlatformAccountPlatform
+
+  @IsOptional()
+  @IsString()
+  accountId?: string
+
+  @IsOptional()
+  @IsString()
+  accountName?: string
+
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string
+
+  @IsOptional()
+  @IsObject()
+  credentials?: Record<string, any>
+}
 
 @MediaClawApiController('api/v1/platform-accounts')
 export class PlatformAccountController {
@@ -12,13 +39,7 @@ export class PlatformAccountController {
   @Post()
   async create(
     @GetToken() user: MediaClawAuthUser,
-    @Body() body: {
-      platform: PlatformAccountPlatform
-      accountId?: string
-      accountName?: string
-      avatarUrl?: string
-      credentials?: Record<string, any>
-    },
+    @Body() body: CreatePlatformAccountDto,
   ) {
     return this.platformAccountService.addAccount(
       user.orgId || user.id,
