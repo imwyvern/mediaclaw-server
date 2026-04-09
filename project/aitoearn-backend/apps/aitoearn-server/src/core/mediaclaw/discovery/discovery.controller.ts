@@ -6,7 +6,7 @@ import {
   ApiOperation,
   ApiQuery,
 } from '@nestjs/swagger'
-import { GetToken } from '@yikart/aitoearn-auth'
+import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { Type } from 'class-transformer'
 import {
   IsArray,
@@ -89,6 +89,7 @@ class ApplyRemixInsightsRequestDto {
   pipelineId: string
 }
 
+@Public()
 @MediaClawApiController('api/v1/discovery')
 export class DiscoveryController {
   constructor(
@@ -100,14 +101,16 @@ export class DiscoveryController {
   @ApiOperation({ summary: '获取可推荐的爆款素材池' })
   @ApiQuery({ name: 'limit', required: false, description: '返回条数，默认 10' })
   @ApiQuery({ name: 'industry', required: false, description: '行业关键词过滤' })
+  @ApiQuery({ name: 'orgId', required: false, description: '可选组织 ID，用于排除当前组织已改编内容' })
   @ApiOkResponse({ description: '返回推荐素材池列表' })
   async getRecommendationPool(
-    @GetToken() user: MediaClawAuthUser,
+    @GetToken() user: MediaClawAuthUser | undefined,
     @Query('limit') limit = '10',
     @Query('industry') industry?: string,
+    @Query('orgId') orgId?: string,
   ) {
     return this.discoveryService.getRecommendationPool(
-      user.orgId || user.id,
+      orgId || user?.orgId || user?.id,
       Number(limit),
       industry,
     )

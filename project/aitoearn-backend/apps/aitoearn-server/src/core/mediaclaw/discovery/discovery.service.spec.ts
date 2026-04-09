@@ -1,7 +1,6 @@
 import { ViralContentRemixStatus } from '@yikart/mongodb'
 import { Types } from 'mongoose'
 import { Mock, vi } from 'vitest'
-import { DiscoveryNotificationService } from './discovery-notification.service'
 import { DiscoveryService } from './discovery.service'
 
 interface QueryResult<T> {
@@ -30,14 +29,6 @@ describe('discoveryService', () => {
   let service: DiscoveryService
   let viralContentModel: Record<string, Mock>
   let videoTaskModel: Record<string, Mock>
-  let competitorModel: Record<string, Mock>
-  let brandModel: Record<string, Mock>
-  let organizationModel: Record<string, Mock>
-  let tikHubService: Record<string, Mock>
-  let discoveryNotificationService: Record<
-    keyof DiscoveryNotificationService,
-    any
-  >
 
   beforeEach(() => {
     vi.useFakeTimers().setSystemTime(new Date('2026-04-01T20:00:00.000Z'))
@@ -52,30 +43,10 @@ describe('discoveryService', () => {
       find: vi.fn(),
       findById: vi.fn(),
     }
-    competitorModel = {
-      find: vi.fn(),
-    }
-    brandModel = {
-      find: vi.fn(),
-    }
-    organizationModel = {
-      find: vi.fn(),
-    }
-    tikHubService = {
-      searchVideos: vi.fn(),
-    }
-    discoveryNotificationService = {
-      notifyNewDiscoveries: vi.fn(),
-    } as unknown as Record<keyof DiscoveryNotificationService, any>
 
     service = new DiscoveryService(
       viralContentModel as any,
       videoTaskModel as any,
-      competitorModel as any,
-      brandModel as any,
-      organizationModel as any,
-      tikHubService as any,
-      discoveryNotificationService as any,
     )
   })
 

@@ -1,21 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Cron, CronExpression } from '@nestjs/schedule'
 import {
-  Brand,
-  Competitor,
-  Organization,
   VideoTask,
   ViralContent,
   ViralContentRemixStatus,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
-import { AcquisitionService } from '../acquisition/acquisition.service'
 import {
   SearchVideoSummary,
-  TikHubPlatform,
 } from '../acquisition/tikhub.service'
-import { DiscoveryNotificationService } from './discovery-notification.service'
 
 interface ViralMetricsInput {
   views?: number
@@ -42,34 +35,7 @@ interface DiscoveryIngestResult {
   contentIds: string[]
 }
 
-interface DiscoveryScanPlan {
-  orgId: string
-  platform: TikHubPlatform
-  industry: string
-  keywords: string[]
-  competitorCount: number
-}
-
-interface DiscoveryKeywordScanResult extends DiscoveryIngestResult {
-  keyword: string
-  source: string
-}
-
 type Identifier = Types.ObjectId | string | { toString: () => string }
-
-type LeanCompetitor = Competitor & {
-  _id: Identifier
-  orgId: Identifier
-}
-
-type LeanBrand = Brand & {
-  _id: Identifier
-  orgId: Identifier
-}
-
-type LeanOrganization = Organization & {
-  _id: Identifier
-}
 
 type LeanViralContent = ViralContent & {
   _id: Identifier
@@ -77,22 +43,11 @@ type LeanViralContent = ViralContent & {
 
 @Injectable()
 export class DiscoveryService {
-  private readonly logger = new Logger(DiscoveryService.name)
-  private readonly searchLimit = 10
-
   constructor(
     @InjectModel(ViralContent.name)
     private readonly viralContentModel: Model<ViralContent>,
     @InjectModel(VideoTask.name)
     private readonly videoTaskModel: Model<VideoTask>,
-    @InjectModel(Competitor.name)
-    private readonly competitorModel: Model<Competitor>,
-    @InjectModel(Brand.name)
-    private readonly brandModel: Model<Brand>,
-    @InjectModel(Organization.name)
-    private readonly organizationModel: Model<Organization>,
-    private readonly acquisitionService: AcquisitionService,
-    private readonly discoveryNotificationService: DiscoveryNotificationService,
   ) {}
 
   calculateViralScoreLegacy(metrics: ViralMetricsInput) {
@@ -146,13 +101,13 @@ export class DiscoveryService {
     return this.selectGroupedTopP90(typedCandidates)
   }
 
-  async getRecommendationPool(orgId: string, limit = 10, industry?: string) {
+  async getRecommendationPool(orgId?: string | null, limit = 10, industry?: string) {
     const normalizedLimit = Math.min(
       Math.max(Math.trunc(Number(limit) || 10), 1),
       50,
     )
     const p90Candidates = await this.filterP90(industry || '')
-    const orgTaskIds = await this.getOrgTaskIds(orgId)
+    const orgTaskIds = orgId ? await this.getOrgTaskIds(orgId) : []
     const excludedTaskIds = new Set(orgTaskIds)
 
     const pool = p90Candidates
@@ -184,7 +139,7 @@ export class DiscoveryService {
       }))
 
     return {
-      orgId,
+      orgId: orgId || null,
       total: pool.length,
       source: pool.length > 0 ? 'p90' : 'empty',
       items: pool,
@@ -225,49 +180,6 @@ export class DiscoveryService {
     }
 
     return content
-  }
-
-  async scanKeyword(
-    platform: string,
-    industry: string,
-    keyword: string,
-    relatedKeywords: string[] = [],
-  ): Promise<DiscoveryKeywordScanResult> {
-    const normalizedIndustry = this.normalizeText(industry)
-    const normalizedKeyword = this.normalizeText(keyword)
-    if (!normalizedIndustry || !normalizedKeyword) {
-      return {
-        industry: normalizedIndustry,
-        platform: this.normalizePlatformValue(platform),
-        keyword: normalizedKeyword,
-        source: 'skipped',
-        scannedCount: 0,
-        upsertedCount: 0,
-        pendingCount: 0,
-        contentIds: [],
-      }
-    }
-
-    const response = await this.acquisitionService.searchVideos(
-      platform,
-      normalizedKeyword,
-      this.searchLimit,
-    )
-    const ingestResult = await this.ingestSearchResults({
-      platform: response.platform,
-      industry: normalizedIndustry,
-      keywords: this.mergeKeywords(relatedKeywords, [
-        normalizedIndustry,
-        normalizedKeyword,
-      ]),
-      items: response.items,
-    })
-
-    return {
-      ...ingestResult,
-      keyword: normalizedKeyword,
-      source: response.source,
-    }
   }
 
   async ingestSearchResults(
@@ -369,182 +281,6 @@ export class DiscoveryService {
     }
   }
 
-  @Cron(CronExpression.EVERY_6_HOURS)
-  async scheduledDiscoveryScan() {
-    const startedAt = new Date()
-    const plans = await this.buildScheduledScanPlans()
-    const keywordResults: DiscoveryKeywordScanResult[] = []
-    const notifications: Record<string, any>[] = []
-
-    this.logger.log(`Discovery scan started with ${plans.length} plan(s).`)
-
-    for (const plan of plans) {
-      this.logger.debug(
-        `Scanning platform=${plan.platform} industry=${plan.industry} keywords=${plan.keywords.join(', ') || 'none'}`,
-      )
-
-      for (const keyword of plan.keywords) {
-        const result = await this.scanKeyword(
-          plan.platform,
-          plan.industry,
-          keyword,
-          plan.keywords,
-        )
-        keywordResults.push(result)
-      }
-
-      const notification = await this.notifyPendingDiscoveriesForPlan(
-        plan,
-        startedAt,
-      )
-      if (notification) {
-        notifications.push(notification)
-      }
-    }
-
-    const totalContents = keywordResults.reduce(
-      (sum, item) => sum + item.upsertedCount,
-      0,
-    )
-    const totalPending = keywordResults.reduce(
-      (sum, item) => sum + item.pendingCount,
-      0,
-    )
-    const totalKeywords = keywordResults.length
-
-    this.logger.log(
-      `Discovery scan finished. plans=${plans.length}, keywords=${totalKeywords}, upserts=${totalContents}, pending=${totalPending}, notifications=${notifications.length}`,
-    )
-
-    return {
-      startedAt: startedAt.toISOString(),
-      finishedAt: new Date().toISOString(),
-      plans: plans.length,
-      keywords: totalKeywords,
-      upserts: totalContents,
-      pending: totalPending,
-      notifications: notifications.length,
-      notificationItems: notifications,
-      items: keywordResults,
-    }
-  }
-
-  private async buildScheduledScanPlans(): Promise<DiscoveryScanPlan[]> {
-    const competitors = (await this.competitorModel
-      .find({ isActive: true })
-      .sort({ lastSyncedAt: -1, createdAt: -1 })
-      .lean()
-      .exec()) as unknown as LeanCompetitor[]
-
-    if (competitors.length === 0) {
-      return []
-    }
-
-    const orgIds = Array.from(
-      new Set(competitors.map(item => item.orgId.toString())),
-    )
-    const [brands, organizations] = await Promise.all([
-      this.brandModel
-        .find({
-          orgId: { $in: orgIds.map(id => new Types.ObjectId(id)) },
-          isActive: true,
-        })
-        .lean()
-        .exec() as unknown as Promise<LeanBrand[]>,
-      this.organizationModel
-        .find({
-          _id: { $in: orgIds.map(id => new Types.ObjectId(id)) },
-        })
-        .lean()
-        .exec() as unknown as Promise<LeanOrganization[]>,
-    ])
-
-    const brandsByOrgId = new Map<string, LeanBrand[]>()
-    for (const brand of brands) {
-      const key = brand.orgId.toString()
-      const items = brandsByOrgId.get(key) || []
-      items.push(brand)
-      brandsByOrgId.set(key, items)
-    }
-
-    const organizationsById = new Map<string, LeanOrganization>(
-      organizations.map(item => [item._id.toString(), item]),
-    )
-
-    const planMap = new Map<string, DiscoveryScanPlan>()
-    for (const competitor of competitors) {
-      const orgId = competitor.orgId.toString()
-      const platform = this.normalizePlatform(competitor.platform)
-      if (!platform) {
-        continue
-      }
-      const orgBrands = brandsByOrgId.get(orgId) || []
-      const orgIndustry = this.extractOrgIndustry(organizationsById.get(orgId))
-
-      if (orgBrands.length > 0) {
-        for (const brand of orgBrands) {
-          const industry = this.normalizeText(brand.industry) || orgIndustry
-          const keywords = this.mergeKeywords(
-            brand.assets?.keywords || [],
-            industry ? [industry] : [],
-          )
-          this.upsertScanPlan(planMap, {
-            orgId,
-            platform,
-            industry,
-            keywords,
-            competitorCount: 1,
-          })
-        }
-        continue
-      }
-
-      if (!orgIndustry) {
-        continue
-      }
-
-      this.upsertScanPlan(planMap, {
-        orgId,
-        platform,
-        industry: orgIndustry,
-        keywords: [orgIndustry],
-        competitorCount: 1,
-      })
-    }
-
-    return Array.from(planMap.values()).filter(
-      plan => plan.keywords.length > 0 && Boolean(plan.industry),
-    )
-  }
-
-  private upsertScanPlan(
-    planMap: Map<string, DiscoveryScanPlan>,
-    input: DiscoveryScanPlan,
-  ) {
-    const normalizedIndustry = this.normalizeText(input.industry)
-    const normalizedKeywords = this.mergeKeywords(
-      input.keywords,
-      normalizedIndustry ? [normalizedIndustry] : [],
-    )
-    if (!normalizedIndustry || normalizedKeywords.length === 0) {
-      return
-    }
-
-    const key = `${input.orgId}:${input.platform}:${normalizedIndustry}`
-    const current = planMap.get(key)
-    if (!current) {
-      planMap.set(key, {
-        ...input,
-        industry: normalizedIndustry,
-        keywords: normalizedKeywords,
-      })
-      return
-    }
-
-    current.keywords = this.mergeKeywords(current.keywords, normalizedKeywords)
-    current.competitorCount += input.competitorCount
-  }
-
   private async refreshPendingCandidates(industry: string, platform?: string) {
     const query = this.buildDiscoveryQuery(industry, platform)
     if (!query['industry']) {
@@ -641,36 +377,6 @@ export class DiscoveryService {
     }
 
     return clauses.length === 1 ? clauses[0] : { $or: clauses }
-  }
-
-  private normalizePlatform(platform: string): TikHubPlatform | null {
-    const normalizedPlatform = this.normalizePlatformValue(platform)
-    const supportedPlatforms: TikHubPlatform[] = [
-      'douyin',
-      'xhs',
-      'kuaishou',
-      'bilibili',
-    ]
-    if (supportedPlatforms.includes(normalizedPlatform as TikHubPlatform)) {
-      return normalizedPlatform as TikHubPlatform
-    }
-
-    return null
-  }
-
-  private extractOrgIndustry(org?: LeanOrganization) {
-    const rawIndustry = org?.settings?.['industry']
-    if (typeof rawIndustry === 'string') {
-      return this.normalizeText(rawIndustry)
-    }
-
-    if (Array.isArray(rawIndustry)) {
-      return this.normalizeText(
-        rawIndustry.find(item => typeof item === 'string') || '',
-      )
-    }
-
-    return ''
   }
 
   private mergeKeywords(primary: string[], secondary: string[]) {
@@ -849,30 +555,5 @@ export class DiscoveryService {
     }
 
     return new Types.ObjectId(task.brandId.toString())
-  }
-
-  private async notifyPendingDiscoveriesForPlan(
-    plan: DiscoveryScanPlan,
-    startedAt: Date,
-  ) {
-    const items = (await this.viralContentModel
-      .find({
-        platform: plan.platform,
-        industry: this.normalizeText(plan.industry),
-        remixStatus: ViralContentRemixStatus.PENDING,
-        createdAt: { $gte: startedAt },
-      })
-      .sort({ viralScore: -1, discoveredAt: -1 })
-      .lean()
-      .exec()) as unknown as LeanViralContent[]
-
-    if (items.length < 3) {
-      return null
-    }
-
-    return this.discoveryNotificationService.notifyNewDiscoveries(
-      plan.orgId,
-      items,
-    )
   }
 }

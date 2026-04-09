@@ -14,7 +14,7 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger'
-import { GetToken } from '@yikart/aitoearn-auth'
+import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { IsString } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
@@ -59,15 +59,18 @@ export class CompetitorController {
   @ApiQuery({ name: 'period', required: false, description: '时间窗口，例如 7d' })
   @ApiQuery({ name: 'limit', required: false, description: '榜单数量，默认 5' })
   @ApiQuery({ name: 'platform', required: false, description: '平台过滤' })
+  @ApiQuery({ name: 'orgId', required: false, description: '可选组织 ID，匿名 demo 时使用' })
   @ApiOkResponse({ description: '返回竞品热点榜单' })
+  @Public()
   async getCompetitorHot(
-    @GetToken() user: MediaClawAuthUser,
+    @GetToken() user: MediaClawAuthUser | undefined,
     @Query('period') period = '7d',
     @Query('limit') limit = '5',
     @Query('platform') platform?: string,
+    @Query('orgId') orgId?: string,
   ) {
     return this.competitorService.getCompetitorHot(
-      user.orgId || user.id,
+      orgId || user?.orgId || user?.id || '',
       period,
       Number(limit),
       platform,

@@ -7,7 +7,8 @@
     "prepare": "command -v git >/dev/null 2>&1 && npx simple-git-hooks || echo 'Git not available, skipping git hooks setup'",
     "lint": "nx run-many --target=lint --nxBail --outputStyle=static --parallel=\"75%\"",
     "ai:serve": "nx serve aitoearn-ai",
-    "server:serve": "nx serve aitoearn-server"
+    "server:serve": "nx serve aitoearn-server",
+    "mediaclaw:discovery:bootstrap": "pnpm nx build aitoearn-server && node dist/apps/aitoearn-server/bootstrap/mediaclaw-discovery-bootstrap.js"
   },
   "dependencies": {
     "@zilliz/milvus2-sdk-node": "^2.6.13",
