@@ -1,5 +1,7 @@
-import { vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
+
+import { SubtitleService } from './subtitle.service'
 
 const pipelineUtils = vi.hoisted(() => ({
   pathExists: vi.fn().mockResolvedValue(false),
@@ -15,10 +17,7 @@ vi.mock('./pipeline.utils', async (importOriginal) => {
   }
 })
 
-import { describe, expect, it, beforeEach } from 'vitest'
-import { SubtitleService } from './subtitle.service'
-
-describe('SubtitleService', () => {
+describe('subtitleService', () => {
   beforeEach(() => {
     pipelineUtils.pathExists.mockReset()
     pipelineUtils.pathExists.mockResolvedValue(false)

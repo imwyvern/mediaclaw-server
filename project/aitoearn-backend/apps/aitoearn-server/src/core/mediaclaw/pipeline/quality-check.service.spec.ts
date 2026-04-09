@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { QualityCheckService } from './quality-check.service'
 
-describe('QualityCheckService', () => {
+describe('qualityCheckService', () => {
   it('should pass metrics that satisfy pipeline thresholds', () => {
     const service = new QualityCheckService()
     const report = service.evaluateMetrics(

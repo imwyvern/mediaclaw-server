@@ -1,5 +1,8 @@
+import { PackStatus, UsageHistoryType } from '@yikart/mongodb'
 import { Types } from 'mongoose'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { InsufficientCreditsError, UsageService } from './usage.service'
 
 vi.mock('@yikart/mongodb', () => {
   class ApiUsage {}
@@ -38,9 +41,6 @@ vi.mock('@yikart/mongodb', () => {
   }
 })
 
-import { PackStatus, UsageHistoryType } from '@yikart/mongodb'
-import { InsufficientCreditsError, UsageService } from './usage.service'
-
 function createQuery<T>(value: T) {
   const query = {
     lean: vi.fn(),
@@ -60,7 +60,7 @@ function createQuery<T>(value: T) {
   return query
 }
 
-describe('UsageService', () => {
+describe('usageService', () => {
   const userId = '507f1f77bcf86cd799439011'
   const orgId = '507f1f77bcf86cd799439012'
   const taskId = '507f1f77bcf86cd799439013'

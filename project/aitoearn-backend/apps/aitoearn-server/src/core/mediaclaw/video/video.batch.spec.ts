@@ -1,5 +1,8 @@
+import { ProductionBatchStatus, VideoTaskStatus } from '@yikart/mongodb'
 import { Types } from 'mongoose'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { VideoService } from './video.service'
 
 vi.mock('@yikart/mongodb', () => {
   class Brand {}
@@ -38,9 +41,6 @@ vi.mock('@yikart/mongodb', () => {
   }
 })
 
-import { ProductionBatchStatus, VideoTaskStatus } from '@yikart/mongodb'
-import { VideoService } from './video.service'
-
 function createQuery<T>(value: T) {
   const query = {
     lean: vi.fn(),
@@ -54,7 +54,7 @@ function createQuery<T>(value: T) {
   return query
 }
 
-describe('VideoService batch status', () => {
+describe('videoService batch status', () => {
   let service: VideoService
   let productionBatchModel: Record<string, any>
   let videoTaskModel: Record<string, any>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DedupService } from './dedup.service'
 
-describe('DedupService', () => {
+describe('dedupService', () => {
   it('should create deterministic dedup strategies for the same seed', () => {
     const service = new DedupService()
 

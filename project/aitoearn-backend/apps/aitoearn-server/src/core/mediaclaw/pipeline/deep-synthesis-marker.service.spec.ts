@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 
-describe('DeepSynthesisMarkerService', () => {
+describe('deepSynthesisMarkerService', () => {
   it('should create a PRD-compliant visible watermark and metadata manifest', () => {
     const service = new DeepSynthesisMarkerService()
     const marker = service.createMarker('task-123', {

@@ -58,7 +58,7 @@ function createTask(overrides: Record<string, any> = {}) {
   }
 }
 
-describe('ContentMgmtService approval workflow', () => {
+describe('contentMgmtService approval workflow', () => {
   const notificationService = {
     send: vi.fn().mockResolvedValue(undefined),
   }
