@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
 import { Types } from 'mongoose'
 import { vi } from 'vitest'
+vi.mock('axios', () => ({
+  default: {
+    post: vi.fn(),
+  },
+}))
 vi.mock('@yikart/mongodb', () => {
   class PaymentOrder {}
   class VideoPack {}
@@ -46,6 +51,7 @@ import {
   PaymentProductType,
   PaymentStatus,
 } from '@yikart/mongodb'
+import axios from 'axios'
 import { XorPayService } from '../../apps/aitoearn-server/src/core/mediaclaw/payment/xorpay.service'
 import { createChainQuery, createExecQuery } from '../support/query'
 
@@ -88,10 +94,20 @@ function buildSignature(payload: Record<string, unknown>, secret: string) {
 
 describe('MediaClaw Payment E2E', () => {
   afterEach(() => {
+    vi.mocked(axios.post).mockReset()
+    delete process.env['XORPAY_API_URL']
     delete process.env['XORPAY_SECRET']
   })
 
   it('应创建支付订单并返回支付地址', async () => {
+    process.env['XORPAY_API_URL'] = 'https://xorpay.example.com/create'
+    vi.mocked(axios.post).mockResolvedValue({
+      data: {
+        pay_url: 'xorpay://mock/MCORDER-S11',
+        trade_no: 'trade-1',
+      },
+    } as any)
+
     const orderModel = {
       create: vi.fn().mockResolvedValue(createOrderDocument()),
       findByIdAndUpdate: vi.fn().mockReturnValue(createExecQuery(createOrderDocument())),
@@ -124,8 +140,8 @@ describe('MediaClaw Payment E2E', () => {
       amount: 19900,
     }))
     expect(result.callbackData).toMatchObject({
-      gatewayMocked: true,
       payUrl: 'xorpay://mock/MCORDER-S11',
+      tradeNo: 'trade-1',
     })
   })
 
