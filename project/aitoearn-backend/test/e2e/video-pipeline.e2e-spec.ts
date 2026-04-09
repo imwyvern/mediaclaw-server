@@ -3,11 +3,13 @@ import { Types } from 'mongoose'
 vi.mock('@yikart/mongodb', () => {
   class Brand {}
   class Pipeline {}
+  class ProductionBatch {}
   class VideoTask {}
 
   return {
     Brand,
     Pipeline,
+    ProductionBatch,
     VideoTask,
     VideoTaskStatus: {
       PENDING: 'pending',

@@ -8,6 +8,7 @@ vi.mock('@yikart/mongodb', () => {
   class PaymentOrder {}
   class Pipeline {}
   class PlatformAccount {}
+  class ProductionBatch {}
   class PublishRecord {}
   class VideoPack {}
   class VideoTask {}
@@ -59,6 +60,7 @@ vi.mock('@yikart/mongodb', () => {
       EXPIRED: 'expired',
       SUSPENDED: 'suspended',
     },
+    ProductionBatch,
     PublishRecord,
     UserRole: {
       ADMIN: 'admin',

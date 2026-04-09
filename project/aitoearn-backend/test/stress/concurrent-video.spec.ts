@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 import { Types } from 'mongoose'
 vi.mock('@yikart/mongodb', () => {
   class Brand {}
+  class Invoice {}
   class Pipeline {}
   class PaymentOrder {}
   class VideoPack {}
@@ -9,6 +10,7 @@ vi.mock('@yikart/mongodb', () => {
 
   return {
     Brand,
+    Invoice,
     PackStatus: {
       ACTIVE: 'active',
       DEPLETED: 'depleted',
