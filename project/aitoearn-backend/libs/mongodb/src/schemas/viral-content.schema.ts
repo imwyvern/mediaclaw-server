@@ -185,6 +185,7 @@ export class ViralContent extends WithTimestampSchema {
 export const ViralContentSchema = SchemaFactory.createForClass(ViralContent);
 ViralContentSchema.index({ platform: 1, videoId: 1 }, { unique: true });
 ViralContentSchema.index({ industry: 1, viralScore: -1, discoveredAt: -1 });
+ViralContentSchema.index({ createdAt: -1 });
 ViralContentSchema.index({ platform: 1, industry: 1, viralScore: -1, createdAt: -1 });
 ViralContentSchema.index({
   platform: 1,
