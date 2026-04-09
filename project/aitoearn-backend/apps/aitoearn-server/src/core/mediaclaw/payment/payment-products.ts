@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common'
 import {
   BillingMode,
   OrgType,
@@ -125,12 +126,12 @@ export function resolveSubscriptionProduct(
   }
 
   if (plan !== SubscriptionPlan.FLAGSHIP) {
-    throw new Error(`Unsupported subscription plan: ${plan}`)
+    throw new BadRequestException(`Unsupported subscription plan: ${plan}`)
   }
 
   const monthlyFeeCents = Number(input.monthlyFeeCents || 0)
   if (!Number.isFinite(monthlyFeeCents) || monthlyFeeCents <= 0) {
-    throw new Error('Flagship plan requires monthlyFeeCents')
+    throw new BadRequestException('Flagship plan requires monthlyFeeCents')
   }
 
   return {
