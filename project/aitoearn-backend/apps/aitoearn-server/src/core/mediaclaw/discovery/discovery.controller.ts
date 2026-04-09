@@ -1,4 +1,11 @@
 import { Body, Get, Post, Query } from '@nestjs/common'
+import {
+  ApiBody,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { Type } from 'class-transformer'
 import {
@@ -90,6 +97,10 @@ export class DiscoveryController {
   ) {}
 
   @Get('pool')
+  @ApiOperation({ summary: '获取可推荐的爆款素材池' })
+  @ApiQuery({ name: 'limit', required: false, description: '返回条数，默认 10' })
+  @ApiQuery({ name: 'industry', required: false, description: '行业关键词过滤' })
+  @ApiOkResponse({ description: '返回推荐素材池列表' })
   async getRecommendationPool(
     @GetToken() user: MediaClawAuthUser,
     @Query('limit') limit = '10',
@@ -103,6 +114,9 @@ export class DiscoveryController {
   }
 
   @Post('score')
+  @ApiOperation({ summary: '计算素材爆款分数' })
+  @ApiBody({ type: ViralScoreRequestDto })
+  @ApiOkResponse({ description: '返回素材的 viral score 计算结果' })
   async calculateViralScore(
     @Body() body: ViralScoreRequestDto,
   ) {
@@ -122,16 +136,25 @@ export class DiscoveryController {
   }
 
   @Post('mark-remixed')
+  @ApiOperation({ summary: '标记素材已完成改编' })
+  @ApiBody({ type: MarkRemixedRequestDto })
+  @ApiCreatedResponse({ description: '已记录素材改编状态' })
   async markRemixed(@Body() body: MarkRemixedRequestDto) {
     return this.discoveryService.markRemixed(body.contentId, body.taskId)
   }
 
   @Post('analyze-viral-elements')
+  @ApiOperation({ summary: '分析爆款素材拆解要素' })
+  @ApiBody({ type: ContentIdRequestDto })
+  @ApiCreatedResponse({ description: '已生成素材的结构化爆款分析' })
   async analyzeViralElements(@Body() body: ContentIdRequestDto) {
     return this.contentRemixService.analyzeViralElements(body.contentId)
   }
 
   @Post('generate-remix-brief')
+  @ApiOperation({ summary: '基于品牌生成素材改编 brief' })
+  @ApiBody({ type: GenerateRemixBriefRequestDto })
+  @ApiCreatedResponse({ description: '已生成素材改编 brief' })
   async generateRemixBrief(
     @Body() body: GenerateRemixBriefRequestDto,
   ) {
@@ -142,6 +165,9 @@ export class DiscoveryController {
   }
 
   @Post('apply-remix-insights')
+  @ApiOperation({ summary: '将爆款洞察写回到生产 pipeline' })
+  @ApiBody({ type: ApplyRemixInsightsRequestDto })
+  @ApiCreatedResponse({ description: '已将改编洞察应用到 pipeline 偏好配置' })
   async applyRemixInsights(
     @Body() body: ApplyRemixInsightsRequestDto,
   ) {

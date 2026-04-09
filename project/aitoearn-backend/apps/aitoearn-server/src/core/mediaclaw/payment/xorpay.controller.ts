@@ -8,6 +8,14 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common'
+import {
+  ApiBody,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import {
@@ -32,6 +40,8 @@ export class XorPayController {
 
   @Get('products')
   @Public()
+  @ApiOperation({ summary: '获取可购买的支付商品列表' })
+  @ApiOkResponse({ description: '返回当前可售的视频包和订阅商品' })
   getProducts() {
     return this.xorPayService.getProducts()
   }
@@ -44,6 +54,9 @@ export class XorPayController {
       ttl: 60_000,
     },
   })
+  @ApiOperation({ summary: '创建 XorPay 支付订单' })
+  @ApiBody({ type: CreatePaymentOrderDto })
+  @ApiCreatedResponse({ description: '支付订单创建成功，并返回支付链接信息' })
   async createOrder(
     @GetToken() user: AuthenticatedPaymentUser,
     @Body() body: CreatePaymentOrderDto,
@@ -68,6 +81,8 @@ export class XorPayController {
 
   @Post(['callback', 'notify'])
   @Public()
+  @ApiOperation({ summary: '接收 XorPay 支付回调' })
+  @ApiCreatedResponse({ description: '回调验签并更新订单支付状态' })
   async callback(
     @Body() body: Record<string, any>,
     @Headers() headers: Record<string, string | string[] | undefined>,
@@ -86,6 +101,9 @@ export class XorPayController {
   }
 
   @Get('status/:orderId')
+  @ApiOperation({ summary: '查询单个订单支付状态' })
+  @ApiParam({ name: 'orderId', description: '支付订单号' })
+  @ApiOkResponse({ description: '返回订单支付状态和权益发放结果' })
   async getStatus(
     @GetToken() user: AuthenticatedPaymentUser,
     @Param('orderId') orderId: string,
@@ -94,6 +112,12 @@ export class XorPayController {
   }
 
   @Get('orders')
+  @ApiOperation({ summary: '查询支付订单列表' })
+  @ApiQuery({ name: 'status', required: false, description: '支付状态过滤' })
+  @ApiQuery({ name: 'page', required: false, description: '页码，默认 1' })
+  @ApiQuery({ name: 'limit', required: false, description: '每页条数，默认 20' })
+  @ApiQuery({ name: 'scope', required: false, description: '查询范围，user 或 org' })
+  @ApiOkResponse({ description: '返回订单列表及分页结果' })
   async listOrders(
     @GetToken() user: AuthenticatedPaymentUser,
     @Query('status') status?: PaymentStatus,

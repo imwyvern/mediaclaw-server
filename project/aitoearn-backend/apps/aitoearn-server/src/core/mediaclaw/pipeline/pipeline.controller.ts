@@ -1,4 +1,11 @@
 import { Body, Delete, Get, Param, Patch, Post } from '@nestjs/common'
+import {
+  ApiBody,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+} from '@nestjs/swagger'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
@@ -17,6 +24,9 @@ export class PipelineController {
   constructor(private readonly pipelineService: PipelineService) {}
 
   @Post()
+  @ApiOperation({ summary: '创建生产 pipeline' })
+  @ApiBody({ type: CreatePipelineDto })
+  @ApiCreatedResponse({ description: 'pipeline 已创建' })
   async create(
     @GetToken() user: MediaClawAuthUser,
     @Body() body: CreatePipelineDto,
@@ -25,16 +35,25 @@ export class PipelineController {
   }
 
   @Get()
+  @ApiOperation({ summary: '获取当前组织的 pipeline 列表' })
+  @ApiOkResponse({ description: '返回当前组织全部 pipeline' })
   async list(@GetToken() user: MediaClawAuthUser) {
     return this.pipelineService.findByOrg(user.orgId || user.id)
   }
 
   @Get(':id')
+  @ApiOperation({ summary: '获取单个 pipeline 详情' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiOkResponse({ description: '返回 pipeline 详情' })
   async findOne(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.pipelineService.findById(user.orgId || user.id, id)
   }
 
   @Patch(':id')
+  @ApiOperation({ summary: '更新 pipeline 基础信息' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiBody({ type: UpdatePipelineDto })
+  @ApiOkResponse({ description: 'pipeline 已更新' })
   async update(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
@@ -44,6 +63,10 @@ export class PipelineController {
   }
 
   @Patch(':id/preferences')
+  @ApiOperation({ summary: '更新 pipeline 风格偏好' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiBody({ type: PipelinePreferencesDto })
+  @ApiOkResponse({ description: 'pipeline 偏好配置已更新' })
   async updatePreferences(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
@@ -53,6 +76,10 @@ export class PipelineController {
   }
 
   @Patch(':id/model-overrides')
+  @ApiOperation({ summary: '更新 pipeline 模型覆盖配置' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiBody({ type: PipelineModelOverridesDto })
+  @ApiOkResponse({ description: 'pipeline 模型覆盖配置已更新' })
   async updateModelOverrides(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
@@ -62,6 +89,10 @@ export class PipelineController {
   }
 
   @Patch(':id/distribution-rules')
+  @ApiOperation({ summary: '更新 pipeline 分发规则' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiBody({ type: PipelineDistributionRulesDto })
+  @ApiOkResponse({ description: 'pipeline 分发规则已更新' })
   async updateDistributionRules(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
@@ -71,6 +102,10 @@ export class PipelineController {
   }
 
   @Patch(':id/bind-group')
+  @ApiOperation({ summary: '绑定 pipeline 到分发群' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiBody({ type: PipelineGroupBindingDto })
+  @ApiOkResponse({ description: 'pipeline 分发群绑定已更新' })
   async bindGroup(
     @GetToken() user: MediaClawAuthUser,
     @Param('id') id: string,
@@ -80,6 +115,9 @@ export class PipelineController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: '归档 pipeline' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiOkResponse({ description: 'pipeline 已归档' })
   async archive(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.pipelineService.archive(user.orgId || user.id, id)
   }
