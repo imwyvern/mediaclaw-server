@@ -1,14 +1,14 @@
 import { VideoTaskStatus } from '@yikart/mongodb'
 
-export type VideoTaskProductionStage =
-  | 'draft'
-  | 'queued'
-  | 'processing'
-  | 'review'
-  | 'approved'
-  | 'delivered'
-  | 'failed'
-  | 'cancelled'
+export type VideoTaskProductionStage
+  = | 'draft'
+    | 'queued'
+    | 'processing'
+    | 'review'
+    | 'approved'
+    | 'delivered'
+    | 'failed'
+    | 'cancelled'
 
 export function mapVideoTaskStatusToProductionStage(status: VideoTaskStatus): VideoTaskProductionStage {
   switch (status) {

@@ -124,7 +124,7 @@ export class EmployeeDispatchService {
 
     const platform = this.resolveTaskPlatform(task)
     const query = {
-      orgId: this.toObjectId(orgId, "orgId"),
+      orgId: this.toObjectId(orgId, 'orgId'),
       isActive: true,
       status: EmployeeAssignmentStatus.ACTIVE,
       ...(platform ? { platforms: platform } : {}),
@@ -142,7 +142,7 @@ export class EmployeeDispatchService {
     }
 
     const dispatchedAt = new Date()
-    const dispatchPayload = assignments.map((assignment) => ({
+    const dispatchPayload = assignments.map(assignment => ({
       assignmentId: assignment._id.toString(),
       employeeId: assignment.employeeId?.toString() || '',
       employeeName: assignment.employeeName,
@@ -251,7 +251,7 @@ export class EmployeeDispatchService {
         },
         {
           $set: {
-            status: VideoTaskStatus.PUBLISHED,
+            'status': VideoTaskStatus.PUBLISHED,
             'metadata.distribution.publishStatus': 'published',
             'metadata.distribution.publishUrl': normalizedPublishUrl,
             'metadata.distribution.lastStatusAt': confirmedAt.toISOString(),

@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Cron } from '@nestjs/schedule'
-import { RedisService } from '@yikart/redis'
 import {
   ClawHostDeploymentMode,
   ClawHostHealthStatus,
@@ -17,6 +16,7 @@ import {
   ClawHostInstanceStatus,
   UserRole,
 } from '@yikart/mongodb'
+import { RedisService } from '@yikart/redis'
 import { Model } from 'mongoose'
 import { MediaClawApiKeyService } from '../apikey/apikey.service'
 
@@ -503,8 +503,8 @@ export class ClawHostService {
     }
 
     const instances = await this.clawHostInstanceModel.find({
-      orgId: orgId.trim(),
-      status: ClawHostInstanceStatus.RUNNING,
+      'orgId': orgId.trim(),
+      'status': ClawHostInstanceStatus.RUNNING,
       'skills.skillId': skillId,
     }).exec()
 

@@ -91,12 +91,12 @@ export class ContentMgmtService {
       task._id,
       {
         $set: {
-          status: VideoTaskStatus.PENDING_REVIEW,
+          'status': VideoTaskStatus.PENDING_REVIEW,
           approval,
           'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.PENDING_REVIEW),
         },
         $push: {
-          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+          'iterationLog': createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
             fromStatus: task.status,
             toStatus: VideoTaskStatus.PENDING_REVIEW,
             timestamp: submittedAt,
@@ -271,12 +271,12 @@ export class ContentMgmtService {
       task._id,
       {
         $set: {
-          status: nextStatus,
-          approval: nextApproval,
+          'status': nextStatus,
+          'approval': nextApproval,
           'metadata.productionStage': mapVideoTaskStatusToProductionStage(nextStatus),
         },
         $push: {
-          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+          'iterationLog': createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
             fromStatus: task.status,
             toStatus: nextStatus,
             timestamp: reviewedAt,
@@ -357,7 +357,7 @@ export class ContentMgmtService {
       task._id,
       {
         $set: {
-          status: VideoTaskStatus.PUBLISHED,
+          'status': VideoTaskStatus.PUBLISHED,
           approval,
           'publishedAt': publishedAt,
           'metadata.publishInfo': {
@@ -371,7 +371,7 @@ export class ContentMgmtService {
           'metadata.distribution.lastStatusAt': timestamp,
         },
         $push: {
-          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+          'iterationLog': createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
             fromStatus: task.status,
             toStatus: VideoTaskStatus.PUBLISHED,
             timestamp: publishedAt,
@@ -484,8 +484,8 @@ export class ContentMgmtService {
   async listPendingContent(orgId: string, reviewerId: string) {
     const reviewer = await this.getReviewerContext(orgId, reviewerId)
     const items = await this.videoTaskModel.find({
-      orgId: this.toObjectId(orgId, 'orgId'),
-      status: VideoTaskStatus.PENDING_REVIEW,
+      'orgId': this.toObjectId(orgId, 'orgId'),
+      'status': VideoTaskStatus.PENDING_REVIEW,
       'approval.pendingRoles': reviewer.role,
     })
       .sort({ updatedAt: -1, createdAt: -1 })

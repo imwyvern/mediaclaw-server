@@ -18,8 +18,8 @@ import {
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import { BillingService } from '../billing/billing.service'
-import { createStatusTransitionIterationEntry, mapVideoTaskStatusToProductionStage } from '../video-task-lifecycle.util'
 import { UsageService } from '../usage/usage.service'
+import { createStatusTransitionIterationEntry, mapVideoTaskStatusToProductionStage } from '../video-task-lifecycle.util'
 import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData } from '../worker/worker.constants'
 
 interface CreateTaskParams {
@@ -205,15 +205,15 @@ export class TaskMgmtService {
         const failedAt = new Date()
         await this.videoTaskModel.findByIdAndUpdate(task._id, {
           $set: {
-            status: VideoTaskStatus.FAILED,
-            creditCharged: false,
-            errorMessage: error instanceof Error ? error.message : String(error),
-            completedAt: failedAt,
+            'status': VideoTaskStatus.FAILED,
+            'creditCharged': false,
+            'errorMessage': error instanceof Error ? error.message : String(error),
+            'completedAt': failedAt,
             'metadata.creditRefundedAt': failedAt.toISOString(),
             'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.FAILED),
           },
           $push: {
-            iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+            'iterationLog': createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
               fromStatus: VideoTaskStatus.PENDING,
               toStatus: VideoTaskStatus.FAILED,
               timestamp: failedAt,
@@ -431,14 +431,14 @@ export class TaskMgmtService {
       task._id,
       {
         $set: {
-          status: VideoTaskStatus.CANCELLED,
-          creditCharged: false,
-          completedAt: cancelledAt,
+          'status': VideoTaskStatus.CANCELLED,
+          'creditCharged': false,
+          'completedAt': cancelledAt,
           'metadata.creditRefundedAt': cancelledAt.toISOString(),
           'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.CANCELLED),
         },
         $push: {
-          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+          'iterationLog': createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
             fromStatus: task.status,
             toStatus: VideoTaskStatus.CANCELLED,
             timestamp: cancelledAt,
@@ -476,14 +476,14 @@ export class TaskMgmtService {
       task._id,
       {
         $set: {
-          status: VideoTaskStatus.PENDING,
-          startedAt: null,
-          completedAt: null,
-          errorMessage: '',
+          'status': VideoTaskStatus.PENDING,
+          'startedAt': null,
+          'completedAt': null,
+          'errorMessage': '',
           'metadata.productionStage': mapVideoTaskStatusToProductionStage(VideoTaskStatus.PENDING),
         },
         $push: {
-          iterationLog: createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
+          'iterationLog': createStatusTransitionIterationEntry(task.iterationLog as Array<Record<string, any>> || [], {
             fromStatus: task.status,
             toStatus: VideoTaskStatus.PENDING,
             timestamp: retriedAt,
@@ -777,7 +777,7 @@ export class TaskMgmtService {
 
   private buildTaskQuery(orgId: string, filters: TaskFilters) {
     const query: Record<string, any> = {
-      orgId: this.toObjectId(orgId, 'orgId'),
+      'orgId': this.toObjectId(orgId, 'orgId'),
       'metadata.isDeleted': { $ne: true },
     }
 
@@ -892,8 +892,8 @@ export class TaskMgmtService {
 
   private buildTaskOwnershipQuery(orgId: string, taskId: string) {
     return {
-      _id: this.toDocumentId(taskId),
-      orgId: this.toObjectId(orgId, 'orgId'),
+      '_id': this.toDocumentId(taskId),
+      'orgId': this.toObjectId(orgId, 'orgId'),
       'metadata.isDeleted': { $ne: true },
     }
   }

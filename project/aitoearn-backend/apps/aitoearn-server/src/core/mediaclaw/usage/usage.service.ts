@@ -450,7 +450,7 @@ export class UsageService {
       page,
       limit,
       total,
-      items: items.map(item => {
+      items: items.map((item) => {
         const metrics = this.extractUsageMetrics(item)
         const brandId = this.resolveHistoryBrandId(item, taskBrandMap)
         const tokenUsage = this.normalizeTokenUsage(item['tokenUsage'] || {})
@@ -619,7 +619,7 @@ export class UsageService {
       page,
       limit,
       total,
-      items: items.map(item => {
+      items: items.map((item) => {
         const brandId = this.resolveHistoryBrandId(item, taskBrandMap)
         const packId = item.packId?.toString?.() || null
         const pack = packId ? packMap.get(packId) : null
@@ -801,7 +801,7 @@ export class UsageService {
     }
 
     const existingRefund = await this.usageHistoryModel.findOne({
-      type: UsageHistoryType.VIDEO_REFUND,
+      'type': UsageHistoryType.VIDEO_REFUND,
       'metadata.chargeUsageHistoryId': history._id.toString(),
     }).lean().exec()
 
@@ -1295,7 +1295,7 @@ export class UsageService {
 
   private async findRefundedChargeIds(chargeIds: string[]) {
     const refunds = await this.usageHistoryModel.find({
-      type: UsageHistoryType.VIDEO_REFUND,
+      'type': UsageHistoryType.VIDEO_REFUND,
       'metadata.chargeUsageHistoryId': { $in: chargeIds },
     })
       .select({ metadata: 1 })

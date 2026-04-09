@@ -71,9 +71,9 @@ export class CampaignService {
     }
 
     const tasks = await this.videoTaskModel.find({
-      orgId: new Types.ObjectId(orgId),
+      'orgId': new Types.ObjectId(orgId),
       'metadata.isDeleted': { $ne: true },
-      $or: matchers,
+      '$or': matchers,
     })
       .sort({ createdAt: -1 })
       .lean()

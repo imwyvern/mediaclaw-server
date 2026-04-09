@@ -29,4 +29,3 @@ export function isMediaclawSuccessStatus(status: VideoTaskStatus | null | undefi
 export function isDistributableVideoTaskStatus(status: VideoTaskStatus | null | undefined) {
   return MEDIACLAW_DISTRIBUTABLE_STATUSES.includes(status as (typeof MEDIACLAW_DISTRIBUTABLE_STATUSES)[number])
 }
-
