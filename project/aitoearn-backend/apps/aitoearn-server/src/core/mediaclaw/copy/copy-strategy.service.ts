@@ -647,7 +647,7 @@ export class CopyStrategyService {
         'variantPerformance.score': -1,
         'performance.ctr': -1,
         'performance.views': -1,
-        createdAt: 1,
+        'createdAt': 1,
       })
       .lean()
       .exec() as Array<Record<string, any>>

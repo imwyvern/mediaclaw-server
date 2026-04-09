@@ -1712,7 +1712,7 @@ export class CopyEngineService {
     const history = await this.copyHistoryModel.find({
       orgId: new Types.ObjectId(orgId),
     })
-      .sort({ 'variantPerformance.score': -1, 'performance.views': -1, 'performance.ctr': -1, createdAt: -1 })
+      .sort({ 'variantPerformance.score': -1, 'performance.views': -1, 'performance.ctr': -1, 'createdAt': -1 })
       .limit(200)
       .lean()
       .exec() as Array<Record<string, any>>

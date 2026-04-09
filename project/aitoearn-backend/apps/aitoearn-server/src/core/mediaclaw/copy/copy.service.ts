@@ -403,8 +403,8 @@ export class CopyService {
   private serializeCopyHistory(item: Record<string, any>) {
     const commentGuides = Array.isArray(item['commentGuides'])
       ? item['commentGuides']
-        .map(candidate => this.readString(candidate))
-        .filter(Boolean)
+          .map(candidate => this.readString(candidate))
+          .filter(Boolean)
       : this.readString(item['commentGuide'])
           .split('\n')
           .map(candidate => candidate.trim())
