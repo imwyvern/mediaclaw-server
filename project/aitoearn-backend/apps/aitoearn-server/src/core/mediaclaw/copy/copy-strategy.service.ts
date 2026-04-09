@@ -147,13 +147,23 @@ export class CopyStrategyService {
           clicks: metrics.likes + metrics.comments + metrics.shares + metrics.saves,
           ctr: metrics.ctr,
         },
+        variantPerformance: {
+          score: performanceScore,
+          bestPerformer: false,
+        },
       },
     }).exec()
+
+    const variantGroup = await this.refreshVariantGroupRanking(
+      recordOrgId,
+      this.readString((copyHistory as CopyHistory & { variantGroupId?: string }).variantGroupId),
+    )
 
     const strategyHints = await this.updateStrategyFromPerformance(recordOrgId)
 
     return {
       record: this.serializePerformanceRecord(performanceRecord),
+      variantGroup,
       strategyHints,
     }
   }
@@ -620,6 +630,55 @@ export class CopyStrategyService {
       recordedAt: item['recordedAt'] || null,
       createdAt: item['createdAt'] || null,
       updatedAt: item['updatedAt'] || null,
+    }
+  }
+
+  private async refreshVariantGroupRanking(orgId: string, variantGroupId: string) {
+    const normalizedVariantGroupId = variantGroupId.trim()
+    if (!normalizedVariantGroupId || !Types.ObjectId.isValid(orgId)) {
+      return null
+    }
+
+    const variants = await this.copyHistoryModel.find({
+      orgId: new Types.ObjectId(orgId),
+      variantGroupId: normalizedVariantGroupId,
+    })
+      .sort({
+        'variantPerformance.score': -1,
+        'performance.ctr': -1,
+        'performance.views': -1,
+        createdAt: 1,
+      })
+      .lean()
+      .exec() as Array<Record<string, any>>
+
+    if (variants.length === 0) {
+      return null
+    }
+
+    const winner = variants[0]
+    await this.copyHistoryModel.updateMany(
+      {
+        orgId: new Types.ObjectId(orgId),
+        variantGroupId: normalizedVariantGroupId,
+      },
+      {
+        $set: {
+          'variantPerformance.bestPerformer': false,
+        },
+      },
+    ).exec()
+    await this.copyHistoryModel.findByIdAndUpdate(winner['_id'], {
+      $set: {
+        'variantPerformance.bestPerformer': true,
+      },
+    }).exec()
+
+    return {
+      variantGroupId: normalizedVariantGroupId,
+      bestCopyHistoryId: winner['_id']?.toString?.() || null,
+      bestPerformanceScore: Number(winner['variantPerformance']?.['score'] || 0),
+      sampleSize: variants.length,
     }
   }
 

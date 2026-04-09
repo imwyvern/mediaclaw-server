@@ -106,7 +106,11 @@ export class CopyService {
     const copies: Array<GeneratedCopy & {
       copyHistoryId: string | null
       variantIndex: number
+      variantGroupId: string | null
     }> = []
+    const variantGroupId = normalizedCount > 1
+      ? new Types.ObjectId().toString()
+      : null
 
     for (let index = 0; index < normalizedCount; index += 1) {
       const generated = await this.copyEngineService.generateCopyRecord(
@@ -128,6 +132,8 @@ export class CopyService {
           style: body.style?.trim() || this.readMetadataString(taskMetadata, 'style'),
           sourceHint: body.sourceHint?.trim() || this.readMetadataString(taskMetadata, 'sourceHint'),
           copyProvider: body.provider?.trim().toLowerCase(),
+          variantIndex: index + 1,
+          variantGroupId,
           variantGoal: normalizedCount > 1
             ? `生成第 ${index + 1} 个版本，与已生成候选保持明显差异。`
             : '',
@@ -139,7 +145,12 @@ export class CopyService {
         },
       )
 
-      copies.push(this.toCopyHistoryPayload(generated.copy, generated.copyHistoryId, index + 1))
+      copies.push(this.toCopyHistoryPayload(
+        generated.copy,
+        generated.copyHistoryId,
+        index + 1,
+        variantGroupId,
+      ))
     }
 
     return {
@@ -178,7 +189,11 @@ export class CopyService {
     const copies: Array<GeneratedCopy & {
       copyHistoryId: string | null
       variantIndex: number
+      variantGroupId: string | null
     }> = []
+    const variantGroupId = normalizedCount > 1
+      ? new Types.ObjectId().toString()
+      : null
 
     for (let index = 0; index < normalizedCount; index += 1) {
       const generated = await this.copyEngineService.generateCopyRecord(
@@ -200,6 +215,8 @@ export class CopyService {
           style: body.style?.trim() || this.readMetadataString(taskMetadata, 'style'),
           sourceHint: body.sourceHint?.trim() || this.readMetadataString(taskMetadata, 'sourceHint'),
           copyProvider: body.provider?.trim().toLowerCase(),
+          variantIndex: index + 1,
+          variantGroupId,
           variantGoal: normalizedCount > 1
             ? `生成第 ${index + 1} 个版本，与已生成候选保持明显差异。`
             : '',
@@ -211,7 +228,12 @@ export class CopyService {
         },
       )
 
-      copies.push(this.toCopyHistoryPayload(generated.copy, generated.copyHistoryId, index + 1))
+      copies.push(this.toCopyHistoryPayload(
+        generated.copy,
+        generated.copyHistoryId,
+        index + 1,
+        variantGroupId,
+      ))
     }
 
     return {
@@ -379,10 +401,14 @@ export class CopyService {
   }
 
   private serializeCopyHistory(item: Record<string, any>) {
-    const commentGuides = this.readString(item['commentGuide'])
-      .split('\n')
-      .map(candidate => candidate.trim())
-      .filter(Boolean)
+    const commentGuides = Array.isArray(item['commentGuides'])
+      ? item['commentGuides']
+        .map(candidate => this.readString(candidate))
+        .filter(Boolean)
+      : this.readString(item['commentGuide'])
+          .split('\n')
+          .map(candidate => candidate.trim())
+          .filter(Boolean)
 
     return {
       id: item['_id']?.toString?.() || null,
@@ -395,6 +421,14 @@ export class CopyService {
       blueWords: Array.isArray(item['blueWords']) ? item['blueWords'] : [],
       commentGuide: this.readString(item['commentGuide']),
       commentGuides,
+      variantIndex: Number.isFinite(Number(item['variantIndex']))
+        ? Number(item['variantIndex'])
+        : null,
+      variantGroupId: this.readString(item['variantGroupId']) || null,
+      variantGoal: this.readString(item['variantGoal']) || '',
+      dedupFingerprint: this.readString(item['dedupFingerprint']) || '',
+      variantPerformance: this.toPlainObject(item['variantPerformance']),
+      bestPerformer: Boolean(item['variantPerformance']?.['bestPerformer']),
       performance: this.toPlainObject(item['performance']),
       createdAt: item['createdAt'] || null,
       updatedAt: item['updatedAt'] || null,
@@ -405,10 +439,12 @@ export class CopyService {
     copy: GeneratedCopy,
     copyHistoryId: string | null,
     variantIndex: number,
+    variantGroupId: string | null,
   ) {
     return {
       copyHistoryId,
       variantIndex,
+      variantGroupId,
       ...copy,
     }
   }

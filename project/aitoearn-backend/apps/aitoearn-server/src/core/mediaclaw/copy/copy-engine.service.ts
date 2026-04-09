@@ -33,6 +33,10 @@ type CopyProvider = 'deepseek' | 'gemini' | 'openai' | 'heuristic'
 interface CopyHistoryPayload extends GeneratedCopy {
   orgId?: string | null
   taskId?: string | null
+  variantIndex?: number | null
+  variantGroupId?: string | null
+  variantGoal?: string
+  dedupFingerprint?: string
 }
 
 interface CopyHistoryWriteOptions {
@@ -127,6 +131,21 @@ interface CopyStrategyPromptHints {
   blueWordPolicy?: string
 }
 
+interface CopyTrendSignals {
+  trendingBlueWords: string[]
+  commentGuideWords: string[]
+}
+
+interface GenerateBlueWordsOptions {
+  trendingWords?: string[]
+  maxWords?: number
+}
+
+interface CommentGuideOptions {
+  guideWords?: string[]
+  trendingBlueWords?: string[]
+}
+
 @Injectable()
 export class CopyEngineService {
   private readonly logger = new Logger(CopyEngineService.name)
@@ -188,6 +207,12 @@ export class CopyEngineService {
     const strategyHints = resolvedOrgId
       ? await this.getCopyStrategyHints(resolvedOrgId)
       : null
+    const trendSignals = resolvedOrgId
+      ? await this.getCopyTrendSignals(resolvedOrgId)
+      : {
+          trendingBlueWords: [],
+          commentGuideWords: [],
+        }
 
     const llmResult = await this.generateWithProvider({
       brandName,
@@ -202,17 +227,36 @@ export class CopyEngineService {
       })),
       brandSlogans,
       strategyHints,
+      trendingBlueWords: trendSignals.trendingBlueWords,
+      commentGuideWords: trendSignals.commentGuideWords,
       metadata,
     })
 
-    const generated = this.normalizeGeneratedCopy({
+    let generated = this.normalizeGeneratedCopy({
       draft: llmResult.draft,
       brandName,
       scene,
       toneKeywords,
       avoidKeywords,
       dedupDuplicate: dedup.isDuplicate,
+      trendingBlueWords: trendSignals.trendingBlueWords,
+      commentGuideWords: trendSignals.commentGuideWords,
     })
+
+    const uniqueCopy = resolvedOrgId
+      ? await this.ensureDistinctFromRecentHistory(resolvedOrgId, generated, {
+          brandName,
+          scene,
+          toneKeywords,
+          avoidKeywords,
+          trendingBlueWords: trendSignals.trendingBlueWords,
+          commentGuideWords: trendSignals.commentGuideWords,
+        })
+      : {
+          copy: generated,
+          dedupFingerprint: this.buildDedupFingerprint(generated),
+        }
+    generated = uniqueCopy.copy
 
     await this.recordLlmUsage(
       llmResult,
@@ -223,6 +267,10 @@ export class CopyEngineService {
     const copyHistory = await this.recordCopyHistory({
       orgId: resolvedOrgId,
       taskId: this.normalizeObjectIdString(metadata['taskId']),
+      variantIndex: this.normalizeVariantIndex(metadata['variantIndex']),
+      variantGroupId: this.readMetadataString(metadata, 'variantGroupId') || null,
+      variantGoal: this.readMetadataString(metadata, 'variantGoal') || '',
+      dedupFingerprint: uniqueCopy.dedupFingerprint,
       ...generated,
     }, options)
 
@@ -262,6 +310,8 @@ export class CopyEngineService {
       toneKeywords,
       avoidKeywords: brand?.assets?.prohibitedWords || [],
       dedupDuplicate: false,
+      trendingBlueWords: [],
+      commentGuideWords: [],
     })
 
     await this.recordLlmUsage(llmResult, rewriteMetadata, normalizedBrandId)
@@ -277,19 +327,27 @@ export class CopyEngineService {
     }
   }
 
-  generateBlueWords(title: string, keywords: string[] = []) {
+  generateBlueWords(
+    title: string,
+    keywords: string[] = [],
+    options: GenerateBlueWordsOptions = {},
+  ) {
     const normalizedTitle = title.trim()
     if (!normalizedTitle) {
       throw new BadRequestException('title is required')
     }
 
-    const keywordBlueWords = keywords
+    const keywordBlueWords = [
+      ...(options.trendingWords || []),
+      ...keywords,
+    ]
       .map(keyword => keyword.trim())
       .filter(Boolean)
-      .slice(0, 3)
+      .slice(0, Math.min(Math.max(options.maxWords || 3, 1), 5))
       .map(keyword => this.toBlueWord(keyword))
     const existingBlueWords = normalizedTitle.match(/#[^\s#]+/g) || []
-    const blueWords = [...new Set([...existingBlueWords, ...keywordBlueWords])].slice(0, 3)
+    const blueWords = [...new Set([...existingBlueWords, ...keywordBlueWords])]
+      .slice(0, Math.min(Math.max(options.maxWords || 3, 1), 5))
     const missingBlueWords = blueWords.filter(word => !normalizedTitle.includes(word))
 
     return {
@@ -304,14 +362,32 @@ export class CopyEngineService {
     return this.generateCommentGuides(brand, content)[0]
   }
 
-  generateCommentGuides(brand: string, content: string) {
+  generateCommentGuides(
+    brand: string,
+    content: string,
+    options: CommentGuideOptions = {},
+  ) {
     const safeBrand = brand.trim() || 'MediaClaw'
     const safeContent = content.trim() || '这条内容'
+    const guideWords = (options.guideWords || [])
+      .map(item => item.trim())
+      .filter(Boolean)
+      .slice(0, 3)
+    const leadBlueWord = (options.trendingBlueWords || [])
+      .map(item => item.replace(/^#+/, '').trim())
+      .find(Boolean)
+    const primaryWord = guideWords[0] || '模板'
+    const secondaryWord = guideWords[1] || '案例'
+    const tertiaryWord = guideWords[2] || '激进'
+    const safeTopic = this.limitText(
+      safeContent.replace(/\s+/g, ' ').slice(0, 24),
+      24,
+    )
 
     return [
-      `${safeBrand}这条内容最适合哪类人群？留言“人群”我补完整拆解。`,
-      `如果你也在做 ${safeContent}，评论区回“模板”我继续给你细化版本。`,
-      `想看 ${safeBrand} 下一条更激进还是更稳的表达？留言“激进”或“稳”。`,
+      `评论“${primaryWord}”我把 ${safeBrand} 这条的完整拆解发你。`,
+      `如果你也在做 ${safeTopic}，留言“${secondaryWord}”我继续补最能转化的版本。`,
+      `想看 ${leadBlueWord || safeBrand} 下一条更${tertiaryWord}还是更稳？评论区直接告诉我。`,
     ]
   }
 
@@ -365,47 +441,72 @@ export class CopyEngineService {
         isDuplicate: false,
         matchCount: 0,
         matches: [],
+        fingerprint: '',
       }
     }
 
-    const normalizedContent = typeof content === 'string'
-      ? content.trim()
-      : [content.title, content.subtitle, content.description].filter(Boolean).join(' ').trim()
+    const fingerprint = this.buildDedupFingerprint(content)
 
-    if (!normalizedContent) {
+    if (!fingerprint) {
       return {
         isDuplicate: false,
         matchCount: 0,
         matches: [],
+        fingerprint: '',
       }
     }
 
-    const exactMatches = await this.copyHistoryModel.find({
+    const recentHistory = await this.copyHistoryModel.find({
       orgId: new Types.ObjectId(orgId),
-      title: new RegExp(`^${this.escapeRegex(normalizedContent)}$`, 'i'),
-    }).limit(5).lean().exec()
+    })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(1000)
+      .lean()
+      .exec() as Array<Record<string, any>>
 
-    const textMatches = await this.copyHistoryModel.find({
-      orgId: new Types.ObjectId(orgId),
-      $text: { $search: normalizedContent.replace(/#/g, ' ') },
-    }).limit(5).lean().exec()
+    const matches = recentHistory
+      .map((item) => {
+        const candidateFingerprint = this.readString(item['dedupFingerprint'])
+          || this.buildDedupFingerprint({
+            title: this.readString(item['title']),
+            subtitle: this.readString(item['subtitle']),
+            description: this.readString(item['description']),
+          })
+        const similarity = this.calculateTextSimilarity(
+          fingerprint,
+          candidateFingerprint,
+        )
+        const titleSimilarity = this.calculateTextSimilarity(
+          this.normalizeFingerprintText(
+            typeof content === 'string'
+              ? content
+              : this.readString(content.title),
+          ),
+          this.normalizeFingerprintText(this.readString(item['title'])),
+        )
 
-    const matches = [...exactMatches, ...textMatches]
-      .filter((item, index, self) =>
-        self.findIndex(candidate => candidate._id.toString() === item._id.toString()) === index,
-      )
+        return {
+          item,
+          similarity: Math.max(similarity, titleSimilarity),
+        }
+      })
+      .filter(candidate => candidate.similarity >= 0.82)
+      .sort((left, right) => right.similarity - left.similarity)
+      .slice(0, 5)
       .map(item => ({
-        id: item._id.toString(),
-        taskId: item.taskId?.toString() || null,
-        title: item.title,
-        subtitle: item.subtitle,
-        createdAt: item.createdAt,
+        id: item.item['_id'].toString(),
+        taskId: item.item['taskId']?.toString?.() || null,
+        title: this.readString(item.item['title']),
+        subtitle: this.readString(item.item['subtitle']),
+        createdAt: item.item['createdAt'],
+        similarity: Number(item.similarity.toFixed(4)),
       }))
 
     return {
       isDuplicate: matches.length > 0,
       matchCount: matches.length,
       matches,
+      fingerprint,
     }
   }
 
@@ -419,6 +520,8 @@ export class CopyEngineService {
     dedupMatches: Array<{ title: string, subtitle: string }>
     brandSlogans: string[]
     strategyHints: CopyStrategyPromptHints | null
+    trendingBlueWords: string[]
+    commentGuideWords: string[]
     metadata: Record<string, any>
   }): Promise<CopyLlmResult> {
     const prompt = this.buildPrompt(input)
@@ -639,6 +742,8 @@ export class CopyEngineService {
     dedupMatches: Array<{ title: string, subtitle: string }>
     brandSlogans: string[]
     strategyHints: CopyStrategyPromptHints | null
+    trendingBlueWords: string[]
+    commentGuideWords: string[]
     metadata: Record<string, any>
   }) {
     const platform = this.readMetadataString(input.metadata, 'platform') || '通用短视频平台'
@@ -680,9 +785,16 @@ export class CopyEngineService {
       dedupHints,
       '本次还需避开已生成标题:',
       variantHints,
+      input.trendingBlueWords.length > 0
+        ? `近期高互动蓝词: ${input.trendingBlueWords.join('、')}`
+        : '',
+      input.commentGuideWords.length > 0
+        ? `近期高互动评论引导词: ${input.commentGuideWords.join('、')}`
+        : '',
       strategyPrompt ? '当前组织已验证的高表现文案策略:' : '',
       strategyPrompt,
       'hashtags 统一带 # 前缀，blueWords 更适合小红书互动语境。',
+      '优先让 blueWords 兼顾近期起量蓝词，commentGuides 使用明确可执行的评论引导词。',
       '禁用词不能出现在 title、subtitle、description、hashtags、commentGuides 的任何位置。',
     ].filter(Boolean).join('\n')
   }
@@ -1163,12 +1275,18 @@ export class CopyEngineService {
     toneKeywords: string[]
     avoidKeywords: string[]
     dedupDuplicate: boolean
+    trendingBlueWords: string[]
+    commentGuideWords: string[]
   }): GeneratedCopy {
     const heuristic = this.buildHeuristicCopy(
       input.brandName,
       input.scene,
       input.toneKeywords,
       input.avoidKeywords,
+      {
+        trendingBlueWords: input.trendingBlueWords,
+        commentGuideWords: input.commentGuideWords,
+      },
     )
 
     const titleBase = this.filterProhibitedText(this.coerceText(input.draft?.title) || heuristic.title, input.avoidKeywords)
@@ -1189,15 +1307,18 @@ export class CopyEngineService {
 
     const blueWordSeeds = this.filterProhibitedTerms(
       blueWordsBase.length > 0
-        ? blueWordsBase
+        ? [...input.trendingBlueWords, ...blueWordsBase]
         : input.toneKeywords.length > 0
-          ? input.toneKeywords
-          : [input.brandName, input.scene],
+          ? [...input.trendingBlueWords, ...input.toneKeywords]
+          : [...input.trendingBlueWords, input.brandName, input.scene],
       input.avoidKeywords,
     )
     const blueWordResult = this.generateBlueWords(
       title,
       blueWordSeeds.length > 0 ? blueWordSeeds : [input.brandName],
+      {
+        trendingWords: input.trendingBlueWords,
+      },
     )
     const subtitle = this.normalizeSubtitle(subtitleBase, input.brandName, input.scene, input.avoidKeywords)
     const description = this.normalizeDescription(
@@ -1219,6 +1340,10 @@ export class CopyEngineService {
       input.brandName,
       description,
       input.avoidKeywords,
+      {
+        guideWords: input.commentGuideWords,
+        trendingBlueWords: input.trendingBlueWords,
+      },
     )
 
     return {
@@ -1237,6 +1362,10 @@ export class CopyEngineService {
     scene: string,
     toneKeywords: string[],
     avoidKeywords: string[],
+    options: CopyTrendSignals = {
+      trendingBlueWords: [],
+      commentGuideWords: [],
+    },
   ): GeneratedCopy {
     const primaryTone = toneKeywords[0] || '品牌感'
     const titleSeed = `${brandName}${primaryTone}短视频`
@@ -1247,6 +1376,9 @@ export class CopyEngineService {
     const blueWordResult = this.generateBlueWords(
       titleSeed,
       blueWordSeeds.length > 0 ? blueWordSeeds : [brandName],
+      {
+        trendingWords: options.trendingBlueWords,
+      },
     )
     const subtitle = this.normalizeSubtitle(
       `${scene}场景成片已生成，突出${toneKeywords.slice(0, 2).join('、') || '品牌识别度'}`,
@@ -1267,7 +1399,10 @@ export class CopyEngineService {
           `如果你也在做 ${scene}，留言“案例”我继续补充合规版本。`,
           `想看 ${brandName} 下一条更强转化还是更强种草？直接留言告诉我。`,
         ]
-      : this.generateCommentGuides(brandName, description)
+      : this.generateCommentGuides(brandName, description, {
+          guideWords: options.commentGuideWords,
+          trendingBlueWords: options.trendingBlueWords,
+        })
 
     return {
       title: blueWordResult.title,
@@ -1346,12 +1481,18 @@ export class CopyEngineService {
     return normalized.slice(0, Math.min(Math.max(normalized.length, 5), 10))
   }
 
-  private normalizeCommentGuides(commentGuides: string[], brandName: string, content: string, avoidKeywords: string[]) {
+  private normalizeCommentGuides(
+    commentGuides: string[],
+    brandName: string,
+    content: string,
+    avoidKeywords: string[],
+    options: CommentGuideOptions = {},
+  ) {
     const normalized = commentGuides
       .map(item => this.filterProhibitedText(item.trim(), avoidKeywords))
       .filter(Boolean)
 
-    const fallback = this.generateCommentGuides(brandName, content)
+    const fallback = this.generateCommentGuides(brandName, content, options)
     while (normalized.length < 3) {
       normalized.push(this.filterProhibitedText(fallback[normalized.length] || fallback[0], avoidKeywords))
     }
@@ -1560,6 +1701,66 @@ export class CopyEngineService {
     }))
   }
 
+  private async getCopyTrendSignals(orgId: string): Promise<CopyTrendSignals> {
+    if (!Types.ObjectId.isValid(orgId)) {
+      return {
+        trendingBlueWords: [],
+        commentGuideWords: [],
+      }
+    }
+
+    const history = await this.copyHistoryModel.find({
+      orgId: new Types.ObjectId(orgId),
+    })
+      .sort({ 'variantPerformance.score': -1, 'performance.views': -1, 'performance.ctr': -1, createdAt: -1 })
+      .limit(200)
+      .lean()
+      .exec() as Array<Record<string, any>>
+
+    const blueWordScores = new Map<string, number>()
+    const commentGuideWordScores = new Map<string, number>()
+
+    for (const item of history) {
+      const weight = this.resolveTrendWeight(item)
+      const blueWordCandidates = this.mergeUniqueStrings(
+        this.readStringArray(item['blueWords']).map(candidate => candidate.replace(/^#+/, '')),
+        this.readStringArray(item['hashtags']).map(candidate => candidate.replace(/^#+/, '')),
+      )
+
+      for (const candidate of blueWordCandidates) {
+        const normalized = candidate.replace(/^#+/, '').trim()
+        if (!normalized || this.isGenericBlueWord(normalized)) {
+          continue
+        }
+
+        blueWordScores.set(
+          normalized,
+          Number((blueWordScores.get(normalized) || 0) + weight),
+        )
+      }
+
+      const guideSources = this.mergeUniqueStrings(
+        this.readStringArray(item['commentGuides']),
+        this.readString(item['commentGuide'])
+          .split(/\n|[|；;]+/g)
+          .map(candidate => candidate.trim())
+          .filter(Boolean),
+      )
+      const guideWords = this.extractCommentGuideWords(guideSources)
+      for (const word of guideWords) {
+        commentGuideWordScores.set(
+          word,
+          Number((commentGuideWordScores.get(word) || 0) + weight),
+        )
+      }
+    }
+
+    return {
+      trendingBlueWords: this.pickTopWeightedTerms(blueWordScores, 5).map(item => this.toBlueWord(item)),
+      commentGuideWords: this.pickTopWeightedTerms(commentGuideWordScores, 6),
+    }
+  }
+
   private buildPlatformRules(platform: string) {
     switch (platform.trim().toLowerCase()) {
       case 'xiaohongshu':
@@ -1617,6 +1818,15 @@ export class CopyEngineService {
       hashtags: payload.hashtags,
       blueWords: payload.blueWords,
       commentGuide: payload.commentGuide,
+      commentGuides: payload.commentGuides,
+      variantIndex: payload.variantIndex ?? null,
+      variantGroupId: payload.variantGroupId?.trim() || '',
+      variantGoal: payload.variantGoal?.trim() || '',
+      dedupFingerprint: payload.dedupFingerprint || this.buildDedupFingerprint(payload),
+      variantPerformance: {
+        score: 0,
+        bestPerformer: false,
+      },
       performance: {
         views: 0,
         clicks: 0,
@@ -1718,6 +1928,245 @@ export class CopyEngineService {
     })
   }
 
+  private async ensureDistinctFromRecentHistory(
+    orgId: string,
+    copy: GeneratedCopy,
+    options: {
+      brandName: string
+      scene: string
+      toneKeywords: string[]
+      avoidKeywords: string[]
+      trendingBlueWords: string[]
+      commentGuideWords: string[]
+    },
+  ) {
+    const initialCheck = await this.checkDedupHistory(orgId, copy)
+    if (!initialCheck.isDuplicate) {
+      return {
+        copy,
+        dedupFingerprint: initialCheck.fingerprint,
+      }
+    }
+
+    const diversified = this.diversifyDuplicateCopy(copy, initialCheck.matches, options)
+    const secondCheck = await this.checkDedupHistory(orgId, diversified)
+
+    return {
+      copy: diversified,
+      dedupFingerprint: secondCheck.fingerprint || this.buildDedupFingerprint(diversified),
+    }
+  }
+
+  private diversifyDuplicateCopy(
+    copy: GeneratedCopy,
+    matches: Array<{ title: string, subtitle: string }>,
+    options: {
+      brandName: string
+      scene: string
+      toneKeywords: string[]
+      avoidKeywords: string[]
+      trendingBlueWords: string[]
+      commentGuideWords: string[]
+    },
+  ): GeneratedCopy {
+    const matchTitles = matches.map(item => item.title)
+    const variantTitle = this.generateABVariants(copy.title, 3)
+      .find(candidate => !matchTitles.some(title =>
+        this.calculateTextSimilarity(
+          this.normalizeFingerprintText(candidate),
+          this.normalizeFingerprintText(title),
+        ) >= 0.9,
+      ))
+      || `${copy.title}，换个打法继续放大结果`
+    const subtitle = this.normalizeSubtitle(
+      `换个角度拆 ${options.scene}，${copy.subtitle}`,
+      options.brandName,
+      options.scene,
+      options.avoidKeywords,
+    )
+    const description = this.normalizeDescription(
+      `${copy.description} 这次改成 ${options.scene} 的落地版本，避免与历史文案重复。`,
+      options.brandName,
+      options.scene,
+      options.toneKeywords,
+      options.avoidKeywords,
+    )
+    const blueWordResult = this.generateBlueWords(
+      variantTitle,
+      this.mergeUniqueStrings(
+        options.trendingBlueWords,
+        copy.blueWords.map(item => item.replace(/^#+/, '')),
+      ),
+      {
+        trendingWords: options.trendingBlueWords,
+      },
+    )
+    const commentGuides = this.normalizeCommentGuides(
+      copy.commentGuides,
+      options.brandName,
+      description,
+      options.avoidKeywords,
+      {
+        guideWords: options.commentGuideWords,
+        trendingBlueWords: options.trendingBlueWords,
+      },
+    )
+
+    return {
+      title: blueWordResult.title,
+      subtitle,
+      description,
+      hashtags: this.normalizeHashtags(
+        this.mergeUniqueStrings(copy.hashtags, options.trendingBlueWords),
+        options.brandName,
+        this.mergeUniqueStrings(options.toneKeywords, options.trendingBlueWords),
+        blueWordResult.blueWords,
+        options.avoidKeywords,
+      ),
+      blueWords: blueWordResult.blueWords,
+      commentGuide: commentGuides.join('\n'),
+      commentGuides,
+    }
+  }
+
+  private buildDedupFingerprint(
+    content: string | { title?: string, subtitle?: string, description?: string },
+  ) {
+    const normalized = typeof content === 'string'
+      ? content
+      : [content.title, content.subtitle, content.description]
+          .map(item => this.readString(item))
+          .filter(Boolean)
+          .join(' ')
+
+    return this.normalizeFingerprintText(normalized).slice(0, 240)
+  }
+
+  private normalizeFingerprintText(text: string) {
+    return text
+      .trim()
+      .toLowerCase()
+      .replace(/#[^\s#]+/g, '')
+      .replace(/[^\p{L}\p{N}]+/gu, '')
+  }
+
+  private calculateTextSimilarity(left: string, right: string) {
+    if (!left || !right) {
+      return 0
+    }
+
+    if (left === right) {
+      return 1
+    }
+
+    const leftBigrams = this.buildBigrams(left)
+    const rightBigrams = this.buildBigrams(right)
+    if (leftBigrams.length === 0 || rightBigrams.length === 0) {
+      return 0
+    }
+
+    const rightCount = new Map<string, number>()
+    for (const token of rightBigrams) {
+      rightCount.set(token, (rightCount.get(token) || 0) + 1)
+    }
+
+    let overlap = 0
+    for (const token of leftBigrams) {
+      const count = rightCount.get(token) || 0
+      if (count > 0) {
+        overlap += 1
+        rightCount.set(token, count - 1)
+      }
+    }
+
+    return (2 * overlap) / (leftBigrams.length + rightBigrams.length)
+  }
+
+  private buildBigrams(text: string) {
+    const normalized = text.trim()
+    if (normalized.length < 2) {
+      return normalized ? [normalized] : []
+    }
+
+    const bigrams: string[] = []
+    for (let index = 0; index < normalized.length - 1; index += 1) {
+      bigrams.push(normalized.slice(index, index + 2))
+    }
+
+    return bigrams
+  }
+
+  private resolveTrendWeight(item: Record<string, any>) {
+    const views = Number(item['performance']?.['views'] || 0)
+    const ctr = Number(item['performance']?.['ctr'] || 0)
+    const variantScore = Number(item['variantPerformance']?.['score'] || 0)
+    const bestPerformer = Boolean(item['variantPerformance']?.['bestPerformer'])
+
+    return Number((
+      1
+      + Math.min(Math.log10(views + 1), 5)
+      + (ctr * 20)
+      + (variantScore / 10)
+      + (bestPerformer ? 1.5 : 0)
+    ).toFixed(4))
+  }
+
+  private pickTopWeightedTerms(weightMap: Map<string, number>, limit: number) {
+    return [...weightMap.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, limit)
+      .map(item => item[0])
+  }
+
+  private extractCommentGuideWords(values: string[]) {
+    const words = new Set<string>()
+    const fallbacks = ['模板', '案例', '链接', '清单', '脚本', '方法']
+
+    for (const value of values) {
+      const normalized = value.trim()
+      if (!normalized) {
+        continue
+      }
+
+      for (const match of normalized.matchAll(/[“"']([^”"'\n]{1,8})[”"']/g)) {
+        const candidate = this.readString(match[1])
+        if (candidate) {
+          words.add(candidate)
+        }
+      }
+
+      for (const match of normalized.matchAll(/(?:留言|评论|回复|回|私信)\s*[“"']?([\p{L}\p{N}]{1,8})/gu)) {
+        const candidate = this.readString(match[1])
+        if (candidate) {
+          words.add(candidate)
+        }
+      }
+    }
+
+    for (const fallback of fallbacks) {
+      if (words.size >= 6) {
+        break
+      }
+
+      words.add(fallback)
+    }
+
+    return [...words]
+  }
+
+  private isGenericBlueWord(value: string) {
+    return ['短视频', '品牌营销', '内容增长', '内容创作'].includes(value)
+  }
+
+  private normalizeVariantIndex(value: unknown) {
+    const normalized = Number(value)
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      return null
+    }
+
+    return Math.trunc(normalized)
+  }
+
   private resolveStyleGuide(style: string) {
     switch (style.trim().toLowerCase()) {
       case '种草':
@@ -1783,6 +2232,14 @@ export class CopyEngineService {
     return value
       .map(item => this.readString(item))
       .filter(Boolean)
+  }
+
+  private mergeUniqueStrings(primary: string[], secondary: string[]) {
+    return [...new Set(
+      [...primary, ...secondary]
+        .map(item => this.readString(item))
+        .filter(Boolean),
+    )]
   }
 
   private normalizeObjectIdString(value: unknown) {

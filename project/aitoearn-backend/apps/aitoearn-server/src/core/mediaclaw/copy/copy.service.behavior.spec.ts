@@ -96,6 +96,15 @@ describe('copyService behavior', () => {
           hashtags: ['#护肤'],
           blueWords: ['#修护'],
           commentGuide: '评论 1\n评论 2\n评论 3',
+          commentGuides: ['评论 1', '评论 2', '评论 3'],
+          variantIndex: 2,
+          variantGroupId: 'variant-group-1',
+          variantGoal: '生成第 2 个版本',
+          dedupFingerprint: 'abcdef',
+          variantPerformance: {
+            score: 82,
+            bestPerformer: true,
+          },
           performance: {
             views: 100,
             clicks: 20,
@@ -136,6 +145,8 @@ describe('copyService behavior', () => {
 
     expect(result.count).toBe(3)
     expect(result.primaryCopy?.description).toContain('正文内容')
+    expect(result.primaryCopy?.variantGroupId).toBeTruthy()
+    expect(new Set(result.copies.map(item => item.variantGroupId)).size).toBe(1)
     expect(copyEngineService.generateCopyRecord).toHaveBeenCalledTimes(3)
   })
 
@@ -214,5 +225,7 @@ describe('copyService behavior', () => {
     expect(result.total).toBe(1)
     expect(result.items[0]?.description).toBe('正文')
     expect(result.items[0]?.commentGuides).toEqual(['评论 1', '评论 2', '评论 3'])
+    expect(result.items[0]?.variantGroupId).toBe('variant-group-1')
+    expect(result.items[0]?.bestPerformer).toBe(true)
   })
 })

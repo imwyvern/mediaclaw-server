@@ -228,4 +228,162 @@ describe('copyEngineService', () => {
       model: 'deepseek-v3',
     })
   })
+
+  it('should use trending blue words and comment guide words from recent history', async () => {
+    const brandModel = {
+      findById: vi.fn().mockReturnValue(createQuery({
+        _id: { toString: () => 'brand-4' },
+        name: 'MediaClaw',
+        orgId: { toString: () => '507f1f77bcf86cd799439041' },
+        assets: {
+          keywords: ['护肤'],
+          prohibitedWords: [],
+        },
+      })),
+    }
+    const history = [
+      {
+        _id: { toString: () => '507f1f77bcf86cd799439051' },
+        title: '春日护肤别再乱拍',
+        subtitle: '字幕',
+        description: '正文',
+        hashtags: ['#春日变美', '#护肤教程'],
+        blueWords: ['#春日变美'],
+        commentGuides: ['评论“模板”我发你'],
+        performance: {
+          views: 82000,
+          ctr: 0.18,
+        },
+        variantPerformance: {
+          score: 86,
+          bestPerformer: true,
+        },
+        createdAt: new Date().toISOString(),
+      },
+    ]
+    const copyHistoryModel = {
+      create: vi.fn().mockResolvedValue(undefined),
+      find: vi.fn().mockReturnValue(createQuery(history)),
+      findOneAndUpdate: vi.fn().mockReturnValue(createQuery({})),
+    }
+    const organizationModel = {
+      findById: vi.fn().mockReturnValue(createQuery(null)),
+    }
+
+    const service = new CopyEngineService(
+      brandModel as any,
+      copyHistoryModel as any,
+      organizationModel as any,
+    )
+    vi.spyOn(service as any, 'generateWithProvider').mockResolvedValue({
+      draft: {
+        title: '护肤结果直接拉满',
+        subtitle: '这是一段足够长的字幕内容',
+        description: '这是一段足够长的正文内容，适合直接发到平台。',
+        hashtags: ['#护肤教程'],
+        blueWords: [],
+        commentGuides: [],
+      },
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        model: '',
+        cost: 0,
+      },
+      provider: 'heuristic',
+    })
+
+    const result = await service.generateCopy(
+      '507f1f77bcf86cd799439042',
+      'https://cdn.example.com/video.mp4',
+      {
+        orgId: '507f1f77bcf86cd799439041',
+        scene: '春日护肤种草',
+      },
+    )
+
+    expect(result.blueWords).toContain('#春日变美')
+    expect(result.commentGuides[0]).toContain('模板')
+  })
+
+  it('should diversify duplicate copy against recent 1000 captions and store dedup fingerprint', async () => {
+    const brandModel = {
+      findById: vi.fn().mockReturnValue(createQuery({
+        _id: { toString: () => 'brand-5' },
+        name: 'MediaClaw',
+        orgId: { toString: () => '507f1f77bcf86cd799439061' },
+        assets: {
+          keywords: ['增长'],
+          prohibitedWords: [],
+        },
+      })),
+    }
+    const duplicateHistory = [
+      {
+        _id: { toString: () => '507f1f77bcf86cd799439071' },
+        taskId: { toString: () => '507f1f77bcf86cd799439072' },
+        title: '同款标题',
+        subtitle: '这是一段足够长的字幕内容，用于重复检测',
+        description: '这是一段足够长的正文内容，用于重复检测和标题去重。',
+        hashtags: ['#增长'],
+        blueWords: ['#增长'],
+        commentGuides: ['评论“案例”我发你'],
+        performance: {
+          views: 10000,
+          ctr: 0.1,
+        },
+        variantPerformance: {
+          score: 30,
+          bestPerformer: false,
+        },
+        dedupFingerprint: '同款标题这是一段足够长的字幕内容用于重复检测这是一段足够长的正文内容用于重复检测和标题去重',
+        createdAt: new Date().toISOString(),
+      },
+    ]
+    const copyHistoryModel = {
+      create: vi.fn().mockResolvedValue(undefined),
+      find: vi.fn().mockReturnValue(createQuery(duplicateHistory)),
+      findOneAndUpdate: vi.fn().mockReturnValue(createQuery({})),
+    }
+    const organizationModel = {
+      findById: vi.fn().mockReturnValue(createQuery(null)),
+    }
+
+    const service = new CopyEngineService(
+      brandModel as any,
+      copyHistoryModel as any,
+      organizationModel as any,
+    )
+    vi.spyOn(service as any, 'generateWithProvider').mockResolvedValue({
+      draft: {
+        title: '同款标题',
+        subtitle: '这是一段足够长的字幕内容，用于重复检测',
+        description: '这是一段足够长的正文内容，用于重复检测和标题去重。',
+        hashtags: ['#增长'],
+        blueWords: ['#增长'],
+        commentGuides: ['评论“案例”我发你'],
+      },
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        model: '',
+        cost: 0,
+      },
+      provider: 'heuristic',
+    })
+
+    const result = await service.generateCopy(
+      '507f1f77bcf86cd799439062',
+      'https://cdn.example.com/video.mp4',
+      {
+        orgId: '507f1f77bcf86cd799439061',
+        scene: '增长投放',
+      },
+    )
+
+    expect(result.title).not.toBe('同款标题')
+    expect(copyHistoryModel.create).toHaveBeenCalledWith(expect.objectContaining({
+      dedupFingerprint: expect.any(String),
+    }))
+  })
 })

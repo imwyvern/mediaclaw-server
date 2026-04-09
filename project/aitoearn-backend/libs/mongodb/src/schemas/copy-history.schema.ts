@@ -15,6 +15,15 @@ class CopyHistoryPerformance {
   ctr: number
 }
 
+@Schema({ _id: false })
+class CopyHistoryVariantPerformance {
+  @Prop({ type: Number, default: 0 })
+  score: number
+
+  @Prop({ type: Boolean, default: false })
+  bestPerformer: boolean
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'copy_histories' })
 export class CopyHistory extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -44,6 +53,24 @@ export class CopyHistory extends WithTimestampSchema {
   @Prop({ type: String, default: '' })
   commentGuide: string
 
+  @Prop({ type: [String], default: [] })
+  commentGuides: string[]
+
+  @Prop({ type: Number, default: null })
+  variantIndex: number | null
+
+  @Prop({ type: String, default: '', index: true })
+  variantGroupId: string
+
+  @Prop({ type: String, default: '' })
+  variantGoal: string
+
+  @Prop({ type: String, default: '', index: true })
+  dedupFingerprint: string
+
+  @Prop({ type: CopyHistoryVariantPerformance, default: () => ({}) })
+  variantPerformance: CopyHistoryVariantPerformance
+
   @Prop({ type: CopyHistoryPerformance, default: () => ({}) })
   performance: CopyHistoryPerformance
 }
@@ -51,3 +78,5 @@ export class CopyHistory extends WithTimestampSchema {
 export const CopyHistorySchema = SchemaFactory.createForClass(CopyHistory)
 CopyHistorySchema.index({ orgId: 1, title: 'text', subtitle: 'text', description: 'text' })
 CopyHistorySchema.index({ orgId: 1, createdAt: -1 })
+CopyHistorySchema.index({ orgId: 1, variantGroupId: 1, createdAt: -1 })
+CopyHistorySchema.index({ orgId: 1, dedupFingerprint: 1, createdAt: -1 })
