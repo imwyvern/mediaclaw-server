@@ -208,6 +208,7 @@ Usage:
   mc-api.sh task-cancel <task-id>
   mc-api.sh task-retry <task-id>
   mc-api.sh task-timeline <task-id>
+  mc-api.sh style-preferences [--json JSON|@file]
   mc-api.sh brand-list
   mc-api.sh brand-get <brand-id>
   mc-api.sh brand-update <brand-id> --json JSON|@file
@@ -722,6 +723,37 @@ cmd_feedback() {
     '{ agentId: $agentId, taskId: $taskId, feedback: $feedback }')"
 
   api_request "POST" "/api/v1/skill/feedback" "${payload}" | pretty_print
+}
+
+cmd_style_preferences() {
+  local json_body=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json)
+        json_body="$(read_json_arg "$2")"
+        shift 2
+        ;;
+      *)
+        fail "Unknown option for style-preferences: $1"
+        ;;
+    esac
+  done
+
+  if [[ -z "${json_body}" ]]; then
+    api_request "GET" "/api/v1/content/style-preferences" | pretty_print
+    return
+  fi
+
+  validate_json "${json_body}"
+  json_body="$(printf '%s\n' "${json_body}" | jq '
+    if type == "object" and has("preferences")
+    then .
+    else { preferences: . }
+    end
+  ')"
+
+  api_request "PUT" "/api/v1/content/style-preferences" "${json_body}" | pretty_print
 }
 
 cmd_account() {
@@ -1518,6 +1550,9 @@ main() {
       ;;
     task-timeline)
       cmd_task_timeline "$@"
+      ;;
+    style-preferences)
+      cmd_style_preferences "$@"
       ;;
     brand-list)
       cmd_brand_list "$@"

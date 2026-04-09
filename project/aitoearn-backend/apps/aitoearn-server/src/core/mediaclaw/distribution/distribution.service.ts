@@ -6,7 +6,6 @@ import {
   Optional,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Cron, CronExpression } from '@nestjs/schedule'
 import {
   DistributionRule,
   DistributionRuleType,
@@ -25,6 +24,7 @@ import {
   DistributionPublishStatus,
   isDistributionPublishStatus,
 } from './distribution.constants'
+import { DistributionQueueService } from './distribution.queue.service'
 
 export interface DistributionRuleEntryPayload {
   condition?: Record<string, unknown> | null
@@ -98,6 +98,8 @@ export class DistributionService {
     private readonly employeeDispatchService?: EmployeeDispatchService,
     @Optional()
     private readonly notificationService?: NotificationService,
+    @Optional()
+    private readonly distributionQueueService?: DistributionQueueService,
   ) {}
 
   async createRule(orgId: string, data: DistributionRulePayload) {
@@ -579,16 +581,61 @@ export class DistributionService {
   }
 
   async notifyTaskComplete(task: VideoTask) {
-    const taskId = task._id?.toString()
+    const taskId = task._id?.toString() || ''
+    if (!taskId) {
+      return {
+        queued: false,
+        reason: 'task_id_missing',
+      }
+    }
+
+    if (this.distributionQueueService) {
+      return this.distributionQueueService.enqueueCompletedTask(taskId)
+    }
+
+    return this.processCompletedTask(taskId)
+  }
+
+  async processCompletedTask(taskId: string) {
+    const task = await this.getTaskOrFail(undefined, taskId)
+    if (!isDistributableVideoTaskStatus(task.status)) {
+      this.logger.log({
+        message: 'Skip distribution for non-distributable task status',
+        taskId,
+        status: task.status,
+      })
+
+      return {
+        taskId,
+        skipped: true,
+        reason: 'task_not_ready_for_distribution',
+        status: task.status,
+      }
+    }
+
     const orgId = task.orgId?.toString() || null
     const pipelineId = task.pipelineId?.toString() || null
+    const existingDistribution = this.asRecord(task.metadata?.distribution)
+    const existingEmployeeDispatch = this.asRecord(existingDistribution?.['employeeDispatch'])
+    const existingDeliveryRecordId = this.normalizeOptionalString(
+      existingEmployeeDispatch?.['deliveryRecordId'],
+    )
+
+    if (existingDeliveryRecordId) {
+      return {
+        taskId,
+        skipped: true,
+        reason: 'already_dispatched',
+        deliveryRecordId: existingDeliveryRecordId,
+        publishStatus: this.resolvePublishStatus(task),
+      }
+    }
+
     const autoDispatchEnabled = this.hasDedupPassed(task)
-    const employeeDispatch = this.employeeDispatchService && taskId && autoDispatchEnabled
-      ? await (pipelineId && orgId
+    const employeeDispatch = this.employeeDispatchService && orgId && autoDispatchEnabled
+      ? await (pipelineId
           ? this.dispatchByPipelineRules(orgId, pipelineId, [taskId])
-          : orgId
-            ? this.employeeDispatchService.batchDispatch(orgId, [taskId], {})
-            : Promise.resolve(null)).catch((error) => {
+          : this.employeeDispatchService.batchDispatch(orgId, [taskId], {})).catch((error) => {
           this.logger.warn({
             message: 'Employee dispatch failed after task completion',
             taskId,
@@ -618,7 +665,7 @@ export class DistributionService {
       },
     }
 
-    if (!autoDispatchEnabled && taskId) {
+    if (!autoDispatchEnabled) {
       this.logger.log({
         message: 'Skip auto distribution until dedup passes',
         taskId,
@@ -642,6 +689,13 @@ export class DistributionService {
         : Promise.resolve(null),
       this.webhookService.trigger('task.completed', payload),
     ])
+
+    return {
+      taskId,
+      notified: true,
+      employeeDispatch,
+      dedupGate: payload.dedupGate,
+    }
   }
 
   async notifyPaymentSuccess(order: PaymentOrder) {
@@ -669,7 +723,6 @@ export class DistributionService {
     })
   }
 
-  @Cron(CronExpression.EVERY_HOUR)
   async expireStaleDistributions() {
     const cutoffIso = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
     const staleTasks = await this.videoTaskModel.find({

@@ -32,6 +32,7 @@ describe('distributionService', () => {
   let webhookService: Record<string, any>
   let employeeDispatchService: Record<string, any>
   let notificationService: Record<string, any>
+  let distributionQueueService: Record<string, any>
 
   beforeEach(() => {
     distributionRuleModel = {
@@ -57,6 +58,12 @@ describe('distributionService', () => {
     notificationService = {
       send: vi.fn().mockResolvedValue(undefined),
     }
+    distributionQueueService = {
+      enqueueCompletedTask: vi.fn().mockResolvedValue({
+        queued: true,
+        taskId: 'task-queued',
+      }),
+    }
 
     service = new DistributionService(
       distributionRuleModel as any,
@@ -65,6 +72,7 @@ describe('distributionService', () => {
       webhookService as any,
       employeeDispatchService as any,
       notificationService as any,
+      distributionQueueService as any,
     )
   })
 
@@ -312,6 +320,61 @@ describe('distributionService', () => {
         contentId: taskId.toString(),
       }),
     )
+  })
+
+  it('应在任务完成后优先进入分发队列', async () => {
+    const taskId = new Types.ObjectId().toString()
+
+    const result = await service.notifyTaskComplete({
+      _id: new Types.ObjectId(taskId),
+    } as any)
+
+    expect(distributionQueueService.enqueueCompletedTask).toHaveBeenCalledWith(taskId)
+    expect(result).toEqual({
+      queued: true,
+      taskId: 'task-queued',
+    })
+  })
+
+  it('应在已存在 deliveryRecordId 时跳过重复派发', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId().toString()
+    const deliveryRecordId = new Types.ObjectId().toString()
+    const task = {
+      _id: new Types.ObjectId(taskId),
+      orgId: new Types.ObjectId(orgId),
+      status: VideoTaskStatus.COMPLETED,
+      outputVideoUrl: 'https://cdn.example.com/task.mp4',
+      dedup: {
+        status: 'passed',
+      },
+      metadata: {
+        distribution: {
+          publishStatus: DistributionPublishStatus.PUSHED,
+          employeeDispatch: {
+            deliveryRecordId,
+          },
+        },
+      },
+      toObject() {
+        return this
+      },
+    }
+
+    videoTaskModel.findById.mockReturnValue(createQuery(task))
+
+    const result = await service.processCompletedTask(taskId)
+
+    expect(employeeDispatchService.batchDispatch).not.toHaveBeenCalled()
+    expect(notificationService.send).not.toHaveBeenCalled()
+    expect(webhookService.trigger).not.toHaveBeenCalledWith('task.completed', expect.anything())
+    expect(result).toEqual({
+      taskId,
+      skipped: true,
+      reason: 'already_dispatched',
+      deliveryRecordId,
+      publishStatus: DistributionPublishStatus.PUSHED,
+    })
   })
 
   it('应在发布确认时回传 publishPostId 并触发数据回流', async () => {

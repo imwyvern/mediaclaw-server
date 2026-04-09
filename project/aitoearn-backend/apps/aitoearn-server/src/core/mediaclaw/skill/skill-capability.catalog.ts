@@ -23,7 +23,7 @@ export const SKILL_CAPABILITY_LAYERS: SkillCapabilityLayer[] = [
     layer: 'L1',
     capability: 'content.delivery',
     title: '内容交付',
-    description: '接收推送、查看待办、预览下载、查询任务进度。',
+    description: '列出我的视频、查看交付待办、预览下载成片和查询任务进度。',
     tags: ['delivery', 'preview', 'download', 'task'],
     commands: [
       'discover',
@@ -55,7 +55,7 @@ export const SKILL_CAPABILITY_LAYERS: SkillCapabilityLayer[] = [
     layer: 'L2',
     capability: 'content.management',
     title: '内容管理',
-    description: '审核发布、修改文案、提交反馈、管理品牌素材。',
+    description: '审核发布、修改标题字幕、提交反馈并管理品牌素材。',
     tags: ['review', 'copy', 'brand', 'feedback'],
     commands: [
       'approve',
@@ -88,7 +88,7 @@ export const SKILL_CAPABILITY_LAYERS: SkillCapabilityLayer[] = [
     layer: 'L3',
     capability: 'analytics.insight',
     title: '数据查询',
-    description: '查询总览、趋势、TOP、SEO、报告和行业热门内容。',
+    description: '查询我的统计、内容报告、SEO、竞品趋势和行业热门内容。',
     tags: ['analytics', 'report', 'competitor'],
     commands: [
       'stats',
@@ -115,7 +115,7 @@ export const SKILL_CAPABILITY_LAYERS: SkillCapabilityLayer[] = [
     layer: 'L4',
     capability: 'production.orchestration',
     title: '生产调度',
-    description: '创建任务、更新任务、配置管线、绑定群组和管理 Campaign。',
+    description: '创建任务、调整风格偏好、配置管线、绑定群组和管理 Campaign。',
     tags: ['scheduling', 'pipeline', 'campaign'],
     commands: [
       'create-task',
@@ -123,6 +123,7 @@ export const SKILL_CAPABILITY_LAYERS: SkillCapabilityLayer[] = [
       'task-cancel',
       'task-retry',
       'task-timeline',
+      'style-preferences',
       'pipeline-list',
       'pipeline-get',
       'pipeline-create',
@@ -140,6 +141,7 @@ export const SKILL_CAPABILITY_LAYERS: SkillCapabilityLayer[] = [
       '/api/v1/tasks',
       '/api/v1/tasks/:id',
       '/api/v1/tasks/timeline/:id',
+      '/api/v1/content/style-preferences',
       '/api/v1/pipelines',
       '/api/v1/pipelines/:id',
       '/api/v1/pipelines/:id/preferences',

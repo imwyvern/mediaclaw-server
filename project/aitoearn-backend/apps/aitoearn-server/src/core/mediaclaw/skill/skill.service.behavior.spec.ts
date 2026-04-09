@@ -237,6 +237,73 @@ describe('skillService behavior', () => {
     ])
   })
 
+  it('应在无 employee dispatch 服务时回退到任务分发元数据', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const userId = new Types.ObjectId().toString()
+    const taskId = new Types.ObjectId()
+    const videoTaskModel = {
+      find: vi.fn().mockReturnValue(createQueryMock([
+        {
+          _id: taskId,
+          brandId: new Types.ObjectId(),
+          pipelineId: new Types.ObjectId(),
+          outputVideoUrl: 'https://cdn.example.com/fallback.mp4',
+          copy: {
+            title: '回退交付任务',
+          },
+          completedAt: new Date('2026-04-09T10:00:00.000Z'),
+          metadata: {
+            distribution: {
+              publishStatus: 'pushed',
+              lastDistributedAt: '2026-04-09T10:05:00.000Z',
+              heartbeatPending: true,
+              employeeDispatch: {
+                deliveryRecordId: 'delivery-fallback',
+                assignmentId: 'assignment-fallback',
+                employeeName: '小赵',
+                employeePhone: '13700000000',
+                deliveryChannel: 'wecom',
+                deliveryStatus: 'pushed',
+                receivedAt: null,
+                confirmedAt: null,
+                manualPickupRequired: false,
+              },
+            },
+          },
+        },
+      ])),
+    }
+
+    const service = new SkillService(
+      {} as any,
+      {} as any,
+      videoTaskModel as any,
+    )
+
+    await service.registerAgent('agent-fallback', ['delivery'], { orgId, userId })
+    const deliveries = await service.getPendingDeliveries('agent-fallback', { orgId, userId })
+
+    expect(videoTaskModel.find).toHaveBeenCalled()
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        taskId: taskId.toString(),
+        deliveryRecordId: 'delivery-fallback',
+        assignmentId: 'assignment-fallback',
+        heartbeatPending: true,
+        publishStatus: 'pushed',
+        assignment: expect.objectContaining({
+          employeeName: '小赵',
+        }),
+        delivery: expect.objectContaining({
+          status: 'pushed',
+          deliveryChannel: 'wecom',
+          pushedAt: '2026-04-09T10:05:00.000Z',
+          heartbeatPending: true,
+        }),
+      }),
+    ])
+  })
+
   it('应在只提供 taskId 时桥接到 employee dispatch 的 deliveryRecord', async () => {
     const orgId = new Types.ObjectId().toString()
     const userId = new Types.ObjectId().toString()

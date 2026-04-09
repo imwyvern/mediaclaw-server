@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Brand, Pipeline, PipelineStatus, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { DistributionPublishStatus } from '../distribution/distribution.constants'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 import { MEDIACLAW_DISTRIBUTABLE_STATUSES } from '../video-task-status.utils'
 import { buildCapabilityDiscovery, normalizeAgentCapabilities } from './skill-capability.catalog'
@@ -221,6 +222,8 @@ export class SkillService {
     const scopeFilter = this.buildTaskScope(scope)
     const deliveryFilter = {
       $or: [
+        { 'metadata.distribution.publishStatus': DistributionPublishStatus.PUSHED },
+        { 'metadata.distribution.employeeDispatch.deliveryStatus': { $in: ['pending', 'pushed', 'received'] } },
         { 'metadata.delivery.status': { $exists: false } },
         { 'metadata.delivery.status': { $ne: 'delivered' } },
       ],
@@ -233,17 +236,7 @@ export class SkillService {
       .sort({ completedAt: -1, createdAt: -1 })
       .lean()
       .exec()
-      .then(tasks => tasks.map(task => ({
-        taskId: task._id?.toString(),
-        brandId: task.brandId?.toString() || null,
-        pipelineId: task.pipelineId?.toString() || null,
-        outputVideoUrl: task.outputVideoUrl,
-        copy: task.copy,
-        completedAt: task.completedAt,
-        delivery: task.metadata?.['delivery'] || {
-          status: 'pending',
-        },
-      })))
+      .then(tasks => tasks.map(task => this.toPendingDeliveryResponse(task)))
   }
 
   async confirmDelivery(agentId: string, input: DeliveryConfirmationInput, scope: SkillScope) {
@@ -277,7 +270,15 @@ export class SkillService {
             status: 'delivered',
             deliveredAt,
             confirmedBy: scope.userId,
+            deliveryRecordId: resolvedDeliveryRecordId || undefined,
           },
+          ...(resolvedDeliveryRecordId
+            ? {
+                'metadata.distribution.employeeDispatch.deliveryRecordId': resolvedDeliveryRecordId,
+                'metadata.distribution.employeeDispatch.deliveryStatus': 'delivered',
+                'metadata.distribution.employeeDispatch.confirmedAt': deliveredAt.toISOString(),
+              }
+            : {}),
         },
       },
       { new: true },
@@ -325,7 +326,63 @@ export class SkillService {
     const task = await this.videoTaskModel.findOne(this.buildScopedTaskQuery(taskId, scope)).lean().exec()
     return this.normalizeOptionalString(
       task?.metadata?.['distribution']?.['employeeDispatch']?.['deliveryRecordId'],
+    ) || this.normalizeOptionalString(task?.metadata?.['delivery']?.['deliveryRecordId'])
+  }
+
+  private toPendingDeliveryResponse(task: Record<string, any>) {
+    const distribution = this.asRecord(task['metadata']?.['distribution'])
+    const employeeDispatch = this.asRecord(distribution?.['employeeDispatch'])
+    const legacyDelivery = this.asRecord(task['metadata']?.['delivery'])
+    const deliveryRecordId = this.normalizeOptionalString(employeeDispatch?.['deliveryRecordId'])
+      || this.normalizeOptionalString(legacyDelivery?.['deliveryRecordId'])
+    const deliveryStatus = this.normalizeOptionalString(employeeDispatch?.['deliveryStatus'])
+      || this.normalizeOptionalString(legacyDelivery?.['status'])
+      || (this.normalizeOptionalString(distribution?.['publishStatus']) === DistributionPublishStatus.PUSHED
+        ? DistributionPublishStatus.PUSHED
+        : 'pending')
+    const pushedAt = employeeDispatch?.['pushedAt']
+      || distribution?.['pushedAt']
+      || distribution?.['lastDistributedAt']
+      || null
+    const deliveredAt = employeeDispatch?.['deliveredAt']
+      || legacyDelivery?.['deliveredAt']
+      || null
+    const heartbeatPending = Boolean(
+      employeeDispatch?.['heartbeatPending']
+      ?? distribution?.['heartbeatPending'],
     )
+
+    return {
+      taskId: task['_id']?.toString(),
+      deliveryRecordId: deliveryRecordId || null,
+      assignmentId: this.normalizeOptionalString(employeeDispatch?.['assignmentId']) || null,
+      brandId: task['brandId']?.toString() || null,
+      pipelineId: task['pipelineId']?.toString() || null,
+      outputVideoUrl: task['outputVideoUrl'],
+      title: task['copy']?.['title'] || '',
+      copy: task['copy'],
+      completedAt: task['completedAt'],
+      heartbeatPending,
+      publishStatus: this.normalizeOptionalString(distribution?.['publishStatus']) || null,
+      assignment: employeeDispatch?.['employeeName']
+        ? {
+            employeeName: employeeDispatch['employeeName'],
+            employeePhone: this.normalizeOptionalString(employeeDispatch?.['employeePhone']) || null,
+          }
+        : null,
+      delivery: {
+        status: deliveryStatus,
+        deliveryChannel: this.normalizeOptionalString(employeeDispatch?.['deliveryChannel'])
+          || this.normalizeOptionalString(legacyDelivery?.['deliveryChannel'])
+          || null,
+        deliveredAt,
+        pushedAt,
+        confirmedAt: employeeDispatch?.['confirmedAt'] || null,
+        receivedAt: employeeDispatch?.['receivedAt'] || null,
+        heartbeatPending,
+        manualPickupRequired: Boolean(employeeDispatch?.['manualPickupRequired']),
+      },
+    }
   }
 
   private buildTaskScope(scope: SkillScope) {
@@ -352,5 +409,9 @@ export class SkillService {
 
   private normalizeOptionalString(value: unknown) {
     return typeof value === 'string' ? value.trim() : ''
+  }
+
+  private asRecord(value: unknown) {
+    return value && typeof value === 'object' ? value as Record<string, any> : null
   }
 }
