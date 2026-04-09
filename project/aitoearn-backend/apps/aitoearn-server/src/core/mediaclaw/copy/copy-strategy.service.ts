@@ -1,7 +1,7 @@
+import type { CopyEmotionalTone } from '@yikart/mongodb'
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { CopyHistory, CopyPerformance, Organization, VideoTask } from '@yikart/mongodb'
-import type { CopyEmotionalTone } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
 interface CopyMetricsInput {
@@ -459,24 +459,24 @@ export class CopyStrategyService {
       avgPerformanceScore: Number((summaryRow['avgPerformanceScore'] || 0).toFixed(2)),
       avgViews: Number((summaryRow['avgViews'] || 0).toFixed(2)),
       avgCtr: Number((summaryRow['avgCtr'] || 0).toFixed(4)),
-      bestPerformingTitlePatterns: titlePatterns.map((item) => ({
+      bestPerformingTitlePatterns: titlePatterns.map(item => ({
         titleLengthRange: item['_id']?.['titleLengthRange'] || 'unknown',
         emotionalTone: item['_id']?.['emotionalTone'] || 'neutral',
         avgPerformanceScore: Number((item['avgPerformanceScore'] || 0).toFixed(2)),
         count: Number(item['count'] || 0),
       })),
       optimalHashtagCount: bestHashtagPattern ? Number(bestHashtagPattern['_id'] || 0) : 0,
-      hashtagPerformance: hashtagPerformance.map((item) => ({
+      hashtagPerformance: hashtagPerformance.map(item => ({
         hashtagCount: Number(item['_id'] || 0),
         avgPerformanceScore: Number((item['avgPerformanceScore'] || 0).toFixed(2)),
         count: Number(item['count'] || 0),
       })),
-      blueWordEffectiveness: blueWordEffectiveness.map((item) => ({
+      blueWordEffectiveness: blueWordEffectiveness.map(item => ({
         hasBlueWords: Boolean(item['_id']),
         avgPerformanceScore: Number((item['avgPerformanceScore'] || 0).toFixed(2)),
         count: Number(item['count'] || 0),
       })),
-      emotionalToneInsights: emotionalToneInsights.map((item) => ({
+      emotionalToneInsights: emotionalToneInsights.map(item => ({
         emotionalTone: item['_id'] || 'neutral',
         avgPerformanceScore: Number((item['avgPerformanceScore'] || 0).toFixed(2)),
         count: Number(item['count'] || 0),

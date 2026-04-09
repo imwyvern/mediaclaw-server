@@ -13,8 +13,8 @@ import {
   VideoPack,
   VideoPackSchema,
 } from '@yikart/mongodb'
-import { getRequiredEnv } from '../mediaclaw-env.util'
 import { MediaclawConfigModule } from '../mediaclaw-config.module'
+import { getRequiredEnv } from '../mediaclaw-env.util'
 import { McAuthController } from './auth.controller'
 import { McAuthService } from './auth.service'
 import { EnterpriseAuthService } from './enterprise-auth.service'

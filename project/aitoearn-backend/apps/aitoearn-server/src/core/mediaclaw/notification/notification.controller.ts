@@ -5,7 +5,7 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { NotificationService } from './notification.service'
 
-type NotificationConfigPayload = {
+interface NotificationConfigPayload {
   channel: NotificationChannel
   name?: string
   events?: NotificationEvent[]

@@ -1,5 +1,5 @@
-import { BadRequestException, Get, Query, Res } from '@nestjs/common'
 import type { Response } from 'express'
+import { BadRequestException, Get, Query, Res } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
@@ -41,8 +41,8 @@ export class AuditController {
       endDate: end || endDate,
     })
 
-    const fileName = 'audit-logs-' + new Date().toISOString().slice(0, 10) + '.' + normalizedFormat
-    response.setHeader('Content-Disposition', 'attachment; filename="' + fileName + '"')
+    const fileName = `audit-logs-${new Date().toISOString().slice(0, 10)}.${normalizedFormat}`
+    response.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
     response.setHeader('Cache-Control', 'no-store')
 
     try {
@@ -107,7 +107,7 @@ export class AuditController {
   }
 
   private csvHeader() {
-    return [
+    return `${[
       'id',
       'orgId',
       'userId',
@@ -123,11 +123,11 @@ export class AuditController {
       'userAgent',
       'createdAt',
       'updatedAt',
-    ].join(',') + '\n'
+    ].join(',')}\n`
   }
 
   private toCsvRow(item: Record<string, any>) {
-    return [
+    return `${[
       item['id'],
       item['orgId'],
       item['userId'],
@@ -143,10 +143,10 @@ export class AuditController {
       item['userAgent'],
       item['createdAt'] ? new Date(item['createdAt']).toISOString() : '',
       item['updatedAt'] ? new Date(item['updatedAt']).toISOString() : '',
-    ].map(value => this.escapeCsv(String(value ?? ''))).join(',') + '\n'
+    ].map(value => this.escapeCsv(String(value ?? ''))).join(',')}\n`
   }
 
   private escapeCsv(value: string) {
-    return '"' + value.replace(/"/g, '""').replace(/\r?\n/g, '\\n') + '"'
+    return `"${value.replace(/"/g, '""').replace(/\r?\n/g, '\\n')}"`
   }
 }

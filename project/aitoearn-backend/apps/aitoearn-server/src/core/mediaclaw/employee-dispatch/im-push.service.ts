@@ -46,5 +46,5 @@ export interface ImPushResult {
 
 export interface ImPushService<TBinding = Record<string, unknown>> {
   readonly channel: DeliveryChannel.FEISHU | DeliveryChannel.WECOM
-  pushVideoCard(context: ImPushContext<TBinding>, videoData: DispatchVideoCard): Promise<ImPushResult>
+  pushVideoCard: (context: ImPushContext<TBinding>, videoData: DispatchVideoCard) => Promise<ImPushResult>
 }

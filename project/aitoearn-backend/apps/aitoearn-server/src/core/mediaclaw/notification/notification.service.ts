@@ -67,23 +67,23 @@ interface EventNotificationDraft {
   relatedId: string
 }
 
-type NotificationDeliveryResult =
+type NotificationDeliveryResult
+  = | {
+    id: string
+    channel: NotificationChannel
+    delivered: true
+    statusCode?: number
+    target?: string
+    recipients?: string[]
+    subject?: string
+  }
   | {
-      id: string
-      channel: NotificationChannel
-      delivered: true
-      statusCode?: number
-      target?: string
-      recipients?: string[]
-      subject?: string
-    }
-  | {
-      id: string
-      channel: NotificationChannel
-      delivered: false
-      reason: string
-      skipped?: boolean
-    }
+    id: string
+    channel: NotificationChannel
+    delivered: false
+    reason: string
+    skipped?: boolean
+  }
 
 @Injectable()
 export class NotificationService {

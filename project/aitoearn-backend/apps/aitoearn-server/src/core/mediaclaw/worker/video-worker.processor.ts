@@ -1,3 +1,4 @@
+import type { PipelineJobContext } from '../pipeline/pipeline.types'
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq'
 import { Injectable, Logger, Optional } from '@nestjs/common'
 import { VideoTask, VideoTaskStatus } from '@yikart/mongodb'
@@ -6,7 +7,6 @@ import { ContentMgmtService } from '../content-mgmt/content-mgmt.service'
 import { CopyService } from '../copy/copy.service'
 import { DistributionService } from '../distribution/distribution.service'
 import { PipelineService } from '../pipeline/pipeline.service'
-import type { PipelineJobContext } from '../pipeline/pipeline.types'
 import { PromptOptimizerLoopService } from '../prompt-optimizer/prompt-optimizer.service'
 import { VideoService } from '../video/video.service'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData, VideoWorkerStep } from './worker.constants'
@@ -18,7 +18,7 @@ const NEXT_STEP_MAP: Partial<Record<VideoWorkerStep, VideoWorkerStep>> = {
   'generate-copy': 'quality-check',
 }
 
-type LegacyVideoTaskReader = {
+interface LegacyVideoTaskReader {
   getTask: (id: string) => Promise<VideoTask>
 }
 

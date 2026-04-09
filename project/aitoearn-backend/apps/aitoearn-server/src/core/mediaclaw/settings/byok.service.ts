@@ -2,10 +2,10 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
-  OrgApiKeyProvider,
   Organization,
   OrganizationApiKeyEntry,
   OrganizationApiKeyMap,
+  OrgApiKeyProvider,
 } from '@yikart/mongodb'
 import axios from 'axios'
 import { Model, Types } from 'mongoose'
@@ -359,7 +359,7 @@ export class ByokService {
       {
         timeout: 8000,
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
       },
@@ -516,7 +516,7 @@ export class ByokService {
   }
 
   private normalizeEncryptionKey(input: string) {
-    if (/^[a-fA-F0-9]{64}$/.test(input)) {
+    if (/^[a-f0-9]{64}$/i.test(input)) {
       return Buffer.from(input, 'hex')
     }
 
