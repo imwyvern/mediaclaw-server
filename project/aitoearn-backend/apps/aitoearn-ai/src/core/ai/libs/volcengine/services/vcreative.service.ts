@@ -114,16 +114,20 @@ export class VCreativeService extends BaseService {
 
       const response = await api(requestData)
 
+      const outputJson = typeof response.Result?.OutputJson === 'string'
+        ? response.Result.OutputJson
+        : undefined
+
       this.logger.debug({
         vCreativeId: request.VCreativeId,
         status: response.Result?.Status,
         uploader: response.Result?.['Uploader'],
         workflowId: response.Result?.['WorkflowId'],
-        hasOutputJson: !!response.Result?.OutputJson,
-        outputJsonPreview: response.Result?.OutputJson
-          ? (response.Result.OutputJson.length > 200
-              ? `${response.Result.OutputJson.substring(0, 200)}...`
-              : response.Result.OutputJson)
+        hasOutputJson: !!outputJson,
+        outputJsonPreview: outputJson
+          ? (outputJson.length > 200
+              ? `${outputJson.substring(0, 200)}...`
+              : outputJson)
           : undefined,
       }, '[getVCreativeTaskResult] 收到响应')
 

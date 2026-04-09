@@ -292,8 +292,12 @@ export class VideoStyleTransferService {
     result: GetVCreativeTaskResultResponse,
   ): Promise<void> {
     let duration = 0
-    if (result.OutputJson) {
-      const outputJson = JSON.parse(result.OutputJson)
+    const outputJsonText = typeof result.OutputJson === 'string'
+      ? result.OutputJson
+      : undefined
+
+    if (outputJsonText) {
+      const outputJson = JSON.parse(outputJsonText)
       const outputVid = outputJson.vid
 
       if (outputVid) {
