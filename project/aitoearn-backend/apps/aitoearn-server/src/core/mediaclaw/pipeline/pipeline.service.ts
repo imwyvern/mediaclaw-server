@@ -21,6 +21,8 @@ import {
 import { buildPublicFileUrl, ensureDirectory, resolveRenderSize } from './pipeline.utils'
 import { QualityCheckService } from './quality-check.service'
 import { SubtitleService } from './subtitle.service'
+import { TemplateBrandContext, TemplateResult } from './templates/base-template'
+import { TemplateRegistry } from './templates/template-registry'
 import { VideoGenService } from './video-gen.service'
 
 @Injectable()
@@ -47,11 +49,12 @@ export class PipelineService {
     private readonly dedupService: DedupService,
     private readonly qualityCheckService: QualityCheckService,
     private readonly modelResolverService: ModelResolverService,
+    private readonly templateRegistry: TemplateRegistry,
   ) {}
 
   async create(orgId: string, brandId: string, data: Record<string, any>) {
     const brand = await this.getOwnedBrandOrFail(orgId, brandId)
-    const payload = this.buildPipelinePayload(orgId, brand, data)
+    const payload = await this.buildPipelinePayload(orgId, brand, data)
     return this.pipelineModel.create(payload)
   }
 
@@ -77,7 +80,7 @@ export class PipelineService {
 
     return this.pipelineModel.findOneAndUpdate(
       this.buildOwnedQuery(orgId, id),
-      this.buildPipelinePayload(orgId, brand, data, pipeline),
+      await this.buildPipelinePayload(orgId, brand, data, pipeline),
       { new: true },
     ).exec()
   }
@@ -297,44 +300,46 @@ export class PipelineService {
     await rm(context.workspaceDir, { recursive: true, force: true })
   }
 
-  private buildPipelinePayload(
+  private async buildPipelinePayload(
     orgId: string,
     brand: Brand,
     data: Record<string, any>,
     existing?: Pipeline | null,
   ) {
     const existingRecord = existing ? ((existing as any)?.toObject?.() || (existing as Record<string, any>)) : null
-    const templateId = this.normalizeOptionalString(data['templateId']) || existingRecord?.['templateId'] || ''
+    const templateResult = await this.resolveTemplateResult(brand, data, existingRecord)
+    const templateBackedData = this.applyTemplateDefaults(data, templateResult)
+    const templateId = this.normalizeOptionalString(templateBackedData['templateId']) || existingRecord?.['templateId'] || ''
     const styleConfig = this.normalizeStyleConfig(
-      this.asRecord(data['styleConfig']),
+      this.asRecord(templateBackedData['styleConfig']),
       brand,
       templateId,
       this.asRecord(existingRecord?.['styleConfig']),
     )
     const groupBinding = this.normalizeGroupBinding(
-      this.asRecord(data['groupBinding']),
+      this.asRecord(templateBackedData['groupBinding']),
       this.asRecord(existingRecord?.['groupBinding']),
       this.normalizeOptionalString(this.asRecord(existingRecord?.['groupBinding'])?.['boundBy']) || 'system',
     )
     const distributionRules = this.normalizeDistributionRules(
-      this.asRecord(data['distributionRules']),
+      this.asRecord(templateBackedData['distributionRules']),
       this.asRecord(existingRecord?.['distributionRules']),
       styleConfig,
     )
     const preferences = this.normalizePreferences(
-      this.asRecord(data['preferences']),
+      this.asRecord(templateBackedData['preferences']),
       styleConfig,
       this.asRecord(existingRecord?.['preferences']),
     )
     const schedule = this.normalizeSchedule(
-      this.asRecord(data['schedule']),
+      this.asRecord(templateBackedData['schedule']),
       this.asRecord(existingRecord?.['schedule']),
     )
     const modelOverrides = this.normalizeModelOverrides(
-      this.asRecord(data['modelOverrides']),
+      this.asRecord(templateBackedData['modelOverrides']),
       this.asRecord(existingRecord?.['modelOverrides']),
     )
-    const name = this.normalizeOptionalString(data['name']) || existingRecord?.['name'] || brand.name
+    const name = this.normalizeOptionalString(templateBackedData['name']) || existingRecord?.['name'] || brand.name
 
     if (!name) {
       throw new BadRequestException('name is required')
@@ -344,11 +349,11 @@ export class PipelineService {
       orgId: new Types.ObjectId(orgId),
       brandId: brand._id,
       name,
-      type: this.normalizeOptionalString(data['type']) || existingRecord?.['type'] || 'seeding',
-      status: this.normalizeOptionalString(data['status']) || existingRecord?.['status'] || PipelineStatus.ACTIVE,
-      description: this.normalizeOptionalString(data['description']) || existingRecord?.['description'] || '',
+      type: this.normalizeOptionalString(templateBackedData['type']) || existingRecord?.['type'] || 'seeding',
+      status: this.normalizeOptionalString(templateBackedData['status']) || existingRecord?.['status'] || PipelineStatus.ACTIVE,
+      description: this.normalizeOptionalString(templateBackedData['description']) || existingRecord?.['description'] || '',
       templateId,
-      routingConfigId: this.toObjectIdOrNull(this.normalizeOptionalString(data['routingConfigId']))
+      routingConfigId: this.toObjectIdOrNull(this.normalizeOptionalString(templateBackedData['routingConfigId']))
         || existingRecord?.['routingConfigId']
         || null,
       imGroupId: groupBinding.groupId,
@@ -368,6 +373,186 @@ export class PipelineService {
       totalVideosProduced: existingRecord?.['totalVideosProduced'] || 0,
       totalVideosPublished: existingRecord?.['totalVideosPublished'] || 0,
     }
+  }
+
+  private async resolveTemplateResult(
+    brand: Brand,
+    data: Record<string, any>,
+    existingRecord?: Record<string, any> | null,
+  ) {
+    const templateType = this.normalizeOptionalString(data['templateType'])
+    if (!templateType) {
+      return null
+    }
+
+    return this.templateRegistry.run(templateType, {
+      brand: this.buildTemplateBrandContext(brand),
+      pipelineName: this.normalizeOptionalString(data['name'])
+        || this.normalizeOptionalString(existingRecord?.['name'])
+        || brand.name,
+      description: this.normalizeOptionalString(data['description'])
+        || this.normalizeOptionalString(existingRecord?.['description']),
+      params: this.asRecord(data['params']) || {},
+    })
+  }
+
+  private buildTemplateBrandContext(brand: Brand): TemplateBrandContext {
+    return {
+      id: brand._id.toString(),
+      name: brand.name || 'MediaClaw',
+      logo: brand.assets?.logoUrl || '',
+      colors: brand.assets?.colors || [],
+      fonts: brand.assets?.fonts || [],
+      slogans: brand.assets?.slogans || [],
+      keywords: brand.assets?.keywords || [],
+      referenceVideoUrl: brand.videoStyle?.referenceVideoUrl || '',
+      preferredDuration: Math.max(5, brand.videoStyle?.preferredDuration || 15),
+      aspectRatio: brand.videoStyle?.aspectRatio || '9:16',
+    }
+  }
+
+  private applyTemplateDefaults(data: Record<string, any>, templateResult: TemplateResult | null) {
+    const source = this.asRecord(data) || {}
+    if (!templateResult) {
+      return source
+    }
+
+    return {
+      ...source,
+      templateId: this.normalizeOptionalString(source['templateId']) || templateResult.templateId,
+      type: this.normalizeOptionalString(source['type']) || templateResult.type,
+      name: this.normalizeOptionalString(source['name']) || templateResult.name,
+      description: this.normalizeOptionalString(source['description']) || templateResult.description,
+      styleConfig: this.mergeStyleConfig(
+        this.asRecord(templateResult.styleConfig),
+        this.asRecord(source['styleConfig']),
+      ),
+      distributionRules: this.mergeDistributionRuleConfig(
+        this.asRecord(templateResult.distributionRules),
+        this.asRecord(source['distributionRules']),
+      ),
+      preferences: this.mergePreferenceConfig(
+        this.asRecord(templateResult.preferences),
+        this.asRecord(source['preferences']),
+        templateResult,
+      ),
+      schedule: this.mergeShallowRecord(
+        this.asRecord(templateResult.schedule),
+        this.asRecord(source['schedule']),
+      ),
+      modelOverrides: this.mergeShallowRecord(
+        this.asRecord(templateResult.modelOverrides),
+        this.asRecord(source['modelOverrides']),
+      ),
+    }
+  }
+
+  private mergeStyleConfig(
+    templateConfig: Record<string, any> | null,
+    sourceConfig: Record<string, any> | null,
+  ) {
+    const templateBrandAssets = this.asRecord(templateConfig?.['brandAssets'])
+    const sourceBrandAssets = this.asRecord(sourceConfig?.['brandAssets'])
+    const templateStyleRewrite = this.asRecord(templateConfig?.['styleRewrite'])
+    const sourceStyleRewrite = this.asRecord(sourceConfig?.['styleRewrite'])
+
+    return {
+      ...(templateConfig || {}),
+      ...(sourceConfig || {}),
+      platforms: this.mergeStringLists(templateConfig?.['platforms'], sourceConfig?.['platforms']),
+      brandAssets: {
+        ...(templateBrandAssets || {}),
+        ...(sourceBrandAssets || {}),
+        colors: this.mergeStringLists(templateBrandAssets?.['colors'], sourceBrandAssets?.['colors']),
+        fonts: this.mergeStringLists(templateBrandAssets?.['fonts'], sourceBrandAssets?.['fonts']),
+      },
+      styleRewrite: {
+        ...(templateStyleRewrite || {}),
+        ...(sourceStyleRewrite || {}),
+        mutationDomains: this.mergeStringLists(
+          templateStyleRewrite?.['mutationDomains'],
+          sourceStyleRewrite?.['mutationDomains'],
+        ),
+      },
+    }
+  }
+
+  private mergeDistributionRuleConfig(
+    templateConfig: Record<string, any> | null,
+    sourceConfig: Record<string, any> | null,
+  ) {
+    return {
+      ...(templateConfig || {}),
+      ...(sourceConfig || {}),
+      assignmentIds: this.mergeStringLists(templateConfig?.['assignmentIds'], sourceConfig?.['assignmentIds']),
+      preferredPlatforms: this.mergeStringLists(
+        templateConfig?.['preferredPlatforms'],
+        sourceConfig?.['preferredPlatforms'],
+      ),
+      preferredCategories: this.mergeStringLists(
+        templateConfig?.['preferredCategories'],
+        sourceConfig?.['preferredCategories'],
+      ),
+      templateIds: this.mergeStringLists(templateConfig?.['templateIds'], sourceConfig?.['templateIds']),
+      accountTypes: this.mergeStringLists(templateConfig?.['accountTypes'], sourceConfig?.['accountTypes']),
+      platformAccountIds: this.mergeStringLists(
+        templateConfig?.['platformAccountIds'],
+        sourceConfig?.['platformAccountIds'],
+      ),
+      targets: Array.isArray(sourceConfig?.['targets'])
+        ? sourceConfig?.['targets']
+        : templateConfig?.['targets'] || [],
+    }
+  }
+
+  private mergePreferenceConfig(
+    templateConfig: Record<string, any> | null,
+    sourceConfig: Record<string, any> | null,
+    templateResult: TemplateResult,
+  ) {
+    const templateSubtitlePreferences = this.asRecord(templateConfig?.['subtitlePreferences'])
+    const sourceSubtitlePreferences = this.asRecord(sourceConfig?.['subtitlePreferences'])
+    const templateRuntime = {
+      templateId: templateResult.templateId,
+      ...templateResult.runtime,
+    }
+
+    return {
+      ...(templateConfig || {}),
+      ...(sourceConfig || {}),
+      preferredStyles: this.mergeStringLists(templateConfig?.['preferredStyles'], sourceConfig?.['preferredStyles']),
+      avoidStyles: this.mergeStringLists(templateConfig?.['avoidStyles'], sourceConfig?.['avoidStyles']),
+      subtitlePreferences: {
+        ...(templateSubtitlePreferences || {}),
+        ...(sourceSubtitlePreferences || {}),
+        templateRuntime: {
+          ...this.asRecord(templateSubtitlePreferences?.['templateRuntime']),
+          ...templateRuntime,
+          ...this.asRecord(sourceSubtitlePreferences?.['templateRuntime']),
+        },
+      },
+      remixInsights: {
+        ...(this.asRecord(templateConfig?.['remixInsights']) || {}),
+        ...(this.asRecord(sourceConfig?.['remixInsights']) || {}),
+      },
+    }
+  }
+
+  private mergeShallowRecord(
+    templateConfig: Record<string, any> | null,
+    sourceConfig: Record<string, any> | null,
+  ) {
+    return {
+      ...(templateConfig || {}),
+      ...(sourceConfig || {}),
+    }
+  }
+
+  private mergeStringLists(templateValues: unknown, sourceValues: unknown) {
+    return this.normalizeStringList([
+      ...(Array.isArray(templateValues) ? templateValues : []),
+      ...(Array.isArray(sourceValues) ? sourceValues : []),
+    ])
   }
 
   private normalizeStyleConfig(

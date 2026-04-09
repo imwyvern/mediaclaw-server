@@ -1,0 +1,47 @@
+{
+  "templateId": "b10-explainer",
+  "name": "B10 Explainer",
+  "description": "topic + script -> Remotion render -> educational vertical video",
+  "version": "1.0",
+  "category": "education",
+  "type": "brand_story",
+  "estimatedTimeSec": 420,
+  "estimatedCost": 0,
+  "qualityStars": 4,
+  "categories": [
+    "education",
+    "tutorial"
+  ],
+  "styles": [
+    "explainer",
+    "educational",
+    "remotion"
+  ],
+  "defaultParams": {
+    "duration": 45,
+    "aspectRatio": "9:16",
+    "subtitleStyle": {
+      "mode": "explainer_caption"
+    },
+    "musicStyle": "explainer",
+    "extra": {
+      "zeroAiVideoCost": true,
+      "renderEngine": "remotion"
+    }
+  },
+  "requiredInputs": [
+    "topic",
+    "script"
+  ],
+  "optionalInputs": [
+    "bullet_points",
+    "brand_assets"
+  ],
+  "limitations": [
+    "依赖清晰脚本结构",
+    "更适合讲解型而非强真人感内容"
+  ],
+  "verifiedClients": [
+    "MediaClaw"
+  ]
+}

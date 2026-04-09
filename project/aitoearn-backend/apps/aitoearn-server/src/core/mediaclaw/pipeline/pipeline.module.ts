@@ -12,6 +12,10 @@ import { PipelineController } from './pipeline.controller'
 import { PipelineService } from './pipeline.service'
 import { QualityCheckService } from './quality-check.service'
 import { SubtitleService } from './subtitle.service'
+import { B10ExplainerTemplate } from './templates/b10-explainer'
+import { B7AiLiveTemplate } from './templates/b7-ai-live'
+import { B9ProductShowcaseTemplate } from './templates/b9-product-showcase'
+import { TemplateRegistry } from './templates/template-registry'
 import { VideoGenService } from './video-gen.service'
 
 @Module({
@@ -35,6 +39,10 @@ import { VideoGenService } from './video-gen.service'
     SubtitleService,
     DedupService,
     QualityCheckService,
+    B7AiLiveTemplate,
+    B9ProductShowcaseTemplate,
+    B10ExplainerTemplate,
+    TemplateRegistry,
   ],
   exports: [PipelineService],
 })

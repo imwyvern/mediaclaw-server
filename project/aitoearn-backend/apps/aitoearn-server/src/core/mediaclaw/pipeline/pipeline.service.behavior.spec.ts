@@ -39,6 +39,7 @@ describe('pipelineService', () => {
   let frameExtractService: Record<string, any>
   let dedupService: Record<string, any>
   let modelResolverService: Record<string, any>
+  let templateRegistry: Record<string, any>
 
   beforeEach(() => {
     pipelineModel = {
@@ -71,6 +72,9 @@ describe('pipelineService', () => {
         source: 'default',
       }),
     }
+    templateRegistry = {
+      run: vi.fn(),
+    }
 
     service = new PipelineService(
       pipelineModel as any,
@@ -83,6 +87,7 @@ describe('pipelineService', () => {
       dedupService as any,
       {} as any,
       modelResolverService as any,
+      templateRegistry as any,
     )
   })
 
@@ -170,6 +175,123 @@ describe('pipelineService', () => {
         }),
       }),
     )
+  })
+
+  it('应支持通过 templateType 与 params 创建模板化 pipeline', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const brandId = new Types.ObjectId()
+    const brand = {
+      _id: brandId,
+      orgId: new Types.ObjectId(orgId),
+      isActive: true,
+      name: '越小啤',
+      assets: {
+        logoUrl: 'https://cdn.example.com/logo.png',
+        colors: ['#111111'],
+        fonts: ['PingFang SC'],
+        slogans: ['越喝越上头'],
+        keywords: ['精酿', '啤酒'],
+      },
+      videoStyle: {
+        preferredDuration: 20,
+        aspectRatio: '9:16',
+      },
+    }
+
+    brandModel.findOne.mockReturnValue(createQuery(brand))
+    templateRegistry.run.mockResolvedValue({
+      templateId: 'b7-ai-live',
+      type: 'seeding',
+      name: '越小啤 AI 微动效线',
+      description: '模板创建',
+      styleConfig: {
+        duration: 5,
+        aspectRatio: '9:16',
+        tone: '高频轻量种草',
+        visualStyle: 'AI 微动效种草',
+        platforms: ['douyin', 'xiaohongshu'],
+        brandAssets: {
+          logo: 'https://cdn.example.com/logo.png',
+          colors: ['#111111'],
+          fonts: ['PingFang SC'],
+        },
+        styleRewrite: {
+          enabled: true,
+          scope: 'shared',
+          preserveComposition: true,
+          preserveProductPlacement: true,
+          mutationDomains: ['lighting direction'],
+        },
+      },
+      distributionRules: {
+        preferredPlatforms: ['douyin', 'xiaohongshu'],
+        templateIds: ['b7-ai-live'],
+        strategy: 'round-robin',
+      },
+      preferences: {
+        preferredStyles: ['micro-motion'],
+        preferredDuration: 5,
+        aspectRatio: '9:16',
+        subtitlePreferences: {
+          templateId: 'b7-ai-live',
+          workflow: 'brand_assets -> product_images -> kling/seedance i2v -> 5s video',
+        },
+      },
+      runtime: {
+        version: '1.0',
+        estimatedCost: 15.1,
+        estimatedDurationSec: 300,
+        costMode: 'ai_video',
+        requiredInputs: ['brand_assets', 'product_images'],
+        optionalInputs: [],
+        stages: [
+          { name: 'i2v_generate', engine: 'kling/seedance', output: '5s branded video' },
+        ],
+        paramsSnapshot: {
+          productImages: ['https://cdn.example.com/product-1.png'],
+        },
+      },
+    })
+
+    await service.create(orgId, brandId.toString(), {
+      brandId: brandId.toString(),
+      templateType: 'b7-ai-live',
+      params: {
+        productImages: ['https://cdn.example.com/product-1.png'],
+      },
+    } as any)
+
+    expect(templateRegistry.run).toHaveBeenCalledWith('b7-ai-live', expect.objectContaining({
+      brand: expect.objectContaining({
+        id: brandId.toString(),
+        name: '越小啤',
+      }),
+      params: {
+        productImages: ['https://cdn.example.com/product-1.png'],
+      },
+    }))
+    expect(pipelineModel.create).toHaveBeenCalledWith(expect.objectContaining({
+      templateId: 'b7-ai-live',
+      type: 'seeding',
+      styleConfig: expect.objectContaining({
+        duration: 5,
+        visualStyle: 'AI 微动效种草',
+      }),
+      distributionRules: expect.objectContaining({
+        preferredPlatforms: ['douyin', 'xiaohongshu'],
+        templateIds: ['b7-ai-live'],
+      }),
+      preferences: expect.objectContaining({
+        preferredStyles: ['micro-motion'],
+        subtitlePreferences: expect.objectContaining({
+          templateId: 'b7-ai-live',
+          templateRuntime: expect.objectContaining({
+            templateId: 'b7-ai-live',
+            estimatedCost: 15.1,
+          }),
+        }),
+      }),
+    }))
   })
 
   it('应把员工目标规则折叠为可分发的 assignment 与平台集合', async () => {

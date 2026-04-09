@@ -7,6 +7,7 @@ import {
   IsInt,
   IsMongoId,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   Min,
@@ -265,6 +266,14 @@ export class CreatePipelineDto {
   templateId?: string
 
   @IsOptional()
+  @IsString()
+  templateType?: string
+
+  @IsOptional()
+  @IsObject()
+  params?: Record<string, unknown>
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => PipelineStyleConfigDto)
   styleConfig?: PipelineStyleConfigDto
@@ -324,6 +333,14 @@ export class UpdatePipelineDto {
   @IsOptional()
   @IsString()
   templateId?: string
+
+  @IsOptional()
+  @IsString()
+  templateType?: string
+
+  @IsOptional()
+  @IsObject()
+  params?: Record<string, unknown>
 
   @IsOptional()
   @ValidateNested()
