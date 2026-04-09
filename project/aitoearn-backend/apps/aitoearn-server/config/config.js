@@ -27,6 +27,7 @@ const {
 const {
   NODE_ENV,
   APP_DOMAIN,
+  OPENAPI_ENABLE,
 } = process.env
 
 const {
@@ -85,6 +86,12 @@ module.exports = {
   port: 3002,
   environment: NODE_ENV,
   enableBadRequestDetails: true,
+  openapi: {
+    enable: OPENAPI_ENABLE ? OPENAPI_ENABLE === 'true' : NODE_ENV !== 'production',
+    title: 'MediaClaw API',
+    description: 'MediaClaw server API reference',
+    path: '/docs',
+  },
 
   // 认证
   auth: {

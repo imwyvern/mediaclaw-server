@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
+import { ThrottlerModule } from '@nestjs/throttler'
 import {
   ApiKey,
   ApiKeySchema,
@@ -104,6 +105,18 @@ const workerModuleImports
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot([
+      {
+        name: 'mediaclawPublic',
+        ttl: 60_000,
+        limit: 120,
+      },
+      {
+        name: 'paymentCreate',
+        ttl: 60_000,
+        limit: 5,
+      },
+    ]),
     MongooseModule.forFeature([
       { name: Organization.name, schema: OrganizationSchema },
       { name: Brand.name, schema: BrandSchema },

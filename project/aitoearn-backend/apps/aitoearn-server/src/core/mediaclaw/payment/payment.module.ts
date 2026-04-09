@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
-import { ThrottlerModule } from '@nestjs/throttler'
 import {
   Invoice,
   InvoiceSchema,
@@ -28,13 +27,6 @@ import { XorPayService } from './xorpay.service'
       { name: Organization.name, schema: OrganizationSchema },
     ]),
     DistributionModule,
-    ThrottlerModule.forRoot([
-      {
-        name: 'paymentCreate',
-        ttl: 60_000,
-        limit: 5,
-      },
-    ]),
   ],
   controllers: [XorPayController],
   providers: [XorPayService, PaymentCreateThrottleGuard],
