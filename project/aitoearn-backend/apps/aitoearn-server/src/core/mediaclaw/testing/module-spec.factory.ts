@@ -202,6 +202,7 @@ const testingHarness = vi.hoisted(() => {
     PaymentProductType: createEnum(['VIDEO_PACK', 'SUBSCRIPTION', 'ADDON']),
     PaymentStatus: createEnum(['PENDING', 'PAID', 'FAILED', 'REFUNDED', 'EXPIRED']),
     PipelineStatus: createEnum(['ACTIVE', 'PAUSED', 'ARCHIVED']),
+    PipelineTemplateStatus: createEnum(['ACTIVE', 'DRAFT', 'DEPRECATED']),
     PipelineType: createEnum(['SEEDING', 'REVIEW', 'NEW_PRODUCT', 'BRAND_STORY', 'PROMO', 'CUSTOM']),
     PlatformAccountPlatform: createEnum(['DOUYIN', 'XIAOHONGSHU', 'KUAISHOU', 'BILIBILI']),
     PlatformAccountStatus: createEnum(['ACTIVE', 'INACTIVE']),
@@ -218,7 +219,6 @@ const testingHarness = vi.hoisted(() => {
       'VIRAL_ANALYSIS',
       'REMIX_BRIEF',
     ]),
-    UserRole: createEnum(['ADMIN', 'EDITOR', 'VIEWER']),
     VideoTaskStatus: createEnum([
       'DRAFT',
       'PENDING',
@@ -245,6 +245,16 @@ const testingHarness = vi.hoisted(() => {
     VideoTaskType: createEnum(['BRAND_REPLACE', 'REMIX', 'NEW_CONTENT']),
     ViralContentRemixStatus: createEnum(['PENDING', 'REMIXED', 'SKIPPED']),
   }
+
+  mongoEnumMocks['UserRole'] = Object.freeze({
+    SUPER_ADMIN: 'super_admin',
+    ENTERPRISE_ADMIN: 'admin',
+    OPERATOR: 'editor',
+    EMPLOYEE: 'viewer',
+    ADMIN: 'admin',
+    EDITOR: 'editor',
+    VIEWER: 'viewer',
+  })
 
   return {
     createConnectionMock,
@@ -354,8 +364,50 @@ vi.mock('@yikart/mongodb', () => {
     'WebhookSchema',
   ] as const
 
+  const normalizeUserRole = (role: string | null | undefined) => {
+    if (!role) {
+      return testingHarness.mongoEnumMocks['UserRole']['EMPLOYEE']
+    }
+
+    const normalized = role.trim()
+    if (!normalized) {
+      return testingHarness.mongoEnumMocks['UserRole']['EMPLOYEE']
+    }
+
+    if (normalized === testingHarness.mongoEnumMocks['UserRole']['SUPER_ADMIN']) {
+      return testingHarness.mongoEnumMocks['UserRole']['SUPER_ADMIN']
+    }
+
+    if (
+      normalized === testingHarness.mongoEnumMocks['UserRole']['ENTERPRISE_ADMIN']
+      || normalized === testingHarness.mongoEnumMocks['UserRole']['ADMIN']
+    ) {
+      return testingHarness.mongoEnumMocks['UserRole']['ENTERPRISE_ADMIN']
+    }
+
+    if (
+      normalized === testingHarness.mongoEnumMocks['UserRole']['OPERATOR']
+      || normalized === testingHarness.mongoEnumMocks['UserRole']['EDITOR']
+    ) {
+      return testingHarness.mongoEnumMocks['UserRole']['OPERATOR']
+    }
+
+    return testingHarness.mongoEnumMocks['UserRole']['EMPLOYEE']
+  }
+
   const mockModule: Record<string, any> = {
     ...testingHarness.mongoEnumMocks,
+    normalizeUserRole,
+    userRoleSatisfies: (role: string | null | undefined, requiredRole: string) => {
+      const ranks: Record<string, number> = {
+        super_admin: 400,
+        admin: 300,
+        editor: 200,
+        viewer: 100,
+      }
+
+      return (ranks[normalizeUserRole(role)] || 0) >= (ranks[normalizeUserRole(requiredRole)] || 0)
+    },
   }
 
   for (const entityName of entityNames) {
