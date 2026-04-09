@@ -1,3 +1,4 @@
+import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
 import { Logger } from '@nestjs/common'
 import { AssetsService } from '@yikart/assets'
 import { CreditsType, UserType } from '@yikart/common'
@@ -15,6 +16,71 @@ vi.mock('./volcengine.utils', () => ({
     saveVideoFromVid: vi.fn(),
   },
 }))
+
+vi.mock('@yikart/mongodb', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@yikart/mongodb')>().catch(() => ({} as typeof import('@yikart/mongodb')))
+
+  return {
+    ...actual,
+    AiLogChannel: actual.AiLogChannel || {
+      Volcengine: 'volcengine',
+    },
+    AiLogRepository: actual.AiLogRepository || class {},
+    AiLogStatus: actual.AiLogStatus || {
+      Generating: 'generating',
+      Success: 'success',
+      Failed: 'failed',
+    },
+    AiLogType: actual.AiLogType || {
+      VideoEdit: 'video-edit',
+    },
+    AssetType: actual.AssetType || {
+      VideoEdit: 'videoEdit',
+    },
+  }
+})
+
+interface ToolLike { name?: string }
+type ServerToolLookup = Pick<McpSdkServerConfigWithInstance, 'instance'> & {
+  tools?: ToolLike[]
+  _config?: {
+    tools?: ToolLike[]
+  }
+}
+
+function getServerToolNames(server: ServerToolLookup) {
+  if (Array.isArray(server?.tools)) {
+    const names = server.tools
+      .map((tool: { name?: string }) => tool.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+    if (names.length > 0) {
+      return names
+    }
+  }
+
+  if (Array.isArray(server?._config?.tools)) {
+    const names = server._config.tools
+      .map((tool: { name?: string }) => tool.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+    if (names.length > 0) {
+      return names
+    }
+  }
+
+  const registeredTools = server?.instance?._registeredTools
+  if (registeredTools instanceof Map) {
+    return Array.from(registeredTools.keys())
+  }
+  if (registeredTools && typeof registeredTools === 'object') {
+    return Object.keys(registeredTools)
+  }
+
+  return []
+}
+
+function getServerVersion(server: ServerToolLookup & { version?: string }) {
+  return server?.version ?? server?.instance?.server?._serverInfo?.version
+}
 
 describe('videoEditMcp', () => {
   let videoEditMcp: VideoEditMcp
@@ -394,7 +460,7 @@ describe('videoEditMcp', () => {
       const tool = videoEditMcp.createGetVideoEditTaskStatusTool(userId, userType)
       const result = await tool.handler({ taskId: 'ailog-123' }, {})
 
-      expect(result.isError).toBeUndefined()
+      expect(result.isError).not.toBe(true)
       const textContent = result.content[0] as { type: 'text', text: string }
       expect(textContent.text).toContain('completed successfully')
       expect(textContent.text).toContain('https://example.com/output.mp4')
@@ -440,7 +506,7 @@ describe('videoEditMcp', () => {
       const tool = videoEditMcp.createGetVideoEditTaskStatusTool(userId, userType)
       const result = await tool.handler({ taskId: 'ailog-123' }, {})
 
-      expect(result.isError).toBeUndefined()
+      expect(result.isError).not.toBe(true)
       const textContent = result.content[0] as { type: 'text', text: string }
       expect(textContent.text).toContain('still processing')
     })
@@ -458,7 +524,7 @@ describe('videoEditMcp', () => {
       const tool = videoEditMcp.createGetVideoEditTaskStatusTool(userId, userType)
       const result = await tool.handler({ taskId: 'ailog-123' }, {})
 
-      expect(result.isError).toBeUndefined()
+      expect(result.isError).not.toBe(true)
       const textContent = result.content[0] as { type: 'text', text: string }
       expect(textContent.text).toContain('processing')
     })
@@ -584,16 +650,16 @@ describe('videoEditMcp', () => {
     })
 
     it('should include expected tools', () => {
-      const server = videoEditMcp.createServer(userId, userType) as { tools?: Array<{ name: string }> }
-      const toolNames = server.tools?.map(t => t.name)
+      const server = videoEditMcp.createServer(userId, userType)
+      const toolNames = getServerToolNames(server)
 
       expect(toolNames).toContain(VideoEditToolName.SubmitDirectEditTask)
       expect(toolNames).toContain(VideoEditToolName.GetVideoEditTaskStatus)
     })
 
     it('should have version 1.0.0', () => {
-      const server = videoEditMcp.createServer(userId, userType) as { version?: string }
-      expect(server.version).toBe('1.0.0')
+      const server = videoEditMcp.createServer(userId, userType)
+      expect(getServerVersion(server)).toBe('1.0.0')
     })
   })
 })

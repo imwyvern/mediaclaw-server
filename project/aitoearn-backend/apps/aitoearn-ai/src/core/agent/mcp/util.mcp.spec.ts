@@ -1,7 +1,62 @@
+import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
 import { Logger } from '@nestjs/common'
 import { ContentGenerationTaskRepository } from '@yikart/mongodb'
 import { vi } from 'vitest'
 import { UtilMcp, UtilToolName } from './util.mcp'
+
+vi.mock('@yikart/mongodb', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@yikart/mongodb')>().catch(() => ({} as typeof import('@yikart/mongodb')))
+
+  return {
+    ...actual,
+    ContentGenerationTaskRepository: actual.ContentGenerationTaskRepository || class {},
+    ContentGenerationTaskStatus: actual.ContentGenerationTaskStatus || {
+      Running: 'running',
+      Completed: 'completed',
+      RequiresAction: 'requires_action',
+      Error: 'error',
+      Aborted: 'aborted',
+    },
+  }
+})
+
+interface ToolLike { name?: string }
+type ServerToolLookup = Pick<McpSdkServerConfigWithInstance, 'instance'> & {
+  tools?: ToolLike[]
+  _config?: {
+    tools?: ToolLike[]
+  }
+}
+
+function getServerToolNames(server: ServerToolLookup) {
+  if (Array.isArray(server?.tools)) {
+    const names = server.tools
+      .map((tool: { name?: string }) => tool.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+    if (names.length > 0) {
+      return names
+    }
+  }
+
+  if (Array.isArray(server?._config?.tools)) {
+    const names = server._config.tools
+      .map((tool: { name?: string }) => tool.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+    if (names.length > 0) {
+      return names
+    }
+  }
+
+  const registeredTools = server?.instance?._registeredTools
+  if (registeredTools instanceof Map) {
+    return Array.from(registeredTools.keys())
+  }
+  if (registeredTools && typeof registeredTools === 'object') {
+    return Object.keys(registeredTools)
+  }
+
+  return []
+}
 
 describe('utilMcp', () => {
   let utilMcp: UtilMcp
@@ -143,12 +198,8 @@ describe('utilMcp', () => {
     })
 
     it('should include wait and getCurrentTime tools', () => {
-      const server = utilMcp.server as { tools?: Array<{ name: string }> }
-      const tools = server.tools
-      expect(tools).toBeDefined()
-      expect(tools?.length).toBeGreaterThanOrEqual(2)
-
-      const toolNames = tools?.map(t => t.name)
+      const toolNames = getServerToolNames(utilMcp.server)
+      expect(toolNames.length).toBeGreaterThanOrEqual(2)
       expect(toolNames).toContain(UtilToolName.Wait)
       expect(toolNames).toContain(UtilToolName.GetCurrentTime)
     })

@@ -1,23 +1,122 @@
+import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
+import type { ImageService } from '../../ai/image'
+import type { GeminiVideoService, GrokVideoService, OpenAIVideoService } from '../../ai/video'
 import { Logger } from '@nestjs/common'
-import { UserType } from '@yikart/common'
+import { FileUtil, UserType } from '@yikart/common'
 import { AiLogStatus } from '@yikart/mongodb'
-import { vi } from 'vitest'
-import { ChatService } from '../../ai/chat'
-import { ImageService } from '../../ai/image'
-import { GeminiVideoService, OpenAIVideoService, Sora2VideoService } from '../../ai/video'
+import { beforeAll, vi } from 'vitest'
+import { z } from 'zod'
 import { MediaMcp, MediaToolName } from './media.mcp'
+
+vi.mock('@yikart/mongodb', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@yikart/mongodb')>().catch(() => ({} as typeof import('@yikart/mongodb')))
+
+  return {
+    ...actual,
+    AiLogChannel: actual.AiLogChannel || {
+      Gemini: 'gemini',
+      Grok: 'grok',
+      OpenAI: 'openai',
+    },
+    AiLogStatus: actual.AiLogStatus || {
+      Generating: 'generating',
+      Success: 'success',
+      Failed: 'failed',
+    },
+    AiLogType: actual.AiLogType || {
+      Video: 'video',
+    },
+    AssetType: actual.AssetType || {
+      ImageGeneration: 'imageGeneration',
+      VideoGeneration: 'videoGeneration',
+      VideoEdit: 'videoEdit',
+    },
+    AssetStatus: actual.AssetStatus || {
+      Pending: 'pending',
+      Confirmed: 'confirmed',
+      Failed: 'failed',
+    },
+  }
+})
+
+vi.mock('../../ai/image', () => ({
+  ImageService: class {},
+}))
+
+vi.mock('../../ai/video', () => ({
+  OpenAIVideoService: class {},
+  GeminiVideoService: class {},
+  GrokVideoService: class {},
+  geminiVeoVideoCreateRequestSchema: z.object({
+    prompt: z.string(),
+    model: z.string(),
+    aspectRatio: z.string().optional(),
+    duration: z.number().optional(),
+    resolution: z.string().optional(),
+    negativePrompt: z.string().optional(),
+    seed: z.number().optional(),
+    image: z.string().optional(),
+    lastFrame: z.string().optional(),
+    video: z.string().optional(),
+    referenceImages: z.array(z.string()).optional(),
+  }),
+}))
+
+interface ToolLike { name?: string }
+type ServerToolLookup = Pick<McpSdkServerConfigWithInstance, 'instance'> & {
+  tools?: ToolLike[]
+  _config?: {
+    tools?: ToolLike[]
+  }
+}
+
+function getServerToolNames(server: ServerToolLookup) {
+  if (Array.isArray(server?.tools)) {
+    const names = server.tools
+      .map((tool: { name?: string }) => tool.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+    if (names.length > 0) {
+      return names
+    }
+  }
+
+  if (Array.isArray(server?._config?.tools)) {
+    const names = server._config.tools
+      .map((tool: { name?: string }) => tool.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+    if (names.length > 0) {
+      return names
+    }
+  }
+
+  const registeredTools = server?.instance?._registeredTools
+  if (registeredTools instanceof Map) {
+    return Array.from(registeredTools.keys())
+  }
+  if (registeredTools && typeof registeredTools === 'object') {
+    return Object.keys(registeredTools)
+  }
+
+  return []
+}
 
 describe('mediaMcp', () => {
   let mediaMcp: MediaMcp
   let mockLogger: Logger
-  let mockChatService: vi.Mocked<ChatService>
   let mockOpenaiVideoService: vi.Mocked<OpenAIVideoService>
   let mockImageService: vi.Mocked<ImageService>
-  let mockSora2VideoService: vi.Mocked<Sora2VideoService>
   let mockGeminiVideoService: vi.Mocked<GeminiVideoService>
+  let mockGrokVideoService: vi.Mocked<GrokVideoService>
 
   const userId = 'test-user-id'
   const userType = UserType.User
+
+  beforeAll(() => {
+    FileUtil.init({
+      endpoint: 'https://s3.example.com',
+      cdnEndpoint: 'https://cdn.example.com',
+    })
+  })
 
   beforeEach(() => {
     mockLogger = {
@@ -25,8 +124,6 @@ describe('mediaMcp', () => {
       error: vi.fn(),
       fatal: vi.fn(),
     } as unknown as Logger
-
-    mockChatService = {} as vi.Mocked<ChatService>
 
     mockOpenaiVideoService = {
       createVideo: vi.fn(),
@@ -39,19 +136,21 @@ describe('mediaMcp', () => {
       userGeminiGeneration: vi.fn(),
     } as unknown as vi.Mocked<ImageService>
 
-    mockSora2VideoService = {} as vi.Mocked<Sora2VideoService>
-
     mockGeminiVideoService = {
       createVideo: vi.fn(),
       getVideo: vi.fn(),
     } as unknown as vi.Mocked<GeminiVideoService>
 
+    mockGrokVideoService = {
+      createVideo: vi.fn(),
+      getTask: vi.fn(),
+    } as unknown as vi.Mocked<GrokVideoService>
+
     mediaMcp = new MediaMcp(
-      mockChatService,
       mockOpenaiVideoService,
       mockImageService,
-      mockSora2VideoService,
       mockGeminiVideoService,
+      mockGrokVideoService,
     )
     // Override the logger for testing
     Object.defineProperty(mediaMcp, 'logger', { value: mockLogger })
@@ -631,6 +730,108 @@ describe('mediaMcp', () => {
     })
   })
 
+  describe('createGenerateVideoWithGrokTool', () => {
+    it('should have correct tool name', () => {
+      const tool = mediaMcp.createGenerateVideoWithGrokTool(userId, userType)
+      expect(tool.name).toBe(MediaToolName.GenerateVideoWithGrok)
+    })
+
+    it('should call grokVideoService.createVideo with correct params', async () => {
+      mockGrokVideoService.createVideo.mockResolvedValue({
+        id: 'grok-task-123',
+      } as never)
+
+      const tool = mediaMcp.createGenerateVideoWithGrokTool(userId, userType)
+      await tool.handler({
+        prompt: 'A sunset over the ocean',
+        model: 'grok-imagine-video',
+        aspectRatio: '9:16',
+        resolution: '720p',
+        duration: 8,
+        imageUrl: 'https://example.com/ref.png',
+      } as never, {})
+
+      expect(mockGrokVideoService.createVideo).toHaveBeenCalledWith({
+        userId,
+        userType,
+        prompt: 'A sunset over the ocean',
+        model: 'grok-imagine-video',
+        aspectRatio: '9:16',
+        resolution: '720p',
+        duration: 8,
+        imageUrl: 'https://example.com/ref.png',
+      })
+    })
+
+    it('should return success result with task id', async () => {
+      mockGrokVideoService.createVideo.mockResolvedValue({
+        id: 'grok-task-123',
+      } as never)
+
+      const tool = mediaMcp.createGenerateVideoWithGrokTool(userId, userType)
+      const result = await tool.handler({
+        prompt: 'A sunset over the ocean',
+        model: 'grok-imagine-video',
+        aspectRatio: '9:16',
+        resolution: '720p',
+        duration: 8,
+      } as never, {})
+
+      expect(result.isError).toBeUndefined()
+      const textContent = result.content[0] as { type: 'text', text: string }
+      expect(textContent.text).toContain('grok-task-123')
+    })
+  })
+
+  describe('createGetGrokVideoStatusTool', () => {
+    it('should have correct tool name', () => {
+      const tool = mediaMcp.createGetGrokVideoStatusTool(userId, userType)
+      expect(tool.name).toBe(MediaToolName.GetGrokVideoStatus)
+    })
+
+    it('should return completed status with video url', async () => {
+      mockGrokVideoService.getTask.mockResolvedValue({
+        status: 'completed',
+        videoUrl: 'grok/video.mp4',
+      } as never)
+
+      const tool = mediaMcp.createGetGrokVideoStatusTool(userId, userType)
+      const result = await tool.handler({ taskId: 'grok-task-123' }, {})
+
+      expect(result.isError).toBeUndefined()
+      const textContent = result.content[0] as { type: 'text', text: string }
+      expect(textContent.text).toContain('completed')
+      expect(textContent.text).toContain('grok/video.mp4')
+    })
+
+    it('should return failed status with error', async () => {
+      mockGrokVideoService.getTask.mockResolvedValue({
+        status: 'failed',
+        error: 'Generation failed',
+      } as never)
+
+      const tool = mediaMcp.createGetGrokVideoStatusTool(userId, userType)
+      const result = await tool.handler({ taskId: 'grok-task-123' }, {})
+
+      expect(result.isError).toBe(true)
+      const textContent = result.content[0] as { type: 'text', text: string }
+      expect(textContent.text).toContain('Generation failed')
+    })
+
+    it('should return pending status when task is still running', async () => {
+      mockGrokVideoService.getTask.mockResolvedValue({
+        status: 'processing',
+      } as never)
+
+      const tool = mediaMcp.createGetGrokVideoStatusTool(userId, userType)
+      const result = await tool.handler({ taskId: 'grok-task-123' }, {})
+
+      expect(result.isError).toBeUndefined()
+      const textContent = result.content[0] as { type: 'text', text: string }
+      expect(textContent.text).toContain('processing')
+    })
+  })
+
   describe('createServer', () => {
     it('should create server with correct name', () => {
       const server = mediaMcp.createServer(userId, userType)
@@ -638,12 +839,12 @@ describe('mediaMcp', () => {
     })
 
     it('should include expected tools', () => {
-      const server = mediaMcp.createServer(userId, userType) as { tools?: Array<{ name: string }> }
-      const toolNames = server.tools?.map(t => t.name)
+      const server = mediaMcp.createServer(userId, userType)
+      const toolNames = getServerToolNames(server)
 
       expect(toolNames).toContain(MediaToolName.GenerateImage)
-      expect(toolNames).toContain(MediaToolName.GenerateVideoWithVeo)
-      expect(toolNames).toContain(MediaToolName.GetVeoVideoStatus)
+      expect(toolNames).toContain(MediaToolName.GenerateVideoWithGrok)
+      expect(toolNames).toContain(MediaToolName.GetGrokVideoStatus)
     })
   })
 })

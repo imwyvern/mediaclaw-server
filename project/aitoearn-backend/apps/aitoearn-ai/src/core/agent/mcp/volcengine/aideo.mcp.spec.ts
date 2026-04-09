@@ -1,9 +1,52 @@
+import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk'
 import { Logger } from '@nestjs/common'
 import { UserType } from '@yikart/common'
 import { vi } from 'vitest'
 import { AideoService } from '../../../ai/aideo'
 import { AideoTaskStatus } from '../../../ai/libs/volcengine'
 import { AideoMcp, AideoToolName } from './aideo.mcp'
+
+interface ToolLike { name?: string }
+type ServerToolLookup = Pick<McpSdkServerConfigWithInstance, 'instance'> & {
+  tools?: ToolLike[]
+  _config?: {
+    tools?: ToolLike[]
+  }
+}
+
+function getServerToolNames(server: ServerToolLookup) {
+  if (Array.isArray(server?.tools)) {
+    const names = server.tools
+      .map((tool: { name?: string }) => tool.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+    if (names.length > 0) {
+      return names
+    }
+  }
+
+  if (Array.isArray(server?._config?.tools)) {
+    const names = server._config.tools
+      .map((tool: { name?: string }) => tool.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+    if (names.length > 0) {
+      return names
+    }
+  }
+
+  const registeredTools = server?.instance?._registeredTools
+  if (registeredTools instanceof Map) {
+    return Array.from(registeredTools.keys())
+  }
+  if (registeredTools && typeof registeredTools === 'object') {
+    return Object.keys(registeredTools)
+  }
+
+  return []
+}
+
+function getServerVersion(server: ServerToolLookup & { version?: string }) {
+  return server?.version ?? server?.instance?.server?._serverInfo?.version
+}
 
 describe('aideoMcp', () => {
   let aideoMcp: AideoMcp
@@ -318,16 +361,16 @@ describe('aideoMcp', () => {
     })
 
     it('should include expected tools', () => {
-      const server = aideoMcp.createServer(userId, userType) as { tools?: Array<{ name: string }> }
-      const toolNames = server.tools?.map(t => t.name)
+      const server = aideoMcp.createServer(userId, userType)
+      const toolNames = getServerToolNames(server)
 
       expect(toolNames).toContain(AideoToolName.SubmitAideoTask)
       expect(toolNames).toContain(AideoToolName.GetAideoTaskStatus)
     })
 
     it('should have version 1.0.0', () => {
-      const server = aideoMcp.createServer(userId, userType) as { version?: string }
-      expect(server.version).toBe('1.0.0')
+      const server = aideoMcp.createServer(userId, userType)
+      expect(getServerVersion(server)).toBe('1.0.0')
     })
   })
 })
