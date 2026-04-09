@@ -89,6 +89,19 @@ class ApplyRemixInsightsRequestDto {
   pipelineId: string
 }
 
+class RemixAnalyzeRequestDto {
+  @IsString()
+  videoUrl: string
+
+  @IsOptional()
+  @IsString()
+  pipelineId?: string
+
+  @IsOptional()
+  @IsString()
+  contentId?: string
+}
+
 @Public()
 @MediaClawApiController('api/v1/discovery')
 export class DiscoveryController {
@@ -177,6 +190,20 @@ export class DiscoveryController {
     return this.contentRemixService.applyRemixInsights(
       body.contentId,
       body.pipelineId,
+    )
+  }
+
+  @Post('remix-analyze')
+  @ApiOperation({ summary: '基于视频链接生成 5 维分析和 video recipe' })
+  @ApiBody({ type: RemixAnalyzeRequestDto })
+  @ApiCreatedResponse({ description: '已返回结构化 video recipe，并可选写回 pipeline 偏好' })
+  async remixAnalyze(
+    @Body() body: RemixAnalyzeRequestDto,
+  ) {
+    return this.contentRemixService.remixAnalyzeByVideoUrl(
+      body.videoUrl,
+      body.pipelineId,
+      body.contentId,
     )
   }
 }

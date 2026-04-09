@@ -50,6 +50,9 @@ class ViralContentAnalysis {
   @Prop({ type: [String], default: [] })
   risks: string[];
 
+  @Prop({ type: Object, default: {} })
+  videoRecipe: Record<string, any>;
+
   @Prop({ type: String, default: "" })
   fallbackReason: string;
 

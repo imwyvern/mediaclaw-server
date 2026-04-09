@@ -32,6 +32,7 @@ interface AnalysisResultShape {
   bestPostingTimes: string[]
   ctaStyle: string
   risks: string[]
+  videoRecipe: VideoRecipeShape
   fallbackReason: string
   raw?: string
   analyzedAt: Date
@@ -52,6 +53,60 @@ interface RemixBriefShape {
   productionNotes: string[]
   fallbackReason: string
   raw?: string
+  generatedAt: Date
+}
+
+interface VideoRecipeDimension {
+  summary: string
+  signals: string[]
+  actions: string[]
+}
+
+interface VideoRecipeShape {
+  source: string
+  recipeVersion: string
+  contentId: string
+  platform: string
+  videoId: string
+  videoUrl: string
+  openingHook: string
+  coreAngle: string
+  structure: VideoRecipeDimension & {
+    beats: string[]
+    pacing: string
+  }
+  visuals: VideoRecipeDimension & {
+    motifs: string[]
+    shotPlan: string[]
+    overlayStyle: string
+  }
+  copy: VideoRecipeDimension & {
+    tone: string
+    hooks: string[]
+    hashtags: string[]
+    cta: string
+    commentSeeds: string[]
+  }
+  audio: VideoRecipeDimension & {
+    cues: string[]
+    soundtrackDirection: string
+  }
+  data: VideoRecipeDimension & {
+    viralScore: number
+    engagementRate: number
+    publishAgeDays: number | null
+    performanceSignals: string[]
+  }
+  pipelineHints: {
+    preferredStyles: string[]
+    preferredDuration: number
+    aspectRatio: string
+    preferredPlatforms: string[]
+    preferredCategories: string[]
+  }
+  sceneBlueprint: string[]
+  productionChecklist: string[]
+  riskControls: string[]
   generatedAt: Date
 }
 
@@ -99,6 +154,40 @@ export class ContentRemixService {
     return analysis
   }
 
+  async remixAnalyzeByVideoUrl(
+    videoUrl: string,
+    pipelineId?: string,
+    contentId?: string,
+  ) {
+    const content = contentId
+      ? await this.getViralContent(contentId)
+      : await this.getViralContentByVideoUrl(videoUrl)
+    const analysis = await this.resolveAnalysis(content)
+    const recipe = this.resolveVideoRecipe(content, analysis)
+    analysis.videoRecipe = recipe
+
+    await this.persistAnalysis(content._id.toString(), analysis)
+
+    const pipelineResult = pipelineId?.trim()
+      ? await this.applyInsightsToPipeline({
+          content,
+          pipeline: await this.getPipeline(pipelineId),
+          analysis,
+          brief: null,
+          recipe,
+        })
+      : null
+
+    return {
+      contentId: content._id.toString(),
+      videoUrl: content.contentUrl || videoUrl.trim(),
+      analysis,
+      recipe,
+      pipelineApplied: Boolean(pipelineResult),
+      pipeline: pipelineResult?.pipeline || null,
+    }
+  }
+
   async generateRemixBrief(contentId: string, brandId: string) {
     const [content, brand] = await Promise.all([
       this.getViralContent(contentId),
@@ -124,108 +213,13 @@ export class ContentRemixService {
       )
     }
 
-    const currentPreferences = pipeline.preferences || {}
-    const mergedPreferredStyles = this.mergeUniqueStrings(
-      currentPreferences.preferredStyles || [],
-      this.readStringArray(analysis?.['visualMotifs']),
-    )
-    const subtitlePreferences = {
-      ...(currentPreferences.subtitlePreferences || {}),
-      openingHook:
-        this.readString(brief?.['openingHook'])
-        || currentPreferences.subtitlePreferences?.['openingHook']
-        || '',
-      ctaStyle:
-        this.readString(analysis?.['ctaStyle'])
-        || currentPreferences.subtitlePreferences?.['ctaStyle']
-        || '',
-      copyIdeas: this.readStringArray(brief?.['copyIdeas']),
-      audioCues: this.readStringArray(analysis?.['audioCues']),
-      copyStyleNotes: this.readStringArray(analysis?.['copyStyle']),
-      hashtagIdeas: this.readStringArray(analysis?.['tagStrategy']),
-      recommendedPostingTimes: this.readStringArray(
-        analysis?.['bestPostingTimes'],
-      ),
-      remixSourceContentId: content._id.toString(),
-      remixAppliedAt: new Date().toISOString(),
-    }
-    const remixInsights = {
-      sourceContentId: content._id.toString(),
-      platform: content.platform,
-      videoId: content.videoId,
-      title: content.title,
-      appliedAt: new Date(),
-      analysis: analysis
-        ? {
-            source: this.readString(analysis['source']),
-            model: this.readString(analysis['model']),
-            summary: this.readString(analysis['summary']),
-            hooks: this.readStringArray(analysis['hooks']),
-            narrativeBeats: this.readStringArray(analysis['narrativeBeats']),
-            structureBreakdown: this.readStringArray(
-              analysis['structureBreakdown'],
-            ),
-            visualMotifs: this.readStringArray(analysis['visualMotifs']),
-            audioCues: this.readStringArray(analysis['audioCues']),
-            copyStyle: this.readStringArray(analysis['copyStyle']),
-            tagStrategy: this.readStringArray(analysis['tagStrategy']),
-            bestPostingTimes: this.readStringArray(
-              analysis['bestPostingTimes'],
-            ),
-            ctaStyle: this.readString(analysis['ctaStyle']),
-            risks: this.readStringArray(analysis['risks']),
-            fallbackReason: this.readString(analysis['fallbackReason']),
-            analyzedAt: analysis['analyzedAt'] || null,
-          }
-        : null,
-      brief: brief
-        ? {
-            brandId: this.readIdentifier(brief['brandId']),
-            source: this.readString(brief['source']),
-            model: this.readString(brief['model']),
-            briefTitle: this.readString(brief['briefTitle']),
-            coreAngle: this.readString(brief['coreAngle']),
-            targetAudience: this.readString(brief['targetAudience']),
-            openingHook: this.readString(brief['openingHook']),
-            scenePlan: this.readStringArray(brief['scenePlan']),
-            copyIdeas: this.readStringArray(brief['copyIdeas']),
-            brandSafetyNotes: this.readStringArray(brief['brandSafetyNotes']),
-            productionNotes: this.readStringArray(brief['productionNotes']),
-            fallbackReason: this.readString(brief['fallbackReason']),
-            generatedAt: brief['generatedAt'] || null,
-          }
-        : null,
-    }
-    const updated = await this.pipelineModel
-      .findByIdAndUpdate(
-        pipeline._id,
-        {
-          $set: {
-            preferences: {
-              ...currentPreferences,
-              preferredStyles: mergedPreferredStyles,
-              subtitlePreferences,
-              remixInsights,
-            },
-          },
-        },
-        { new: true },
-      )
-      .lean()
-      .exec()
-
-    if (!updated) {
-      throw new NotFoundException('Pipeline not found')
-    }
-
-    return {
-      contentId: content._id.toString(),
-      pipelineId: pipeline._id.toString(),
-      preferredStyles: mergedPreferredStyles,
-      subtitlePreferences,
-      remixInsights,
-      pipeline: updated,
-    }
+    return this.applyInsightsToPipeline({
+      content,
+      pipeline,
+      analysis,
+      brief,
+      recipe: this.resolveVideoRecipe(content, analysis),
+    })
   }
 
   private async resolveAnalysis(content: LeanViralContent) {
@@ -300,7 +294,7 @@ export class ContentRemixService {
       throw new Error('invalid_json_payload')
     }
 
-    return {
+    const analysis = {
       source: 'vce_gemini',
       model: this.getGeminiModel(),
       contentId: content._id.toString(),
@@ -336,7 +330,11 @@ export class ContentRemixService {
       fallbackReason: '',
       raw: completion,
       analyzedAt: new Date(),
+      videoRecipe: fallback.videoRecipe,
     }
+
+    analysis.videoRecipe = this.buildVideoRecipe(content, analysis)
+    return analysis
   }
 
   private async generateBrief(
@@ -428,6 +426,7 @@ export class ContentRemixService {
             bestPostingTimes: analysis.bestPostingTimes,
             ctaStyle: analysis.ctaStyle,
             risks: analysis.risks,
+            videoRecipe: analysis.videoRecipe,
             fallbackReason: analysis.fallbackReason,
             analyzedAt: analysis.analyzedAt,
           },
@@ -485,6 +484,33 @@ export class ContentRemixService {
       .exec()) as unknown as LeanViralContent | null
     if (!content) {
       throw new NotFoundException('Viral content not found')
+    }
+
+    return content
+  }
+
+  private async getViralContentByVideoUrl(videoUrl: string) {
+    const normalizedUrl = videoUrl.trim()
+    if (!normalizedUrl) {
+      throw new BadRequestException('videoUrl is required')
+    }
+
+    const extractedVideoId = this.extractVideoId(normalizedUrl)
+    const orConditions: Array<Record<string, unknown>> = [
+      { contentUrl: normalizedUrl },
+    ]
+
+    if (extractedVideoId) {
+      orConditions.push({ videoId: extractedVideoId })
+    }
+
+    const content = (await this.viralContentModel
+      .findOne({ $or: orConditions })
+      .lean()
+      .exec()) as unknown as LeanViralContent | null
+
+    if (!content) {
+      throw new NotFoundException('Viral content not found for videoUrl')
     }
 
     return content
@@ -585,7 +611,7 @@ export class ContentRemixService {
     content: LeanViralContent,
     fallbackReason: string,
   ): AnalysisResultShape {
-    return {
+    const analysis = {
       source: 'fallback',
       model: 'fallback',
       contentId: content._id.toString(),
@@ -624,9 +650,13 @@ export class ContentRemixService {
       bestPostingTimes: this.buildPostingTimeFallback(content),
       ctaStyle: '邀请用户在评论区给出自己的选择、经验或反例',
       risks: ['避免绝对化承诺', '避免夸张前后对比无法验证'],
+      videoRecipe: {} as VideoRecipeShape,
       fallbackReason,
       analyzedAt: new Date(),
     }
+
+    analysis.videoRecipe = this.buildVideoRecipe(content, analysis)
+    return analysis
   }
 
   private buildBriefFallback(
@@ -715,6 +745,429 @@ export class ContentRemixService {
     const primaryWindow = `${weekdayNames[publishedAt.getDay()]} ${`${hour}`.padStart(2, '0')}:00-${nextHour}:00`
 
     return this.mergeUniqueStrings([primaryWindow], windows)
+  }
+
+  private resolveVideoRecipe(
+    content: LeanViralContent,
+    analysis?: Record<string, any> | AnalysisResultShape | null,
+  ) {
+    const analysisRecord = this.asRecord(analysis)
+    const embeddedRecipe = this.asRecord(analysisRecord?.['videoRecipe'])
+    if (embeddedRecipe) {
+      return this.normalizeVideoRecipe(content, analysisRecord || {}, embeddedRecipe)
+    }
+
+    return this.buildVideoRecipe(content, analysisRecord || {})
+  }
+
+  private buildVideoRecipe(
+    content: LeanViralContent,
+    analysis: Record<string, unknown>,
+  ): VideoRecipeShape {
+    const hooks = this.readStringArray(analysis['hooks'])
+    const narrativeBeats = this.readStringArray(analysis['narrativeBeats'])
+    const structureBreakdown = this.readStringArray(analysis['structureBreakdown'])
+    const visualMotifs = this.readStringArray(analysis['visualMotifs'])
+    const audioCues = this.readStringArray(analysis['audioCues'])
+    const copyStyle = this.readStringArray(analysis['copyStyle'])
+    const tagStrategy = this.readStringArray(analysis['tagStrategy'])
+    const bestPostingTimes = this.readStringArray(analysis['bestPostingTimes'])
+    const risks = this.readStringArray(analysis['risks'])
+    const summary = this.readString(analysis['summary'])
+      || `${content.title || content.videoId} 的爆点集中在开场结果前置、视觉对比和评论互动。`
+    const engagementRate = this.calculateEngagementRate(content)
+    const publishAgeDays = this.calculatePublishAgeDays(content.publishedAt)
+    const preferredDuration = this.estimatePreferredDuration(structureBreakdown)
+    const openingHook = hooks[0]
+      || narrativeBeats[0]
+      || `先亮结果，再给 ${content.industry || '目标用户'} 一个必须继续看的理由。`
+    const preferredStyles = this.mergeUniqueStrings(
+      visualMotifs.slice(0, 3),
+      copyStyle.slice(0, 3),
+    )
+    const commentSeeds = this.buildCommentSeeds(content, tagStrategy)
+    const performanceSignals = [
+      `爆款分 ${Number(content.viralScore || 0).toFixed(1)}`,
+      `互动率 ${(engagementRate * 100).toFixed(2)}%`,
+      `播放 ${Number(content.views || 0).toLocaleString('en-US')}`,
+      bestPostingTimes[0] ? `优先发布时间 ${bestPostingTimes[0]}` : '',
+    ].filter(Boolean)
+
+    return {
+      source: this.readString(analysis['source']) || 'derived',
+      recipeVersion: 'v2.0',
+      contentId: content._id.toString(),
+      platform: content.platform,
+      videoId: content.videoId,
+      videoUrl: content.contentUrl || '',
+      openingHook,
+      coreAngle: summary,
+      structure: {
+        summary: summary || '先给结果，再递进证明，最后用问题式 CTA 收口。',
+        signals: structureBreakdown.length > 0
+          ? structureBreakdown
+          : ['开场强钩子', '中段快速证明', '结尾评论 CTA'],
+        actions: [
+          '开头 3 秒先展示结果或冲突',
+          '中段压缩为 2-3 个可复用证据点',
+          '结尾保留一个明确互动动作',
+        ],
+        beats: narrativeBeats.length > 0
+          ? narrativeBeats
+          : ['抛问题', '给证据', '促互动'],
+        pacing: preferredDuration <= 12 ? 'fast-cut' : 'hook-proof-cta',
+      },
+      visuals: {
+        summary: visualMotifs.join('、') || '视觉上强调近景反应、关键字幕高亮和前后反差。',
+        signals: visualMotifs.length > 0
+          ? visualMotifs
+          : ['近景特写', '结果画面对比', '字幕高亮利益点'],
+        actions: [
+          '每个镜头只保留一个视觉卖点',
+          '字幕重点与镜头动作同步出现',
+          '品牌露出放在证明段而非开场堆砌',
+        ],
+        motifs: visualMotifs.length > 0
+          ? visualMotifs
+          : ['近景人物反应', '高对比字幕', '快切 B-roll'],
+        shotPlan: this.buildSceneBlueprint(hooks, structureBreakdown, visualMotifs),
+        overlayStyle: '大字利益点 + 局部高亮，避免满屏信息',
+      },
+      copy: {
+        summary: copyStyle.join('、') || '文案以短句、反问和结果前置为主。',
+        signals: copyStyle.length > 0
+          ? copyStyle
+          : ['结果前置', '短句推进', '提问式收尾'],
+        actions: [
+          '标题只保留一个主利益点',
+          '正文使用短句递进，不解释背景故事',
+          '结尾评论引导词保持可执行',
+        ],
+        tone: copyStyle[0] || 'direct-convincing',
+        hooks: hooks.length > 0 ? hooks : [openingHook],
+        hashtags: tagStrategy,
+        cta: this.readString(analysis['ctaStyle']) || '让用户留言领取模板、案例或方法',
+        commentSeeds,
+      },
+      audio: {
+        summary: audioCues.join('、') || '音频节奏围绕前强后稳，结尾留停顿拉评论。',
+        signals: audioCues.length > 0
+          ? audioCues
+          : ['开头强重拍', '中段口播推进', '结尾停顿'],
+        actions: [
+          '前 2 秒先给明显节奏点',
+          '中段口播与字幕节奏同步',
+          '结尾留 0.5-1 秒停顿承接 CTA',
+        ],
+        cues: audioCues.length > 0
+          ? audioCues
+          : ['重拍开头', '中段加速', '结尾停顿'],
+        soundtrackDirection: content.platform === 'bilibili'
+          ? '信息密度型节奏底音'
+          : '快节奏情绪起伏底音',
+      },
+      data: {
+        summary: `该素材在 ${content.platform} 的数据核心是高互动和相对新鲜度。`,
+        signals: performanceSignals,
+        actions: [
+          '优先复用已验证的发布时间窗口',
+          '把高互动标签前置到标题或首评',
+          '投放前先保留一个可评论分歧点',
+        ],
+        viralScore: Number(content.viralScore || 0),
+        engagementRate: Number(engagementRate.toFixed(4)),
+        publishAgeDays,
+        performanceSignals,
+      },
+      pipelineHints: {
+        preferredStyles,
+        preferredDuration,
+        aspectRatio: '9:16',
+        preferredPlatforms: [content.platform].filter(Boolean),
+        preferredCategories: [content.industry].filter(Boolean),
+      },
+      sceneBlueprint: this.buildSceneBlueprint(
+        hooks,
+        structureBreakdown,
+        visualMotifs,
+      ),
+      productionChecklist: [
+        '开场先放结果，不要先铺背景',
+        `标题围绕“${content.title || content.industry || '核心利益点'}”只讲一个重点`,
+        tagStrategy[0] ? `标签策略优先采用：${tagStrategy.join('；')}` : '',
+        bestPostingTimes[0] ? `发布时间优先测试：${bestPostingTimes.join(' / ')}` : '',
+      ].filter(Boolean),
+      riskControls: risks.length > 0 ? risks : ['避免绝对化承诺', '避免堆砌品牌卖点'],
+      generatedAt: new Date(),
+    }
+  }
+
+  private normalizeVideoRecipe(
+    content: LeanViralContent,
+    analysis: Record<string, unknown>,
+    recipe: Record<string, unknown>,
+  ): VideoRecipeShape {
+    const rebuilt = this.buildVideoRecipe(content, analysis)
+
+    return {
+      ...rebuilt,
+      source: this.readString(recipe['source']) || rebuilt.source,
+      recipeVersion: this.readString(recipe['recipeVersion']) || rebuilt.recipeVersion,
+      videoUrl: this.readString(recipe['videoUrl']) || rebuilt.videoUrl,
+      openingHook: this.readString(recipe['openingHook']) || rebuilt.openingHook,
+      coreAngle: this.readString(recipe['coreAngle']) || rebuilt.coreAngle,
+      sceneBlueprint: this.preferStringArray(recipe['sceneBlueprint'], rebuilt.sceneBlueprint),
+      productionChecklist: this.preferStringArray(
+        recipe['productionChecklist'],
+        rebuilt.productionChecklist,
+      ),
+      riskControls: this.preferStringArray(recipe['riskControls'], rebuilt.riskControls),
+      generatedAt: this.toDate(recipe['generatedAt']) || rebuilt.generatedAt,
+    }
+  }
+
+  private async applyInsightsToPipeline(input: {
+    content: LeanViralContent
+    pipeline: LeanPipeline
+    analysis?: Record<string, any> | AnalysisResultShape | null
+    brief?: Record<string, any> | RemixBriefShape | null
+    recipe: VideoRecipeShape
+  }) {
+    const { content, pipeline, analysis, brief, recipe } = input
+    const currentPreferences = this.asRecord(pipeline.preferences) || {}
+    const currentSubtitlePreferences = this.asRecord(
+      currentPreferences['subtitlePreferences'],
+    ) || {}
+    const currentPreferenceLearning = this.asRecord(
+      currentPreferences['preferenceLearning'],
+    ) || {}
+    const mergedPreferredStyles = this.mergeUniqueStrings(
+      this.readStringArray(currentPreferences['preferredStyles']),
+      this.mergeUniqueStrings(
+        this.readStringArray(analysis?.['visualMotifs']),
+        recipe.pipelineHints.preferredStyles,
+      ),
+    )
+    const subtitlePreferences = {
+      ...currentSubtitlePreferences,
+      openingHook:
+        this.readString(brief?.['openingHook'])
+        || recipe.openingHook
+        || this.readString(currentSubtitlePreferences['openingHook'])
+        || '',
+      ctaStyle:
+        this.readString(analysis?.['ctaStyle'])
+        || recipe.copy.cta
+        || this.readString(currentSubtitlePreferences['ctaStyle'])
+        || '',
+      copyIdeas: this.mergeUniqueStrings(
+        this.readStringArray(brief?.['copyIdeas']),
+        recipe.copy.hooks,
+      ),
+      audioCues: this.mergeUniqueStrings(
+        this.readStringArray(analysis?.['audioCues']),
+        recipe.audio.cues,
+      ),
+      copyStyleNotes: this.mergeUniqueStrings(
+        this.readStringArray(analysis?.['copyStyle']),
+        recipe.copy.signals,
+      ),
+      hashtagIdeas: this.mergeUniqueStrings(
+        this.readStringArray(analysis?.['tagStrategy']),
+        recipe.copy.hashtags,
+      ),
+      recommendedPostingTimes: this.mergeUniqueStrings(
+        this.readStringArray(analysis?.['bestPostingTimes']),
+        recipe.data.performanceSignals.filter(item => item.includes('发布时间')),
+      ),
+      commentGuideWords: recipe.copy.commentSeeds,
+      sceneBlueprint: recipe.sceneBlueprint,
+      remixSourceContentId: content._id.toString(),
+      remixAppliedAt: new Date().toISOString(),
+    }
+    const remixInsights = {
+      sourceContentId: content._id.toString(),
+      platform: content.platform,
+      videoId: content.videoId,
+      title: content.title,
+      appliedAt: new Date(),
+      videoRecipe: recipe,
+      analysis: analysis
+        ? {
+            source: this.readString(analysis['source']),
+            model: this.readString(analysis['model']),
+            summary: this.readString(analysis['summary']),
+            hooks: this.readStringArray(analysis['hooks']),
+            narrativeBeats: this.readStringArray(analysis['narrativeBeats']),
+            structureBreakdown: this.readStringArray(
+              analysis['structureBreakdown'],
+            ),
+            visualMotifs: this.readStringArray(analysis['visualMotifs']),
+            audioCues: this.readStringArray(analysis['audioCues']),
+            copyStyle: this.readStringArray(analysis['copyStyle']),
+            tagStrategy: this.readStringArray(analysis['tagStrategy']),
+            bestPostingTimes: this.readStringArray(
+              analysis['bestPostingTimes'],
+            ),
+            ctaStyle: this.readString(analysis['ctaStyle']),
+            risks: this.readStringArray(analysis['risks']),
+            fallbackReason: this.readString(analysis['fallbackReason']),
+            analyzedAt: analysis['analyzedAt'] || null,
+          }
+        : null,
+      brief: brief
+        ? {
+            brandId: this.readIdentifier(brief['brandId']),
+            source: this.readString(brief['source']),
+            model: this.readString(brief['model']),
+            briefTitle: this.readString(brief['briefTitle']),
+            coreAngle: this.readString(brief['coreAngle']),
+            targetAudience: this.readString(brief['targetAudience']),
+            openingHook: this.readString(brief['openingHook']),
+            scenePlan: this.readStringArray(brief['scenePlan']),
+            copyIdeas: this.readStringArray(brief['copyIdeas']),
+            brandSafetyNotes: this.readStringArray(brief['brandSafetyNotes']),
+            productionNotes: this.readStringArray(brief['productionNotes']),
+            fallbackReason: this.readString(brief['fallbackReason']),
+            generatedAt: brief['generatedAt'] || null,
+          }
+        : null,
+    }
+    const preferenceLearning = {
+      ...currentPreferenceLearning,
+      videoRecipe: {
+        sourceContentId: content._id.toString(),
+        videoUrl: content.contentUrl || '',
+        platform: content.platform,
+        preferredPlatforms: recipe.pipelineHints.preferredPlatforms,
+        preferredCategories: recipe.pipelineHints.preferredCategories,
+        preferredStyles: recipe.pipelineHints.preferredStyles,
+        generatedAt: recipe.generatedAt,
+      },
+    }
+    const updated = await this.pipelineModel
+      .findByIdAndUpdate(
+        pipeline._id,
+        {
+          $set: {
+            preferences: {
+              ...currentPreferences,
+              preferredStyles: mergedPreferredStyles,
+              preferredDuration: recipe.pipelineHints.preferredDuration,
+              aspectRatio: recipe.pipelineHints.aspectRatio,
+              subtitlePreferences,
+              remixInsights,
+              preferenceLearning,
+            },
+          },
+        },
+        { new: true },
+      )
+      .lean()
+      .exec()
+
+    if (!updated) {
+      throw new NotFoundException('Pipeline not found')
+    }
+
+    return {
+      contentId: content._id.toString(),
+      pipelineId: pipeline._id.toString(),
+      preferredStyles: mergedPreferredStyles,
+      subtitlePreferences,
+      remixInsights,
+      recipe,
+      pipeline: updated,
+    }
+  }
+
+  private buildSceneBlueprint(
+    hooks: string[],
+    structureBreakdown: string[],
+    visualMotifs: string[],
+  ) {
+    const blueprint = [
+      hooks[0] ? `镜头 1: ${hooks[0]}` : '',
+      structureBreakdown[1] ? `镜头 2: ${structureBreakdown[1]}` : '',
+      visualMotifs[0] ? `镜头 3: 强化 ${visualMotifs[0]}` : '',
+      structureBreakdown.at(-1) ? `镜头 4: ${structureBreakdown.at(-1)}` : '',
+    ].filter(Boolean)
+
+    return blueprint.length > 0
+      ? blueprint
+      : [
+          '镜头 1: 3 秒内先抛结果',
+          '镜头 2: 给出 1-2 个证明动作',
+          '镜头 3: 放大差异点或用户反馈',
+          '镜头 4: 用评论 CTA 收口',
+        ]
+  }
+
+  private buildCommentSeeds(content: LeanViralContent, tagStrategy: string[]) {
+    const topic = content.industry || content.platform || '这类内容'
+    const lead = tagStrategy[0]?.replace(/^围绕“|”扩展.*$/g, '') || topic
+
+    return [
+      `留言“模板”，我补这条 ${lead} 的拆解版本。`,
+      `如果你也在做 ${topic}，评论“场景”我继续给你案例。`,
+      '想看更激进还是更稳的改写，评论区直接告诉我。',
+    ]
+  }
+
+  private calculateEngagementRate(content: LeanViralContent) {
+    const views = Math.max(Number(content.views || 0), 1)
+    const interactions = Number(content.likes || 0)
+      + Number(content.comments || 0)
+      + Number(content.shares || 0)
+
+    return interactions / views
+  }
+
+  private calculatePublishAgeDays(publishedAt: unknown) {
+    const publishedDate = this.toDate(publishedAt)
+    if (!publishedDate) {
+      return null
+    }
+
+    const diff = Date.now() - publishedDate.getTime()
+    return Math.max(0, Math.floor(diff / (24 * 60 * 60 * 1000)))
+  }
+
+  private estimatePreferredDuration(structureBreakdown: string[]) {
+    if (structureBreakdown.length >= 4) {
+      return 18
+    }
+
+    if (structureBreakdown.length <= 2) {
+      return 12
+    }
+
+    return 15
+  }
+
+  private extractVideoId(videoUrl: string) {
+    try {
+      const parsed = new URL(videoUrl)
+      const explicit = parsed.searchParams.get('videoId')
+        || parsed.searchParams.get('video_id')
+        || parsed.searchParams.get('itemId')
+        || parsed.searchParams.get('item_id')
+
+      if (explicit?.trim()) {
+        return explicit.trim()
+      }
+
+      const lastSegment = parsed.pathname
+        .split('/')
+        .map(item => item.trim())
+        .filter(Boolean)
+        .at(-1)
+
+      return lastSegment || ''
+    }
+    catch {
+      return ''
+    }
   }
 
   private formatViralContent(content: LeanViralContent) {
@@ -836,6 +1289,14 @@ export class ContentRemixService {
 
   private readString(value: unknown) {
     return typeof value === 'string' ? value.trim() : ''
+  }
+
+  private asRecord(value: unknown) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null
+    }
+
+    return value as Record<string, unknown>
   }
 
   private readIdentifier(value: unknown) {
