@@ -11,6 +11,7 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import {
   CreatePipelineDto,
+  CreatePipelineFeedbackDto,
   PipelineDistributionRulesDto,
   PipelineGroupBindingDto,
   PipelineModelOverridesDto,
@@ -39,6 +40,14 @@ export class PipelineController {
   @ApiOkResponse({ description: '返回当前组织全部 pipeline' })
   async list(@GetToken() user: MediaClawAuthUser) {
     return this.pipelineService.findByOrg(user.orgId || user.id)
+  }
+
+  @Get(':id/preferences')
+  @ApiOperation({ summary: '获取 pipeline 偏好学习结果' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiOkResponse({ description: '返回 pipeline 偏好画像、反馈日志与学习结果' })
+  async getPreferences(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
+    return this.pipelineService.getPreferenceProfile(user.orgId || user.id, id)
   }
 
   @Get(':id')
@@ -73,6 +82,19 @@ export class PipelineController {
     @Body() body: PipelinePreferencesDto,
   ) {
     return this.pipelineService.updatePreferences(user.orgId || user.id, id, body)
+  }
+
+  @Post(':id/feedback')
+  @ApiOperation({ summary: '记录 pipeline 偏好反馈并自动学习' })
+  @ApiParam({ name: 'id', description: 'pipeline ID' })
+  @ApiBody({ type: CreatePipelineFeedbackDto })
+  @ApiOkResponse({ description: '反馈已记录并完成偏好学习' })
+  async recordFeedback(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: CreatePipelineFeedbackDto,
+  ) {
+    return this.pipelineService.recordFeedback(user.orgId || user.id, id, body)
   }
 
   @Patch(':id/model-overrides')

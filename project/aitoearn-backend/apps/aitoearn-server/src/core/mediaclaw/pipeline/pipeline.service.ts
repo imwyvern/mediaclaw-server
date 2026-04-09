@@ -10,6 +10,7 @@ import { BrandEditService } from './brand-edit.service'
 import { DedupService } from './dedup.service'
 import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { FrameExtractService } from './frame-extract.service'
+import { PipelinePreferenceLearningService } from './pipeline-preference-learning.service'
 import {
   PipelineBrandProfile,
   PipelineJobContext,
@@ -49,6 +50,7 @@ export class PipelineService {
     private readonly dedupService: DedupService,
     private readonly qualityCheckService: QualityCheckService,
     private readonly modelResolverService: ModelResolverService,
+    private readonly pipelinePreferenceLearningService: PipelinePreferenceLearningService,
     private readonly templateRegistry: TemplateRegistry,
   ) {}
 
@@ -107,6 +109,60 @@ export class PipelineService {
       { $set: { preferences: normalizedPreferences } },
       { new: true },
     ).exec()
+  }
+
+  async getPreferenceProfile(orgId: string, id: string) {
+    const pipeline = await this.requireOwnedPipeline(orgId, id)
+    const preferences = this.asRecord(pipeline.preferences) || {}
+
+    return {
+      pipelineId: pipeline._id.toString(),
+      preferences,
+      feedbackLog: Array.isArray(preferences['feedbackLog']) ? preferences['feedbackLog'] : [],
+      learning: this.asRecord(preferences['preferenceLearning']) || {},
+      styleConfig: this.asRecord(pipeline.styleConfig) || {},
+      distributionRules: this.asRecord(pipeline.distributionRules) || {},
+    }
+  }
+
+  async recordFeedback(orgId: string, id: string, input: Record<string, any>) {
+    const pipeline = await this.requireOwnedPipeline(orgId, id)
+    const pipelineRecord = (pipeline as any)?.toObject?.() || (pipeline as Record<string, any>)
+    const currentPreferences = this.asRecord(pipelineRecord['preferences']) || {}
+    const currentStyleConfig = this.asRecord(pipelineRecord['styleConfig']) || {}
+    const currentDistributionRules = this.asRecord(pipelineRecord['distributionRules']) || {}
+    const existingFeedbackLog = Array.isArray(currentPreferences['feedbackLog'])
+      ? currentPreferences['feedbackLog'] as Array<Record<string, any>>
+      : []
+    const feedbackEntry = this.pipelinePreferenceLearningService.createFeedbackEntry(input)
+    const feedbackLog = [...existingFeedbackLog, feedbackEntry].slice(-100)
+    const learnedState = this.pipelinePreferenceLearningService.buildLearnedState(
+      currentPreferences,
+      currentStyleConfig,
+      currentDistributionRules,
+      feedbackLog,
+    )
+
+    const updated = await this.pipelineModel.findOneAndUpdate(
+      this.buildOwnedQuery(orgId, id),
+      {
+        $set: {
+          preferences: learnedState.preferences,
+          styleConfig: learnedState.styleConfig,
+          distributionRules: learnedState.distributionRules,
+        },
+      },
+      { new: true },
+    ).exec()
+
+    return {
+      pipelineId: id,
+      feedback: feedbackEntry,
+      preferences: this.asRecord(updated?.preferences) || learnedState.preferences,
+      learning: this.asRecord(updated?.preferences?.['preferenceLearning']) || learnedState.preferenceLearning,
+      styleConfig: this.asRecord(updated?.styleConfig) || learnedState.styleConfig,
+      distributionRules: this.asRecord(updated?.distributionRules) || learnedState.distributionRules,
+    }
   }
 
   async updateModelOverrides(orgId: string, id: string, overrides: Partial<Pipeline['modelOverrides']>) {
@@ -648,6 +704,11 @@ export class PipelineService {
   ) {
     const source = incoming || {}
     const previous = existing || {}
+    const feedbackLog = Array.isArray(source['feedbackLog'])
+      ? source['feedbackLog']
+      : Array.isArray(previous['feedbackLog'])
+        ? previous['feedbackLog']
+        : []
 
     return {
       preferredStyles: this.normalizeStringList(
@@ -672,6 +733,12 @@ export class PipelineService {
         ...(this.asRecord(previous['remixInsights']) || {}),
         ...(this.asRecord(source['remixInsights']) || {}),
       },
+      feedbackLog,
+      preferenceLearning: {
+        ...(this.asRecord(previous['preferenceLearning']) || {}),
+        ...(this.asRecord(source['preferenceLearning']) || {}),
+      },
+      lastFeedbackAt: source['lastFeedbackAt'] || previous['lastFeedbackAt'] || null,
       feedbackCount: this.normalizePositiveNumber(source['feedbackCount'], Number(previous['feedbackCount'] || 0)),
     }
   }

@@ -93,6 +93,15 @@ class PipelinePreferences {
   @Prop({ type: Object, default: {} })
   remixInsights: Record<string, any>;
 
+  @Prop({ type: [Object], default: [] })
+  feedbackLog: Record<string, any>[];
+
+  @Prop({ type: Object, default: {} })
+  preferenceLearning: Record<string, any>;
+
+  @Prop({ type: Date, default: null })
+  lastFeedbackAt?: Date | null;
+
   @Prop({ type: Number, default: 0 })
   feedbackCount: number;
 }

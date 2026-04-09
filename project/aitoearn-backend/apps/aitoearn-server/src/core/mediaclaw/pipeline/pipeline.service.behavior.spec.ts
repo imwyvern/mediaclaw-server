@@ -1,5 +1,7 @@
 import { Types } from 'mongoose'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { PipelineFeedbackSourceType } from './pipeline-feedback.constants'
+import { PipelinePreferenceLearningService } from './pipeline-preference-learning.service'
 import { PipelineService } from './pipeline.service'
 
 vi.mock('@yikart/mongodb', () => {
@@ -40,6 +42,7 @@ describe('pipelineService', () => {
   let dedupService: Record<string, any>
   let modelResolverService: Record<string, any>
   let templateRegistry: Record<string, any>
+  let pipelinePreferenceLearningService: PipelinePreferenceLearningService
 
   beforeEach(() => {
     pipelineModel = {
@@ -75,6 +78,7 @@ describe('pipelineService', () => {
     templateRegistry = {
       run: vi.fn(),
     }
+    pipelinePreferenceLearningService = new PipelinePreferenceLearningService()
 
     service = new PipelineService(
       pipelineModel as any,
@@ -87,6 +91,7 @@ describe('pipelineService', () => {
       dedupService as any,
       {} as any,
       modelResolverService as any,
+      pipelinePreferenceLearningService as any,
       templateRegistry as any,
     )
   })
@@ -503,6 +508,128 @@ describe('pipelineService', () => {
       scope: 'per_scene',
       preserveComposition: true,
       preserveProductPlacement: true,
+    }))
+  })
+
+  it('应按反馈权重学习并自动更新 pipeline 偏好参数', async () => {
+    const orgId = new Types.ObjectId().toString()
+    const pipelineId = new Types.ObjectId()
+    const pipeline = {
+      _id: pipelineId,
+      orgId: new Types.ObjectId(orgId),
+      brandId: new Types.ObjectId(),
+      status: 'active',
+      styleConfig: {
+        duration: 15,
+        aspectRatio: '9:16',
+        tone: '平稳',
+        visualStyle: '纪实',
+      },
+      distributionRules: {
+        preferredPlatforms: ['douyin'],
+        preferredCategories: ['beauty'],
+      },
+      preferences: {
+        preferredStyles: ['story'],
+        avoidStyles: [],
+        preferredDuration: 15,
+        aspectRatio: '9:16',
+        feedbackLog: [
+          {
+            id: 'fb-1',
+            sourceType: PipelineFeedbackSourceType.OPERATOR,
+            weight: 0.7,
+            preferredStyles: ['micro-motion'],
+            avoidStyles: [],
+            preferredPlatforms: ['xiaohongshu'],
+            preferredCategories: ['beauty'],
+            preferredDuration: 12,
+            aspectRatio: '9:16',
+            tone: '轻快',
+            visualStyle: '近景展示',
+            performanceData: {},
+            rejectionReason: '',
+            note: '运营反馈',
+            createdAt: '2026-04-09T00:00:00.000Z',
+          },
+        ],
+      },
+      toObject() {
+        return this
+      },
+    }
+
+    pipelineModel.findOne.mockReturnValue(createQuery(pipeline))
+    pipelineModel.findOneAndUpdate.mockReturnValue(createQuery({
+      ...pipeline,
+      preferences: {
+        preferredStyles: ['micro-motion', 'close-up'],
+        avoidStyles: ['slow-burn'],
+        preferredDuration: 8,
+        aspectRatio: '1:1',
+        feedbackCount: 2,
+        feedbackLog: [],
+        preferenceLearning: {
+          feedbackSources: {
+            boss: 1,
+            operator: 1,
+          },
+          preferredPlatforms: ['xiaohongshu', 'douyin'],
+        },
+      },
+      styleConfig: {
+        ...pipeline.styleConfig,
+        tone: '高转化',
+        visualStyle: '近景种草',
+      },
+      distributionRules: {
+        preferredPlatforms: ['xiaohongshu', 'douyin'],
+        preferredCategories: ['beauty', 'skincare'],
+      },
+    }))
+
+    const result = await service.recordFeedback(orgId, pipelineId.toString(), {
+      sourceType: PipelineFeedbackSourceType.BOSS,
+      note: '老板要求更短更直接',
+      preferredStyles: ['micro-motion', 'close-up'],
+      avoidStyles: ['slow-burn'],
+      preferredPlatforms: ['xiaohongshu'],
+      preferredCategories: ['skincare'],
+      preferredDuration: 8,
+      aspectRatio: '1:1',
+      tone: '高转化',
+      visualStyle: '近景种草',
+      performanceData: {
+        engagementRate: 0.18,
+      },
+    })
+
+    expect(pipelineModel.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          preferences: expect.objectContaining({
+            preferredStyles: ['micro-motion', 'close-up'],
+            avoidStyles: ['slow-burn'],
+            preferredDuration: 10,
+            aspectRatio: '1:1',
+            feedbackCount: 2,
+          }),
+          styleConfig: expect.objectContaining({
+            tone: '高转化',
+            visualStyle: '近景种草',
+          }),
+          distributionRules: expect.objectContaining({
+            preferredPlatforms: ['xiaohongshu', 'douyin'],
+            preferredCategories: ['skincare', 'beauty'],
+          }),
+        }),
+      }),
+      { new: true },
+    )
+    expect(result.feedback.sourceType).toBe(PipelineFeedbackSourceType.BOSS)
+    expect(result.learning).toEqual(expect.objectContaining({
+      preferredPlatforms: ['xiaohongshu', 'douyin'],
     }))
   })
 })

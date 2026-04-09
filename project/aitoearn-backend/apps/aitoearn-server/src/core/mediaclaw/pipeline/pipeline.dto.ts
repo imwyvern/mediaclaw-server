@@ -13,6 +13,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator'
+import { PipelineFeedbackSourceType } from './pipeline-feedback.constants'
 
 export class PipelineBrandAssetsDto {
   @IsOptional()
@@ -211,6 +212,61 @@ export class PipelinePreferencesDto {
 
   @IsOptional()
   remixInsights?: Record<string, unknown>
+}
+
+export class CreatePipelineFeedbackDto {
+  @IsEnum(PipelineFeedbackSourceType)
+  sourceType: PipelineFeedbackSourceType
+
+  @IsOptional()
+  @IsString()
+  note?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  preferredStyles?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  avoidStyles?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  preferredPlatforms?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  preferredCategories?: string[]
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  preferredDuration?: number
+
+  @IsOptional()
+  @IsString()
+  aspectRatio?: string
+
+  @IsOptional()
+  @IsString()
+  tone?: string
+
+  @IsOptional()
+  @IsString()
+  visualStyle?: string
+
+  @IsOptional()
+  @IsObject()
+  performanceData?: Record<string, number>
+
+  @IsOptional()
+  @IsString()
+  rejectionReason?: string
 }
 
 export class PipelineModelOverridesDto {
