@@ -15,3 +15,11 @@
   - `pnpm nx lint aitoearn-server` 通过
   - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/asset/asset.service.behavior.spec.ts src/core/mediaclaw/asset/asset.service.spec.ts` 通过
 - 下一步计划：补内容批量下载和导出闭环，优先做 ZIP 批量下载与 Excel 导出。
+
+## 2026-04-10 10:36:07 PDT
+- 当前改动：补全内容管理批量操作闭环，`batch-download` 新增 ZIP 打包，`export` 新增 Excel/ZIP 导出，并补可解析 ZIP/SpreadsheetML 的行为测试。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/content-mgmt/content-mgmt.export.behavior.spec.ts src/core/mediaclaw/content-mgmt/content-mgmt.service.spec.ts src/core/mediaclaw/content-mgmt/content-mgmt.workflow.spec.ts` 通过
+- 下一步计划：补 OpenClaw API Key 合约兼容层，先做 customer-scoped key 格式兼容，不主动破坏现有 `mc_live_` 存量 key。

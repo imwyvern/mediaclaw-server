@@ -68,6 +68,10 @@ class BatchDownloadCompatDto {
   @IsArray()
   @IsString({ each: true })
   ids: string[]
+
+  @IsOptional()
+  @IsIn(['links', 'zip'])
+  format?: 'links' | 'zip'
 }
 
 class BatchUpdateCompatDto {
@@ -111,8 +115,8 @@ class ExportContentDto {
   @IsString()
   orgId?: string
 
-  @IsString()
-  format: string
+  @IsIn(['json', 'csv', 'excel', 'zip'])
+  format: 'json' | 'csv' | 'excel' | 'zip'
 
   @IsOptional()
   @ValidateNested()
@@ -261,7 +265,11 @@ export class ContentMgmtController {
     @GetToken() user: { orgId?: string, id?: string },
     @Body() body: BatchDownloadCompatDto,
   ) {
-    return this.contentMgmtService.batchDownload(user.orgId || user.id || '', body.ids)
+    return this.contentMgmtService.batchDownload(
+      user.orgId || user.id || '',
+      body.ids,
+      body.format,
+    )
   }
 
   @Patch('batch-update')

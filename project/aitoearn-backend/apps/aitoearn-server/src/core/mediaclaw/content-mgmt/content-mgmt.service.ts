@@ -19,6 +19,7 @@ import {
   VideoTaskApprovalAction,
   VideoTaskStatus,
 } from '@yikart/mongodb'
+import AdmZip from 'adm-zip'
 import { Model, Types } from 'mongoose'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 import { NotificationService } from '../notification/notification.service'
@@ -43,6 +44,9 @@ interface BatchUpdateInput {
   caption?: string
   status?: string
 }
+
+type BatchDownloadFormat = 'links' | 'zip'
+type ExportContentFormat = 'json' | 'csv' | 'excel' | 'zip'
 
 interface CopyUpdateInput {
   title?: string
@@ -555,16 +559,18 @@ export class ContentMgmtService {
     }
   }
 
-  async batchDownload(orgId: string, contentIds: string[]) {
+  async batchDownload(
+    orgId: string,
+    contentIds: string[],
+    format: BatchDownloadFormat = 'links',
+  ) {
     if (!Array.isArray(contentIds) || contentIds.length === 0) {
       throw new BadRequestException('ids is required')
     }
 
+    const normalizedFormat = this.normalizeBatchDownloadFormat(format)
     const results = await Promise.allSettled(
-      contentIds.map(async contentId => ({
-        id: contentId,
-        downloadUrl: await this.getDownloadUrl(orgId, contentId),
-      })),
+      contentIds.map(contentId => this.buildDownloadDescriptor(orgId, contentId)),
     )
 
     const items = results.map((result, index) =>
@@ -576,7 +582,12 @@ export class ContentMgmtService {
           },
     )
 
+    if (normalizedFormat === 'zip') {
+      return this.buildDownloadArchive(items)
+    }
+
     return {
+      format: 'links',
       items,
       total: items.length,
       successCount: items.filter(item => 'downloadUrl' in item).length,
@@ -618,7 +629,7 @@ export class ContentMgmtService {
   }
 
   async exportContent(orgId: string, format: string, filters: ContentFilters) {
-    const normalizedFormat = format.toLowerCase()
+    const normalizedFormat = this.normalizeExportFormat(format)
     const query = this.buildQuery(orgId, filters)
     const items = await this.videoTaskModel.find(query)
       .sort({ createdAt: -1 })
@@ -644,7 +655,29 @@ export class ContentMgmtService {
       }
     }
 
-    throw new BadRequestException('format must be csv or json')
+    if (normalizedFormat === 'excel') {
+      return {
+        format: 'excel',
+        fileName: `content-export-${new Date().toISOString()}.xls`,
+        mimeType: 'application/vnd.ms-excel',
+        data: this.toSpreadsheetXml(rows),
+      }
+    }
+
+    if (normalizedFormat === 'zip') {
+      const exportedAt = new Date().toISOString()
+      const bundle = this.buildExportArchive(rows, filters, exportedAt)
+      return {
+        format: 'zip',
+        fileName: `content-export-${exportedAt}.zip`,
+        mimeType: 'application/zip',
+        encoding: 'base64',
+        data: bundle.toString('base64'),
+        total: rows.length,
+      }
+    }
+
+    throw new BadRequestException('format must be csv, excel, json or zip')
   }
 
   async getContent(orgId: string, contentId: string) {
@@ -670,12 +703,17 @@ export class ContentMgmtService {
 
   async getDownloadUrl(orgId: string, contentId: string) {
     const task = await this.getTaskOrFail(orgId, contentId)
-    if (!task.outputVideoUrl?.trim()) {
+    return this.resolveDownloadUrl(task, contentId)
+  }
+
+  private resolveDownloadUrl(task: Record<string, any>, contentId: string) {
+    const outputVideoUrl = String(task['outputVideoUrl'] || '').trim()
+    if (!outputVideoUrl) {
       throw new BadRequestException('Content is not ready for download')
     }
 
     try {
-      const url = new URL(task.outputVideoUrl)
+      const url = new URL(outputVideoUrl)
       url.searchParams.set('download', '1')
       if (!url.searchParams.has('filename')) {
         url.searchParams.set('filename', `mediaclaw-${contentId}.mp4`)
@@ -683,7 +721,79 @@ export class ContentMgmtService {
       return url.toString()
     }
     catch {
-      return task.outputVideoUrl
+      return outputVideoUrl
+    }
+  }
+
+  private async buildDownloadDescriptor(orgId: string, contentId: string) {
+    const task = await this.getTaskOrFail(orgId, contentId)
+    return {
+      id: contentId,
+      fileName: this.buildVideoFileName(task, contentId),
+      downloadUrl: this.resolveDownloadUrl(task, contentId),
+      title: task.copy?.title || '',
+      status: task.status,
+    }
+  }
+
+  private async buildDownloadArchive(
+    items: Array<Record<string, unknown>>,
+  ) {
+    const zip = new AdmZip()
+    const archivedItems: Array<Record<string, unknown>> = []
+
+    for (const item of items) {
+      const downloadUrl = typeof item['downloadUrl'] === 'string' ? item['downloadUrl'] : ''
+      const fileName = typeof item['fileName'] === 'string'
+        ? item['fileName']
+        : `mediaclaw-${item['id'] || 'content'}.mp4`
+      if (!downloadUrl) {
+        archivedItems.push(item)
+        continue
+      }
+
+      try {
+        const response = await fetch(downloadUrl)
+        if (!response.ok) {
+          throw new Error(`download responded with ${response.status}`)
+        }
+
+        const arrayBuffer = await response.arrayBuffer()
+        zip.addFile(fileName, Buffer.from(arrayBuffer))
+        archivedItems.push({
+          ...item,
+          archived: true,
+          bytes: arrayBuffer.byteLength,
+        })
+      }
+      catch (error) {
+        archivedItems.push({
+          ...item,
+          archived: false,
+          error: error instanceof Error ? error.message : 'download_failed',
+        })
+      }
+    }
+
+    const manifest = {
+      exportedAt: new Date().toISOString(),
+      total: archivedItems.length,
+      successCount: archivedItems.filter(item => item['archived'] === true).length,
+      failureCount: archivedItems.filter(item => item['archived'] !== true).length,
+      items: archivedItems,
+    }
+    zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2)))
+
+    return {
+      format: 'zip',
+      fileName: `content-download-${manifest.exportedAt}.zip`,
+      mimeType: 'application/zip',
+      encoding: 'base64',
+      data: zip.toBuffer().toString('base64'),
+      total: archivedItems.length,
+      successCount: manifest.successCount,
+      failureCount: manifest.failureCount,
+      items: archivedItems,
     }
   }
 
@@ -795,12 +905,136 @@ export class ContentMgmtService {
     ].join('\n')
   }
 
+  private toSpreadsheetXml(rows: Array<Record<string, any>>) {
+    const headers = [
+      'ID',
+      '组织',
+      '品牌',
+      '管线',
+      '用户',
+      '任务类型',
+      '状态',
+      '标题',
+      '副标题',
+      '话题标签',
+      '蓝词',
+      '评论引导',
+      '发布平台',
+      '发布链接',
+      '发布状态',
+      '创建时间',
+      '更新时间',
+    ]
+    const tableRows = rows.map(row => [
+      row['id'],
+      row['orgId'],
+      row['brandId'],
+      row['pipelineId'],
+      row['userId'],
+      row['taskType'],
+      row['status'],
+      row['copy']?.['title'] || '',
+      row['copy']?.['subtitle'] || '',
+      Array.isArray(row['copy']?.['hashtags']) ? row['copy']['hashtags'].join(' | ') : '',
+      Array.isArray(row['copy']?.['blueWords']) ? row['copy']['blueWords'].join(' | ') : '',
+      Array.isArray(row['copy']?.['commentGuides']) ? row['copy']['commentGuides'].join(' | ') : '',
+      row['publishInfo']?.['platform'] || '',
+      row['publishInfo']?.['publishUrl'] || '',
+      row['publishStatus'] || '',
+      row['createdAt'] instanceof Date ? row['createdAt'].toISOString() : row['createdAt'] || '',
+      row['updatedAt'] instanceof Date ? row['updatedAt'].toISOString() : row['updatedAt'] || '',
+    ])
+
+    const rowsXml = [headers, ...tableRows]
+      .map(columns => `<Row>${columns.map(column => `<Cell><Data ss:Type="String">${this.escapeXmlValue(column)}</Data></Cell>`).join('')}</Row>`)
+      .join('')
+
+    return [
+      '<?xml version="1.0"?>',
+      '<?mso-application progid="Excel.Sheet"?>',
+      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">',
+      '<Worksheet ss:Name="MediaClawExport">',
+      '<Table>',
+      rowsXml,
+      '</Table>',
+      '</Worksheet>',
+      '</Workbook>',
+    ].join('')
+  }
+
+  private buildExportArchive(
+    rows: Array<Record<string, any>>,
+    filters: ContentFilters,
+    exportedAt: string,
+  ) {
+    const zip = new AdmZip()
+    zip.addFile('content-export.json', Buffer.from(JSON.stringify(rows, null, 2)))
+    zip.addFile('content-export.csv', Buffer.from(this.toCsv(rows)))
+    zip.addFile('content-export.xls', Buffer.from(this.toSpreadsheetXml(rows)))
+    zip.addFile(
+      'manifest.json',
+      Buffer.from(
+        JSON.stringify(
+          {
+            exportedAt,
+            total: rows.length,
+            filters,
+            includedFiles: ['content-export.json', 'content-export.csv', 'content-export.xls'],
+          },
+          null,
+          2,
+        ),
+      ),
+    )
+
+    return zip.toBuffer()
+  }
+
   private escapeCsvValue(value: unknown) {
     const text = String(value ?? '')
     if (!text.includes(',') && !text.includes('"') && !text.includes('\n')) {
       return text
     }
     return `"${text.replace(/"/g, '""')}"`
+  }
+
+  private escapeXmlValue(value: unknown) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
+  }
+
+  private buildVideoFileName(task: Record<string, any>, contentId: string) {
+    const title = this.sanitizeFileNameSegment(task['copy']?.['title'])
+      || this.sanitizeFileNameSegment(task['copy']?.['subtitle'])
+      || `mediaclaw-${contentId}`
+
+    return `${title}.mp4`
+  }
+
+  private sanitizeFileNameSegment(value: unknown) {
+    return String(value ?? '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w\u4E00-\u9FA5.-]/g, '')
+      .replace(/-+/g, '-')
+      .slice(0, 64)
+  }
+
+  private normalizeBatchDownloadFormat(format?: string): BatchDownloadFormat {
+    return format === 'zip' ? 'zip' : 'links'
+  }
+
+  private normalizeExportFormat(format: string): ExportContentFormat {
+    const normalized = String(format || '').trim().toLowerCase()
+    if (normalized === 'json' || normalized === 'csv' || normalized === 'excel' || normalized === 'zip') {
+      return normalized
+    }
+
+    throw new BadRequestException('format must be csv, excel, json or zip')
   }
 
   private async getTaskOrFail(orgId: string, contentId: string) {
