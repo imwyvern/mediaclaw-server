@@ -144,3 +144,14 @@
   - `pnpm nx test aitoearn-server -- --run` 通过，`121` 个测试文件、`381` 个测试全部通过
   - 功能自测结论：实例 gateway 配置可保存并回显，heartbeat 能收到真实 `configUpdates`，员工分发成功后会触发 gateway `delivery.pending` 推送
 - 下一步计划：提交本次 Gateway 原子改动，然后进入“个人共享群体验 API 入口”，补齐个人体验版共享实例的产品化配置与查询接口。
+
+## 2026-04-10 13:03:27 PDT
+- 当前改动：补完个人共享群体验 API 入口。为 `ClawHostInstance` 新增 `sharedExperienceConfig` 配置模型，支持平台配置官方群渠道、欢迎语、默认入口和客服信息；新增 `PersonalSharedExperienceService` 与 `/api/v1/auth/personal/shared-experience*` 接口，个人体验版用户可查询共享实例目录、激活共享会话并拿到稳定 `sessionId` 与剩余视频包余额。
+- 验证结果：
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/clawhost/clawhost.service.behavior.spec.ts src/core/mediaclaw/auth/personal-shared-experience.service.behavior.spec.ts src/core/mediaclaw/auth/auth.service.spec.ts` 首轮失败，定位为共享体验激活用例未 mock `find().sort().limit().lean()` 链路
+  - 补齐 `clawHostInstanceModel.find` query mock 后，定向测试通过，`3` 个测试文件、`13` 个测试全部通过
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run` 通过，`122` 个测试文件、`384` 个测试全部通过
+  - 功能自测结论：实例可配置共享群入口，个人用户可读取目录并激活体验，会话绑定会持久化到用户侧并回写实例最近激活时间
+- 下一步计划：进入 SLA 服务化接口，实现 SLA 分档、周期快照、赔付评估与对外查询 API，并在完成后再做一次全量 build/lint/test 收口。

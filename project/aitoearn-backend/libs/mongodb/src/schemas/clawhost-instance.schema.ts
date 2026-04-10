@@ -80,6 +80,48 @@ export class ClawHostGatewayConfig {
   lastPushMessage: string
 }
 
+@Schema({ _id: false })
+export class ClawHostSharedExperienceChannel {
+  @Prop({ type: String, required: true })
+  channel: string
+
+  @Prop({ type: String, default: '' })
+  groupName: string
+
+  @Prop({ type: String, default: '' })
+  inviteUrl: string
+
+  @Prop({ type: String, default: '' })
+  chatId: string
+
+  @Prop({ type: String, default: '' })
+  entryKeyword: string
+}
+
+@Schema({ _id: false })
+export class ClawHostSharedExperienceConfig {
+  @Prop({ type: Boolean, default: false })
+  enabled: boolean
+
+  @Prop({ type: String, default: '' })
+  displayName: string
+
+  @Prop({ type: String, default: '' })
+  welcomeMessage: string
+
+  @Prop({ type: String, default: '' })
+  supportContact: string
+
+  @Prop({ type: String, default: '' })
+  defaultChannel: string
+
+  @Prop({ type: [ClawHostSharedExperienceChannel], default: [] })
+  channels: ClawHostSharedExperienceChannel[]
+
+  @Prop({ type: Date, default: null })
+  lastActivatedAt: Date | null
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'clawhost_instances' })
 export class ClawHostInstance extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -157,6 +199,9 @@ export class ClawHostInstance extends WithTimestampSchema {
   @Prop({ type: ClawHostGatewayConfig, default: () => ({}) })
   gatewayConfig: ClawHostGatewayConfig
 
+  @Prop({ type: ClawHostSharedExperienceConfig, default: () => ({}) })
+  sharedExperienceConfig: ClawHostSharedExperienceConfig
+
   @Prop({ type: String, default: '' })
   requestedImChannel: string
 
@@ -206,5 +251,6 @@ ClawHostInstanceSchema.index({ orgId: 1, status: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ clientName: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ orgId: 1, deploymentMode: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ orgId: 1, plan: 1, createdAt: -1 })
+ClawHostInstanceSchema.index({ 'sharedExperienceConfig.enabled': 1, status: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ containerId: 1 }, { sparse: true })
 ClawHostInstanceSchema.index({ boundApiKeyId: 1 }, { sparse: true })

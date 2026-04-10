@@ -20,6 +20,7 @@ import {
   EnterpriseSsoSamlAssertionDto,
 } from './enterprise-sso.dto'
 import { EnterpriseSsoService } from './enterprise-sso.service'
+import { PersonalSharedExperienceService } from './personal-shared-experience.service'
 
 class SendSmsDto {
   @IsString()
@@ -195,12 +196,25 @@ class SwitchOrgDto {
   orgId: string
 }
 
+class ActivatePersonalSharedExperienceDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  instanceId?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  preferredChannel?: string
+}
+
 @MediaClawApiController('api/v1/auth')
 export class McAuthController {
   constructor(
     private readonly authService: McAuthService,
     private readonly enterpriseAuthService: EnterpriseAuthService,
     private readonly enterpriseSsoService: EnterpriseSsoService,
+    private readonly personalSharedExperienceService: PersonalSharedExperienceService,
   ) {}
 
   @Public()
@@ -291,6 +305,25 @@ export class McAuthController {
   @Post('enterprise/accept-invite')
   async acceptInvite(@Body() body: AcceptInviteDto) {
     return this.enterpriseAuthService.acceptInvite(body.token, body.phone, body.code)
+  }
+
+  @Public()
+  @Get('personal/shared-experience/catalog')
+  async getPersonalSharedExperienceCatalog() {
+    return this.personalSharedExperienceService.getCatalog()
+  }
+
+  @Get('personal/shared-experience')
+  async getPersonalSharedExperience(@GetToken() user: { id: string }) {
+    return this.personalSharedExperienceService.getMyEntry(user.id)
+  }
+
+  @Post('personal/shared-experience/activate')
+  async activatePersonalSharedExperience(
+    @GetToken() user: { id: string },
+    @Body() body: ActivatePersonalSharedExperienceDto,
+  ) {
+    return this.personalSharedExperienceService.activate(user.id, body)
   }
 
   @Post('switch-org')

@@ -93,6 +93,15 @@ function createManagedInstance(overrides: Record<string, unknown> = {}) {
       lastPushStatus: '',
       lastPushMessage: '',
     },
+    sharedExperienceConfig: {
+      enabled: false,
+      displayName: '',
+      welcomeMessage: '',
+      supportContact: '',
+      defaultChannel: '',
+      channels: [],
+      lastActivatedAt: null,
+    },
     requestedImChannel: 'feishu',
     accessUrl: 'http://127.0.0.1:3900/',
     installCommand: 'openclaw skills install mediaclaw-client',
@@ -268,6 +277,53 @@ describe('clawHostService behavior', () => {
     expect(result.connectionInfo.gateway).toEqual(expect.objectContaining({
       enabled: true,
       url: 'https://openclaw.example.com',
+    }))
+  })
+
+  it('应保存共享群体验配置并回显默认渠道', async () => {
+    const save = vi.fn().mockResolvedValue(undefined)
+    const instance: Record<string, any> = {
+      ...createManagedInstance({
+        orgId: 'org-1',
+      }),
+      save,
+      toObject() {
+        return this
+      },
+    }
+    instance.set = vi.fn((key: string, value: unknown) => {
+      instance[key] = value
+    })
+    clawHostInstanceModel.findOne.mockReturnValue(createExecQuery(instance))
+
+    const result = await service.configureSharedExperience('org-1', instance.instanceId, {
+      enabled: true,
+      displayName: 'MediaClaw 官方体验群',
+      welcomeMessage: '发送开始体验即可领取试用任务',
+      supportContact: '企微小助手',
+      defaultChannel: 'feishu',
+      channels: [{
+        channel: 'feishu',
+        groupName: 'MediaClaw 飞书体验群',
+        inviteUrl: 'https://open.feishu.cn/invite/shared-demo',
+        entryKeyword: '开始体验',
+      }],
+    })
+
+    expect(instance.set).toHaveBeenCalledWith('sharedExperienceConfig', expect.objectContaining({
+      enabled: true,
+      displayName: 'MediaClaw 官方体验群',
+      defaultChannel: 'feishu',
+    }))
+    expect(result.connectionInfo.sharedExperience).toEqual(expect.objectContaining({
+      enabled: true,
+      defaultChannel: 'feishu',
+      channels: [
+        expect.objectContaining({
+          channel: 'feishu',
+          inviteUrl: 'https://open.feishu.cn/invite/shared-demo',
+        }),
+      ],
     }))
   })
 

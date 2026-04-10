@@ -132,6 +132,24 @@ class ExternalIdentity {
   lastLoginAt: Date
 }
 
+@Schema({ _id: false })
+class SharedExperienceBinding {
+  @Prop({ type: String, default: '' })
+  instanceId: string
+
+  @Prop({ type: String, default: '' })
+  sessionId: string
+
+  @Prop({ type: String, default: '' })
+  channel: string
+
+  @Prop({ type: Date, default: null })
+  activatedAt: Date | null
+
+  @Prop({ type: Date, default: null })
+  lastAccessAt: Date | null
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'mediaclaw_users' })
 export class MediaClawUser extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -173,6 +191,9 @@ export class MediaClawUser extends WithTimestampSchema {
   @Prop({ type: [ExternalIdentity], default: [] })
   externalIdentities: ExternalIdentity[]
 
+  @Prop({ type: SharedExperienceBinding, default: () => ({}) })
+  sharedExperience: SharedExperienceBinding
+
   @Prop({ type: String, default: '' })
   supabaseUserId: string
 
@@ -197,3 +218,4 @@ MediaClawUserSchema.index({ wechatUnionId: 1 }, { unique: true, sparse: true })
 MediaClawUserSchema.index({ 'orgMemberships.orgId': 1 })
 MediaClawUserSchema.index({ 'imBindings.platform': 1, 'imBindings.platformUserId': 1 })
 MediaClawUserSchema.index({ 'externalIdentities.providerId': 1, 'externalIdentities.subject': 1 })
+MediaClawUserSchema.index({ 'sharedExperience.instanceId': 1, userType: 1 })

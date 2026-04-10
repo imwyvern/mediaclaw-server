@@ -168,6 +168,7 @@ export class ClawHostService {
       }],
       healthStatus: this.buildPendingHealthStatus(now),
       gatewayConfig: this.buildGatewayConfig(),
+      sharedExperienceConfig: this.buildSharedExperienceConfig(),
       k8sNamespace: runtime?.namespace || namespace,
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
         ? runtime?.podName || podName
@@ -264,6 +265,7 @@ export class ClawHostService {
       }],
       healthStatus: this.buildPendingHealthStatus(new Date()),
       gatewayConfig: this.buildGatewayConfig(),
+      sharedExperienceConfig: this.buildSharedExperienceConfig(),
       k8sNamespace: runtime?.namespace || namespace,
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
         ? runtime?.podName || podName
@@ -680,6 +682,61 @@ export class ClawHostService {
         },
       })
     }
+
+    return this.toResponse(instance.toObject() as ClawHostInstance)
+  }
+
+  async configureSharedExperience(
+    orgId: string,
+    instanceId: string,
+    input: {
+      enabled?: boolean
+      displayName?: string
+      welcomeMessage?: string
+      supportContact?: string
+      defaultChannel?: string
+      channels?: Array<{
+        channel: string
+        groupName?: string
+        inviteUrl?: string
+        chatId?: string
+        entryKeyword?: string
+      }>
+    },
+  ) {
+    const instance = await this.clawHostInstanceModel.findOne({
+      instanceId,
+      orgId: orgId.trim(),
+    }).exec()
+    if (!instance) {
+      throw new NotFoundException('ClawHost instance not found')
+    }
+
+    const currentConfig = this.buildSharedExperienceConfig(instance.sharedExperienceConfig)
+    const nextConfig = this.buildSharedExperienceConfig({
+      enabled: input.enabled ?? currentConfig.enabled,
+      displayName: input.displayName ?? currentConfig.displayName,
+      welcomeMessage: input.welcomeMessage ?? currentConfig.welcomeMessage,
+      supportContact: input.supportContact ?? currentConfig.supportContact,
+      defaultChannel: input.defaultChannel ?? currentConfig.defaultChannel,
+      channels: input.channels ?? currentConfig.channels,
+      lastActivatedAt: currentConfig.lastActivatedAt,
+    })
+
+    if (nextConfig.enabled && nextConfig.channels.length === 0) {
+      throw new BadRequestException('shared experience requires at least one channel')
+    }
+
+    if (
+      nextConfig.enabled
+      && nextConfig.defaultChannel
+      && !nextConfig.channels.some(channel => channel.channel === nextConfig.defaultChannel)
+    ) {
+      throw new BadRequestException('defaultChannel must match one of the configured shared channels')
+    }
+
+    instance.set('sharedExperienceConfig', nextConfig)
+    await instance.save()
 
     return this.toResponse(instance.toObject() as ClawHostInstance)
   }
@@ -1164,6 +1221,47 @@ export class ClawHostService {
     }
   }
 
+  private buildSharedExperienceConfig(
+    source: Partial<{
+      enabled: boolean
+      displayName: string
+      welcomeMessage: string
+      supportContact: string
+      defaultChannel: string
+      channels: Array<{
+        channel: string
+        groupName?: string
+        inviteUrl?: string
+        chatId?: string
+        entryKeyword?: string
+      }>
+      lastActivatedAt: Date | null
+    }> = {},
+  ) {
+    const channels = Array.isArray(source.channels)
+      ? source.channels
+          .map(channel => ({
+            channel: channel.channel?.trim() || '',
+            groupName: channel.groupName?.trim() || '',
+            inviteUrl: channel.inviteUrl?.trim() || '',
+            chatId: channel.chatId?.trim() || '',
+            entryKeyword: channel.entryKeyword?.trim() || '',
+          }))
+          .filter(channel => channel.channel)
+      : []
+    const defaultChannel = source.defaultChannel?.trim() || channels[0]?.channel || ''
+
+    return {
+      enabled: Boolean(source.enabled),
+      displayName: source.displayName?.trim() || '',
+      welcomeMessage: source.welcomeMessage?.trim() || '',
+      supportContact: source.supportContact?.trim() || '',
+      defaultChannel,
+      channels,
+      lastActivatedAt: source.lastActivatedAt || null,
+    }
+  }
+
   private normalizeCapabilities(capabilities?: string[]) {
     if (!Array.isArray(capabilities) || capabilities.length === 0) {
       return []
@@ -1494,6 +1592,7 @@ export class ClawHostService {
         accessUrl: instance.accessUrl || '',
         healthUrl: instance.healthUrl || '',
         gateway: this.buildGatewayConfig(instance.gatewayConfig),
+        sharedExperience: this.buildSharedExperienceConfig(instance.sharedExperienceConfig),
         containerId: instance.containerId || '',
         containerName: instance.containerName || '',
         runtimeImage: instance.runtimeImage || '',

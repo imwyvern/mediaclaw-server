@@ -145,6 +145,56 @@ export class ConfigureClawHostGatewayDto {
   toolName?: string
 }
 
+export class ClawHostSharedExperienceChannelDto {
+  @IsString()
+  @IsNotEmpty()
+  channel: string
+
+  @IsOptional()
+  @IsString()
+  groupName?: string
+
+  @IsOptional()
+  @IsString()
+  inviteUrl?: string
+
+  @IsOptional()
+  @IsString()
+  chatId?: string
+
+  @IsOptional()
+  @IsString()
+  entryKeyword?: string
+}
+
+export class ConfigureSharedExperienceDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean
+
+  @IsOptional()
+  @IsString()
+  displayName?: string
+
+  @IsOptional()
+  @IsString()
+  welcomeMessage?: string
+
+  @IsOptional()
+  @IsString()
+  supportContact?: string
+
+  @IsOptional()
+  @IsString()
+  defaultChannel?: string
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ClawHostSharedExperienceChannelDto)
+  channels?: ClawHostSharedExperienceChannelDto[]
+}
+
 export class ListClawHostInstancesQueryDto {
   @IsOptional()
   @IsString()

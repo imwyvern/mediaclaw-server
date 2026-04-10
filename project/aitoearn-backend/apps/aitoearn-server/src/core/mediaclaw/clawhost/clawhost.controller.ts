@@ -15,6 +15,7 @@ import { PermissionGuard, Roles } from '../permission.guard'
 import {
   BatchUpgradeClawHostSkillDto,
   ConfigureClawHostGatewayDto,
+  ConfigureSharedExperienceDto,
   CreateClawHostInstanceDto,
   GetClawHostLogsQueryDto,
   InstallClawHostSkillDto,
@@ -94,6 +95,15 @@ export class ClawHostController {
     @Body() body: ConfigureClawHostGatewayDto,
   ) {
     return this.clawHostService.configureGateway(user.orgId || user.id, instanceId, body)
+  }
+
+  @Post('instances/:id/shared-experience')
+  async configureSharedExperience(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+    @Body() body: ConfigureSharedExperienceDto,
+  ) {
+    return this.clawHostService.configureSharedExperience(user.orgId || user.id, instanceId, body)
   }
 
   @Get('instances/:id/status')

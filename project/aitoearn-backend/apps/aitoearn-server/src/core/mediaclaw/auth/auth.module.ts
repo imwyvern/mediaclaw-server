@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common'
 import { JwtModule } from '@nestjs/jwt'
 import { MongooseModule } from '@nestjs/mongoose'
 import {
+  ClawHostInstance,
+  ClawHostInstanceSchema,
   EnterpriseInvite,
   EnterpriseInviteSchema,
   EnterpriseSsoProvider,
@@ -21,6 +23,7 @@ import { McAuthController } from './auth.controller'
 import { McAuthService } from './auth.service'
 import { EnterpriseAuthService } from './enterprise-auth.service'
 import { EnterpriseSsoService } from './enterprise-sso.service'
+import { PersonalSharedExperienceService } from './personal-shared-experience.service'
 
 @Module({
   imports: [
@@ -28,6 +31,7 @@ import { EnterpriseSsoService } from './enterprise-sso.service'
     MongooseModule.forFeature([
       { name: MediaClawUser.name, schema: MediaClawUserSchema },
       { name: VideoPack.name, schema: VideoPackSchema },
+      { name: ClawHostInstance.name, schema: ClawHostInstanceSchema },
       { name: Organization.name, schema: OrganizationSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
       { name: EnterpriseInvite.name, schema: EnterpriseInviteSchema },
@@ -39,7 +43,17 @@ import { EnterpriseSsoService } from './enterprise-sso.service'
     }),
   ],
   controllers: [McAuthController],
-  providers: [McAuthService, EnterpriseAuthService, EnterpriseSsoService],
-  exports: [McAuthService, EnterpriseAuthService, EnterpriseSsoService],
+  providers: [
+    McAuthService,
+    EnterpriseAuthService,
+    EnterpriseSsoService,
+    PersonalSharedExperienceService,
+  ],
+  exports: [
+    McAuthService,
+    EnterpriseAuthService,
+    EnterpriseSsoService,
+    PersonalSharedExperienceService,
+  ],
 })
 export class McAuthModule {}
