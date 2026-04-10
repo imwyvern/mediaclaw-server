@@ -29,7 +29,7 @@ services:
       - --web.enable-lifecycle
     restart: unless-stopped
     ports:
-      - ${PROMETHEUS_PORT:-9090}:9090
+      - 127.0.0.1:${PROMETHEUS_PORT:-9090}:9090
     volumes:
       - ./docker/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./docker/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -39,6 +39,7 @@ services:
     depends_on:
       - alertmanager
       - blackbox-exporter
+    mem_limit: 256m
     networks:
       - mediaclaw-net
 
@@ -51,12 +52,13 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
     restart: unless-stopped
     ports:
-      - ${GRAFANA_PORT:-3000}:3000
+      - 127.0.0.1:${GRAFANA_PORT:-3000}:3000
     volumes:
       - grafana-data:/var/lib/grafana
       - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+    mem_limit: 256m
     networks:
       - mediaclaw-net
 
@@ -105,9 +107,8 @@ services:
       - .env.production
     restart: unless-stopped
     ports:
-      - ${ALERTMANAGER_PORT:-9093}:9093
+      - 127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093
     volumes:
-      - ./docker/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     networks:
       - mediaclaw-net

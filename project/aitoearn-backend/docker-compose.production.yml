@@ -37,7 +37,9 @@ services:
     mem_limit: ${API_MEM_LIMIT:-768m}
     cpus: ${API_CPUS:-1.50}
     networks:
-      - mediaclaw-net
+      mediaclaw-net:
+        aliases:
+          - api
 
   worker:
     image: ${MEDIACLAW_WORKER_IMAGE:-mediaclaw/aitoearn-worker}:${IMAGE_TAG:-latest}
@@ -79,7 +81,9 @@ services:
     mem_limit: ${WORKER_MEM_LIMIT:-768m}
     cpus: ${WORKER_CPUS:-1.50}
     networks:
-      - mediaclaw-net
+      mediaclaw-net:
+        aliases:
+          - worker
 
   mongodb:
     image: mongo:8.0
@@ -105,7 +109,9 @@ services:
     mem_limit: ${MONGODB_MEM_LIMIT:-512m}
     cpus: ${MONGODB_CPUS:-1.00}
     networks:
-      - mediaclaw-net
+      mediaclaw-net:
+        aliases:
+          - mongodb
 
   redis:
     image: redis:7-alpine
@@ -127,7 +133,9 @@ services:
     mem_limit: ${REDIS_MEM_LIMIT:-256m}
     cpus: ${REDIS_CPUS:-0.50}
     networks:
-      - mediaclaw-net
+      mediaclaw-net:
+        aliases:
+          - redis
 
   rustfs:
     image: rustfs/rustfs:latest
@@ -164,7 +172,9 @@ services:
     mem_limit: ${RUSTFS_MEM_LIMIT:-1024m}
     cpus: ${RUSTFS_CPUS:-1.00}
     networks:
-      - mediaclaw-net
+      mediaclaw-net:
+        aliases:
+          - rustfs
 
   # Milvus skipped on current 4GB-class host unless vector profile is explicitly enabled.
   # Last capacity check: available memory was below the required 2Gi threshold.
@@ -265,7 +275,9 @@ services:
     mem_limit: ${NGINX_MEM_LIMIT:-128m}
     cpus: ${NGINX_CPUS:-0.50}
     networks:
-      - mediaclaw-net
+      mediaclaw-net:
+        aliases:
+          - nginx
 
 networks:
   mediaclaw-net:
