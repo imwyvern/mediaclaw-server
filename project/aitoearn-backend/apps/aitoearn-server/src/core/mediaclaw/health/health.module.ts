@@ -16,6 +16,7 @@ import { HealthService } from './health.service'
 import { MonitoringAlertService } from './monitoring-alert.service'
 import { MonitoringMetricsController } from './monitoring-metrics.controller'
 import { MonitoringMetricsService } from './monitoring-metrics.service'
+import { PublicHealthController } from './public-health.controller'
 import { QueueDashboardAuthService } from './queue-dashboard-auth.service'
 import { QueueDashboardService } from './queue-dashboard.service'
 
@@ -30,7 +31,7 @@ import { QueueDashboardService } from './queue-dashboard.service'
       { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },
     ]),
   ],
-  controllers: [HealthController, MonitoringMetricsController],
+  controllers: [HealthController, MonitoringMetricsController, PublicHealthController],
   providers: [
     HealthService,
     MediaClawHealthCheckService,

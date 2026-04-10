@@ -56,6 +56,15 @@ export class HealthService {
     private readonly clawHostService: ClawHostService,
   ) {}
 
+  getPublicStatus() {
+    return {
+      status: 'ok',
+      service: 'mediaclaw-api',
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+    }
+  }
+
   async heartbeat(user: HeartbeatUser | undefined, input: HeartbeatInput) {
     const agentId = input.agentId?.trim()
     if (!agentId) {

@@ -38,12 +38,7 @@ export class HealthController {
   @Public()
   @Get('health')
   check() {
-    return {
-      status: 'ok',
-      service: 'mediaclaw-api',
-      version: '1.0.0',
-      timestamp: new Date().toISOString(),
-    }
+    return this.healthService.getPublicStatus()
   }
 
   @Roles(UserRole.SUPER_ADMIN)
