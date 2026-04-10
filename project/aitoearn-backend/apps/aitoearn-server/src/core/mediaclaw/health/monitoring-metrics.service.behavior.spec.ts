@@ -78,6 +78,13 @@ describe('monitoringMetricsService behavior', () => {
 
     service.recordVideoProductionCompleted()
     service.recordVideoProductionFailed('quality-check')
+    service.recordMongoSlowQuery({
+      modelName: 'VideoTask',
+      collectionName: 'video_tasks',
+      operation: 'find',
+      durationMs: 640,
+      timestamp: new Date().toISOString(),
+    })
     await service.captureQueueMetrics()
 
     const snapshot = service.getOperationalSnapshot()
@@ -90,5 +97,6 @@ describe('monitoringMetricsService behavior', () => {
     expect(snapshot.video.failureRate).toBe(0.5)
     expect(snapshot.queue.depth).toBe(6)
     expect(snapshot.queue.latency).toBeGreaterThanOrEqual(15_000)
+    expect(snapshot.database.slowQueries).toBe(1)
   })
 })

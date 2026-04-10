@@ -12,6 +12,12 @@
     "mediaclaw:discovery:bootstrap": "pnpm nx build aitoearn-server && node dist/apps/aitoearn-server/bootstrap/mediaclaw-discovery-bootstrap.js"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/context-async-hooks": "^2.6.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.214.0",
+    "@opentelemetry/resources": "^2.6.1",
+    "@opentelemetry/sdk-trace-base": "^2.6.1",
+    "@opentelemetry/semantic-conventions": "^1.40.0",
     "@xmldom/xmldom": "^0.9.9",
     "@zilliz/milvus2-sdk-node": "^2.6.13",
     "adm-zip": "^0.5.17",

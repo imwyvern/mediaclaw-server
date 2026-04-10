@@ -1,3 +1,4 @@
+import type { MongoSlowQueryEvent } from '@yikart/mongodb'
 import type { NextFunction, Request, Response } from 'express'
 import { InjectQueue } from '@nestjs/bullmq'
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
@@ -25,6 +26,10 @@ interface MonitoringSnapshot {
     failureRate: number
   }
   queue: QueueSnapshot
+  database: {
+    slowQueries: number
+    lastSlowQueryAt: string
+  }
 }
 
 @Injectable()
@@ -39,6 +44,11 @@ export class MonitoringMetricsService implements OnApplicationBootstrap {
   private readonly videoStats = {
     total: 0,
     failed: 0,
+  }
+
+  private readonly mongodbStats = {
+    slowQueries: 0,
+    lastSlowQueryAt: '',
   }
 
   private lastQueueSnapshot: QueueSnapshot = {
@@ -81,6 +91,18 @@ export class MonitoringMetricsService implements OnApplicationBootstrap {
     'queue_latency',
     'Current BullMQ queue latency in milliseconds',
     ['queue'],
+  )
+
+  private readonly mongodbSlowQueriesTotal = this.getOrCreateCounter(
+    'mongodb_slow_queries_total',
+    'Total number of MongoDB slow queries above threshold',
+    ['collection', 'operation'],
+  )
+
+  private readonly mongodbSlowQueryDuration = this.getOrCreateHistogram(
+    'mongodb_slow_query_duration',
+    'MongoDB slow query duration in milliseconds',
+    ['collection', 'operation'],
   )
 
   constructor(
@@ -134,6 +156,15 @@ export class MonitoringMetricsService implements OnApplicationBootstrap {
     this.videoStats.failed += 1
     this.videoProductionTotal.labels('failed').inc()
     this.videoProductionErrors.labels(step?.trim() || 'unknown').inc()
+  }
+
+  recordMongoSlowQuery(event: MongoSlowQueryEvent) {
+    const collection = event.collectionName?.trim() || 'unknown'
+    const operation = event.operation?.trim() || 'unknown'
+    this.mongodbStats.slowQueries += 1
+    this.mongodbStats.lastSlowQueryAt = event.timestamp || new Date().toISOString()
+    this.mongodbSlowQueriesTotal.labels(collection, operation).inc()
+    this.mongodbSlowQueryDuration.labels(collection, operation).observe(event.durationMs)
   }
 
   @Cron('* * * * *')
@@ -198,6 +229,10 @@ export class MonitoringMetricsService implements OnApplicationBootstrap {
         failureRate,
       },
       queue: this.lastQueueSnapshot,
+      database: {
+        slowQueries: this.mongodbStats.slowQueries,
+        lastSlowQueryAt: this.mongodbStats.lastSlowQueryAt,
+      },
     }
   }
 

@@ -104,3 +104,13 @@
   - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/clawhost/clawhost-runtime.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost-postgres.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.spec.ts` 首轮失败，定位为 `module-spec.factory` 装配下 `ClawHostRuntimeService` 未拿到新增 driver provider
   - 对 `ClawHostRuntimeService` 增加 `@Optional()` 注入兜底后，定向测试通过，`4` 个测试文件、`14` 个测试全部通过
 - 下一步计划：进入监控链路升级，补 OpenTelemetry tracing 初始化与 Mongo 慢查询观测，并把告警/指标串起来。
+
+## 2026-04-10 12:23:30 PDT
+- 当前改动：补完监控链路升级，新增 OpenTelemetry tracing 初始化、中间件级请求 span、响应 trace header 回传，以及 MongoDB 慢查询监控插件与指标接入；同时修正慢查询 payload 截断逻辑，避免 JSON 截断导致运行时异常。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 首轮失败，定位为 `monitoring-tracing.service.behavior.spec.ts` 结尾括号缺失导致解析错误
+  - 修复 spec 语法错误后，`pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/health/monitoring-metrics.service.behavior.spec.ts src/core/mediaclaw/health/monitoring-tracing.service.behavior.spec.ts src/core/mediaclaw/health/monitoring-alert.service.behavior.spec.ts` 首轮失败，定位为同一 spec 解析错误
+  - 修复后定向测试通过，`3` 个测试文件、`3` 个测试全部通过
+- 下一步计划：进入 Batch 3 最后一个原子改动，补备份/存储策略的 OSS 生命周期同步与校验，再做全量 build/lint/test 收口。

@@ -13,9 +13,11 @@ import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthController } from './health.controller'
 import { HealthService } from './health.service'
+import { MongoSlowQueryObserverService } from './mongo-slow-query-observer.service'
 import { MonitoringAlertService } from './monitoring-alert.service'
 import { MonitoringMetricsController } from './monitoring-metrics.controller'
 import { MonitoringMetricsService } from './monitoring-metrics.service'
+import { MonitoringTracingService } from './monitoring-tracing.service'
 import { PublicHealthController } from './public-health.controller'
 import { QueueDashboardAuthService } from './queue-dashboard-auth.service'
 import { QueueDashboardService } from './queue-dashboard.service'
@@ -36,6 +38,8 @@ import { QueueDashboardService } from './queue-dashboard.service'
     HealthService,
     MediaClawHealthCheckService,
     MonitoringMetricsService,
+    MonitoringTracingService,
+    MongoSlowQueryObserverService,
     MonitoringAlertService,
     QueueDashboardAuthService,
     QueueDashboardService,
