@@ -124,3 +124,12 @@
   - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/health/storage-lifecycle.service.behavior.spec.ts src/core/mediaclaw/health/health.service.spec.ts` 首轮失败，定位为视频规则校验误用对象序列化，属性顺序差异导致 false negative
   - 修复后定向测试通过，`2` 个测试文件、`6` 个测试全部通过
 - 下一步计划：Batch 3 的原子改动已补齐，接下来执行全量 build/lint/test 收口，确认没有引入新的 failure，再整理本批次提交结果。
+
+## 2026-04-10 12:31:48 PDT
+- 当前改动：执行 Batch 3 全量收口验证，确认 ClawHost 多 runtime、OpenTelemetry tracing、Mongo 慢查询监控、OSS 生命周期同步四组架构升级没有引入新的回归。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run` 通过，`119` 个测试文件、`377` 个测试全部通过
+  - 功能自测结论：Batch 3 新增的 `clawhost runtime abstraction`、`monitoring tracing + slow query metrics`、`storage lifecycle policy sync` 均已被定向与全量测试覆盖，满足停止条件
+- 下一步计划：Batch 3 已完成，整理提交结果并向用户汇报；保留无关残留 `tts.service.ts` 与 `.tmp-vitest/` 不做处理。
