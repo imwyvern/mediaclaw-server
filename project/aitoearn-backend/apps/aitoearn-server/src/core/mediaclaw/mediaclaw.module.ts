@@ -71,6 +71,7 @@ import { CampaignModule } from './campaign/campaign.module'
 import { ClawHostModule } from './clawhost/clawhost.module'
 import { ClientMgmtModule } from './client-mgmt/client-mgmt.module'
 import { CompetitorModule } from './competitor/competitor.module'
+import { ComplianceModule } from './compliance/compliance.module'
 import { ContentMgmtModule } from './content-mgmt/content-mgmt.module'
 import { CopyModule } from './copy/copy.module'
 import { CrawlerModule } from './crawler/crawler.module'
@@ -176,6 +177,7 @@ const workerModuleImports
     ContentMgmtModule,
     TaskMgmtModule,
     CompetitorModule,
+    ComplianceModule,
     MediaClawAssetModule,
     PipelineSystemModule,
     MarketplaceModule,

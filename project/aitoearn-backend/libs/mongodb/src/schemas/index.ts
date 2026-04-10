@@ -17,6 +17,10 @@ import {
   ClawHostInstanceSchema,
 } from "./clawhost-instance.schema";
 import {
+  ComplianceDeletionRequest,
+  ComplianceDeletionRequestSchema,
+} from "./compliance-deletion-request.schema";
+import {
   ContentGenerationTask,
   ContentGenerationTaskSchema,
 } from "./content-generation-task.schema";
@@ -146,6 +150,7 @@ export * from "./brand-asset-version.schema";
 export * from "./brand.schema";
 export * from "./campaign.schema";
 export * from "./clawhost-instance.schema";
+export * from "./compliance-deletion-request.schema";
 export * from "./competitor.schema";
 export * from "./conversation-usage.schema";
 export * from "./content-hash.schema";
@@ -216,6 +221,7 @@ export const schemas = [
   { name: Brand.name, schema: BrandSchema },
   { name: Campaign.name, schema: CampaignSchema },
   { name: ClawHostInstance.name, schema: ClawHostInstanceSchema },
+  { name: ComplianceDeletionRequest.name, schema: ComplianceDeletionRequestSchema },
   { name: Competitor.name, schema: CompetitorSchema },
   { name: ConversationUsage.name, schema: ConversationUsageSchema },
   { name: ContentHash.name, schema: ContentHashSchema },
