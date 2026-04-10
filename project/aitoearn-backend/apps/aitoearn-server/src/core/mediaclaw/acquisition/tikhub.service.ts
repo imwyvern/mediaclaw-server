@@ -57,6 +57,37 @@ interface TikHubSourceVideoData {
   title?: string
 }
 
+export interface TikHubVideoComment {
+  commentId: string
+  author: string
+  content: string
+  likeCount: number
+  replyCount: number
+  publishedAt: string
+}
+
+export interface TikHubCreatorProfile {
+  creatorId: string
+  nickname: string
+  avatarUrl: string
+  followerCount: number
+  followingCount: number
+  likeCount: number
+  bio: string
+  profileUrl: string
+}
+
+interface TikHubCreatorProfileData {
+  profile: TikHubCreatorProfile
+  recentPosts: SearchVideoSummary[]
+}
+
+interface TikHubCreatorContracts {
+  resolve?: TikHubRequestContract | null
+  profile: TikHubRequestContract
+  posts: TikHubRequestContract
+}
+
 interface PlatformContract {
   search: TikHubRequestContract
   detail: TikHubRequestContract
@@ -252,6 +283,140 @@ export class TikHubService implements ContentProvider {
     }
   }
 
+  async getVideoComments(
+    platform: string,
+    input: {
+      videoId?: string
+      videoUrl?: string
+      limit?: number
+    },
+  ) {
+    const normalizedPlatform = this.assertPlatform(platform)
+    const safeLimit = Math.min(Math.max(Math.trunc(Number(input.limit) || 50), 1), 50)
+    const safeVideoUrl = input.videoUrl?.trim() || ''
+    let safeVideoId = input.videoId?.trim() || ''
+
+    if (!safeVideoId && safeVideoUrl) {
+      const source = await this.getSourceVideo(safeVideoUrl)
+      safeVideoId = source.data?.videoId?.trim() || ''
+    }
+
+    if (!safeVideoId) {
+      throw new BadRequestException('videoId or resolvable videoUrl is required')
+    }
+
+    const request = this.buildCommentContract(normalizedPlatform, safeVideoId, safeLimit)
+
+    if (!this.hasApiKey()) {
+      this.warnUnavailable('getVideoComments')
+      return {
+        provider: this.providerName,
+        source: 'unavailable',
+        reason: 'TIKHUB_API_KEY not configured',
+        platform: normalizedPlatform,
+        videoId: safeVideoId,
+        videoUrl: safeVideoUrl,
+        limit: safeLimit,
+        request,
+        comments: [] as TikHubVideoComment[],
+      }
+    }
+
+    const response = await this.requestWithRetry<Record<string, unknown>>(request)
+
+    return {
+      provider: this.providerName,
+      source: 'tikhub',
+      platform: normalizedPlatform,
+      videoId: safeVideoId,
+      videoUrl: safeVideoUrl,
+      limit: safeLimit,
+      request,
+      comments: this.parseCommentsResponse(normalizedPlatform, response, safeLimit),
+    }
+  }
+
+  async getCreatorProfile(
+    platform: string,
+    input: {
+      creatorId?: string
+      accountUrl?: string
+      limit?: number
+    },
+  ) {
+    const normalizedPlatform = this.assertPlatform(platform)
+    const safeAccountUrl = input.accountUrl?.trim() || ''
+    const safeLimit = Math.min(Math.max(Math.trunc(Number(input.limit) || 20), 1), 20)
+    const directCreatorId = input.creatorId?.trim()
+      || this.extractCreatorIdFromUrl(normalizedPlatform, safeAccountUrl)
+    if (!this.hasApiKey() && !directCreatorId) {
+      this.warnUnavailable('getCreatorProfile')
+      return {
+        provider: this.providerName,
+        source: 'unavailable',
+        reason: 'TIKHUB_API_KEY not configured',
+        platform: normalizedPlatform,
+        creatorId: '',
+        accountUrl: safeAccountUrl,
+        limit: safeLimit,
+        requests: null,
+        data: null as TikHubCreatorProfileData | null,
+      }
+    }
+
+    const resolved = directCreatorId
+      ? { creatorId: directCreatorId }
+      : await this.resolveCreatorIdentity(
+          normalizedPlatform,
+          input.creatorId?.trim() || '',
+          safeAccountUrl,
+        )
+    const contracts = this.buildCreatorContracts(
+      normalizedPlatform,
+      resolved.creatorId,
+      safeLimit,
+      safeAccountUrl,
+    )
+
+    if (!this.hasApiKey()) {
+      this.warnUnavailable('getCreatorProfile')
+      return {
+        provider: this.providerName,
+        source: 'unavailable',
+        reason: 'TIKHUB_API_KEY not configured',
+        platform: normalizedPlatform,
+        creatorId: resolved.creatorId,
+        accountUrl: safeAccountUrl,
+        limit: safeLimit,
+        requests: contracts as TikHubCreatorContracts | null,
+        data: null as TikHubCreatorProfileData | null,
+      }
+    }
+
+    const [profilePayload, postsPayload] = await Promise.all([
+      this.requestWithRetry<Record<string, unknown>>(contracts.profile),
+      this.requestWithRetry<Record<string, unknown>>(contracts.posts),
+    ])
+
+    return {
+      provider: this.providerName,
+      source: 'tikhub',
+      platform: normalizedPlatform,
+      creatorId: resolved.creatorId,
+      accountUrl: safeAccountUrl,
+      limit: safeLimit,
+      requests: contracts,
+      data: this.parseCreatorProfileResponse(
+        normalizedPlatform,
+        profilePayload,
+        postsPayload,
+        resolved.creatorId,
+        safeLimit,
+        safeAccountUrl,
+      ),
+    }
+  }
+
   supportsPlatform(platform: string) {
     try {
       this.assertPlatform(platform)
@@ -407,6 +572,178 @@ export class TikHubService implements ContentProvider {
             bv_id: bilibiliVideoId,
           },
           note: 'Bilibili share URL needs to be normalized to BV id first, then playurl is fetched downstream.',
+        },
+      },
+    }
+
+    return contractMap[platform]
+  }
+
+  private buildCommentContract(
+    platform: TikHubPlatform,
+    videoId: string,
+    limit: number,
+  ): TikHubRequestContract {
+    const baseUrl = this.getBaseUrl()
+    const headers = this.getHeaders()
+
+    const contractMap: Record<TikHubPlatform, TikHubRequestContract> = {
+      douyin: {
+        method: 'POST',
+        url: `${baseUrl}/api/v1/douyin/web/fetch_video_comments`,
+        headers,
+        body: {
+          aweme_id: videoId,
+          cursor: 0,
+          count: limit,
+        },
+        note: 'Douyin comments endpoint fetches top-level comments by aweme_id.',
+      },
+      xhs: {
+        method: 'GET',
+        url: `${baseUrl}/api/v1/xiaohongshu/web/get_note_comments`,
+        headers,
+        query: {
+          note_id: videoId,
+          cursor: '',
+          num: limit,
+        },
+        note: 'Xiaohongshu comments endpoint returns note comments by note_id.',
+      },
+      kuaishou: {
+        method: 'GET',
+        url: `${baseUrl}/api/v1/kuaishou/web/fetch_video_comments`,
+        headers,
+        query: {
+          photo_id: videoId,
+          pcursor: '',
+          count: limit,
+        },
+        note: 'Kuaishou comments endpoint uses photo_id and cursor-based paging.',
+      },
+      bilibili: {
+        method: 'GET',
+        url: `${baseUrl}/api/v1/bilibili/web/fetch_video_comments`,
+        headers,
+        query: {
+          bv_id: videoId,
+          page: 1,
+          page_size: limit,
+        },
+        note: 'Bilibili comments endpoint returns replies for a BV video id.',
+      },
+    }
+
+    return contractMap[platform]
+  }
+
+  private buildCreatorContracts(
+    platform: TikHubPlatform,
+    creatorId: string,
+    limit: number,
+    accountUrl: string,
+  ): TikHubCreatorContracts {
+    const baseUrl = this.getBaseUrl()
+    const headers = this.getHeaders()
+
+    const contractMap: Record<TikHubPlatform, TikHubCreatorContracts> = {
+      douyin: {
+        profile: {
+          method: 'POST',
+          url: `${baseUrl}/api/v1/douyin/web/handler_user_profile`,
+          headers,
+          body: {
+            sec_user_id: creatorId,
+          },
+          note: 'Douyin creator profile endpoint reads sec_user_id from body.',
+        },
+        posts: {
+          method: 'POST',
+          url: `${baseUrl}/api/v1/douyin/web/fetch_user_post_videos`,
+          headers,
+          body: {
+            sec_user_id: creatorId,
+            max_cursor: 0,
+            count: limit,
+          },
+          note: 'Douyin user posts endpoint returns latest aweme items.',
+        },
+      },
+      xhs: {
+        profile: {
+          method: 'GET',
+          url: `${baseUrl}/api/v1/xiaohongshu/web/get_user_info`,
+          headers,
+          query: {
+            user_id: creatorId,
+          },
+          note: 'Xiaohongshu user info endpoint resolves profile by user_id.',
+        },
+        posts: {
+          method: 'GET',
+          url: `${baseUrl}/api/v1/xiaohongshu/web/get_user_notes`,
+          headers,
+          query: {
+            user_id: creatorId,
+            cursor: '',
+            num: limit,
+          },
+          note: 'Xiaohongshu user notes endpoint returns latest notes for the creator.',
+        },
+      },
+      kuaishou: {
+        profile: {
+          method: 'GET',
+          url: `${baseUrl}/api/v1/kuaishou/web/fetch_user_info`,
+          headers,
+          query: {
+            user_id: creatorId,
+          },
+          note: 'Kuaishou profile endpoint resolves creator metrics by user_id.',
+        },
+        posts: {
+          method: 'GET',
+          url: `${baseUrl}/api/v1/kuaishou/web/fetch_user_post`,
+          headers,
+          query: {
+            user_id: creatorId,
+            pcursor: '',
+            count: limit,
+          },
+          note: 'Kuaishou user post endpoint returns the latest photos/videos.',
+        },
+      },
+      bilibili: {
+        resolve: accountUrl
+          ? {
+              method: 'GET',
+              url: `${baseUrl}/api/v1/bilibili/web/fetch_get_user_id`,
+              headers,
+              query: {
+                url: accountUrl,
+              },
+              note: 'Bilibili user id resolver returns mid from the space URL.',
+            }
+          : null,
+        profile: {
+          method: 'GET',
+          url: `${baseUrl}/api/v1/bilibili/web/fetch_user_profile`,
+          headers,
+          query: {
+            mid: creatorId,
+          },
+          note: 'Bilibili creator profile endpoint returns card/stat by mid.',
+        },
+        posts: {
+          method: 'GET',
+          url: `${baseUrl}/api/v1/bilibili/app/fetch_user_videos`,
+          headers,
+          query: {
+            mid: creatorId,
+            pn: 1,
+            ps: limit,
+          },
+          note: 'Bilibili user videos endpoint returns creator archive list by mid.',
         },
       },
     }
@@ -732,6 +1069,276 @@ export class TikHubService implements ContentProvider {
     }
   }
 
+  private parseCommentsResponse(
+    platform: TikHubPlatform,
+    payload: Record<string, unknown>,
+    limit: number,
+  ) {
+    const container = this.unwrapData(payload)
+    const items = this.pickRecordList(
+      container['comments'],
+      container['comment_list'],
+      container['replies'],
+      container['items'],
+      payload['comments'],
+      payload['data'],
+    )
+
+    return items.slice(0, limit).map((item) => {
+      const author = this.pickFirstRecord(
+        item['user'],
+        item['author'],
+        item['member'],
+        item['upper'],
+      )
+      const content = platform === 'bilibili'
+        ? this.readString(
+            this.readNested(item, ['content', 'message']),
+            item['message'],
+            item['text'],
+          )
+        : this.readString(
+            this.readNested(item, ['content', 'text']),
+            this.readNested(item, ['text_extra', 0, 'hashtag_name']),
+            item['content'],
+            item['text'],
+            item['desc'],
+          )
+
+      return {
+        commentId: this.readString(
+          item['cid'],
+          item['comment_id'],
+          item['id'],
+          item['rpid'],
+        ),
+        author: this.readString(
+          author?.['nickname'],
+          author?.['name'],
+          author?.['uname'],
+          item['user_name'],
+        ),
+        content,
+        likeCount: this.readNumber(
+          item['like_count'],
+          item['likeCount'],
+          item['like'],
+          this.readNested(item, ['count', 'like']),
+        ),
+        replyCount: this.readNumber(
+          item['reply_count'],
+          item['replyCount'],
+          item['reply'],
+          this.readNested(item, ['count', 'reply']),
+        ),
+        publishedAt: this.normalizeDate(
+          item['create_time'],
+          item['ctime'],
+          item['time'],
+          item['ip_location'],
+        ),
+      }
+    })
+  }
+
+  private parseCreatorProfileResponse(
+    platform: TikHubPlatform,
+    profilePayload: Record<string, unknown>,
+    postsPayload: Record<string, unknown>,
+    creatorId: string,
+    limit: number,
+    accountUrl: string,
+  ): TikHubCreatorProfileData {
+    const profile = this.parseCreatorProfileRecord(
+      platform,
+      profilePayload,
+      creatorId,
+      accountUrl,
+    )
+    const recentPosts = this.parseCreatorPostsResponse(
+      platform,
+      postsPayload,
+      limit,
+      profile,
+    )
+
+    return {
+      profile,
+      recentPosts,
+    }
+  }
+
+  private parseCreatorProfileRecord(
+    platform: TikHubPlatform,
+    payload: Record<string, unknown>,
+    creatorId: string,
+    accountUrl: string,
+  ): TikHubCreatorProfile {
+    const container = this.unwrapData(payload)
+    const profile = this.pickFirstRecord(
+      container['user'],
+      container['user_info'],
+      container['profile'],
+      container['card'],
+      container['data'],
+      container,
+    ) || {}
+    const stats = this.pickFirstRecord(
+      profile['stats'],
+      profile['stat'],
+      profile['statistics'],
+      this.readNested(profile, ['interactions']),
+    ) || {}
+
+    return {
+      creatorId: this.readString(
+        profile['sec_user_id'],
+        profile['user_id'],
+        profile['id'],
+        profile['mid'],
+        creatorId,
+      ) || creatorId,
+      nickname: this.readString(
+        profile['nickname'],
+        profile['name'],
+        profile['uname'],
+        profile['nick_name'],
+      ),
+      avatarUrl: this.readImageUrl(
+        profile['avatar_thumb'],
+        profile['avatar_medium'],
+        profile['avatar'],
+        profile['face'],
+        this.readNested(profile, ['images', 0]),
+      ),
+      followerCount: this.readNumber(
+        stats['follower_count'],
+        stats['fans'],
+        stats['fans_count'],
+        stats['follower'],
+      ),
+      followingCount: this.readNumber(
+        stats['following_count'],
+        stats['follow'],
+        stats['follow_count'],
+        stats['friend'],
+      ),
+      likeCount: this.readNumber(
+        stats['total_favorited'],
+        stats['liked_count'],
+        stats['like_num'],
+        stats['likes'],
+      ),
+      bio: this.readString(
+        profile['signature'],
+        profile['desc'],
+        profile['bio'],
+        profile['sign'],
+      ),
+      profileUrl: accountUrl || this.defaultProfileUrl(platform, creatorId),
+    }
+  }
+
+  private parseCreatorPostsResponse(
+    platform: TikHubPlatform,
+    payload: Record<string, unknown>,
+    limit: number,
+    profile: TikHubCreatorProfile,
+  ) {
+    const container = this.unwrapData(payload)
+    const items = this.pickRecordList(
+      container['aweme_list'],
+      container['items'],
+      container['notes'],
+      container['photos'],
+      container['list'],
+      container['archives'],
+      this.readNested(container, ['list', 'vlist']),
+      this.readNested(container, ['data', 'list']),
+      payload['items'],
+      payload['data'],
+    )
+
+    const summaries = items.slice(0, limit).map((item) => {
+      const author = this.pickFirstRecord(item['author'], item['user'], item['owner'])
+      const stats = this.pickFirstRecord(
+        item['statistics'],
+        item['stat'],
+        item['stats'],
+        item['interact_info'],
+      )
+
+      return this.buildSearchSummary(platform, {
+        videoId: this.readString(
+          item['aweme_id'],
+          item['note_id'],
+          item['photo_id'],
+          item['bvid'],
+          item['bv_id'],
+          item['id'],
+        ),
+        title: this.stripMarkup(
+          this.readString(
+            item['desc'],
+            item['title'],
+            item['display_title'],
+          ),
+        ),
+        author: this.readString(
+          author?.['nickname'],
+          author?.['name'],
+          author?.['uname'],
+          profile.nickname,
+        ),
+        contentUrl: this.readString(
+          item['share_url'],
+          item['arcurl'],
+          item['jump_url'],
+        ),
+        thumbnailUrl: this.readImageUrl(
+          item['cover'],
+          item['pic'],
+          item['dynamic_cover'],
+          this.readNested(item, ['video', 'cover']),
+          this.readNested(item, ['video', 'origin_cover']),
+        ),
+        publishedAt: this.normalizeDate(
+          item['create_time'],
+          item['pubdate'],
+          item['publish_time'],
+          item['timestamp'],
+        ),
+        views: this.readNumber(
+          stats?.['play_count'],
+          stats?.['view'],
+          stats?.['view_count'],
+          item['play'],
+        ),
+        likes: this.readNumber(
+          stats?.['digg_count'],
+          stats?.['like_count'],
+          stats?.['likes'],
+          item['like'],
+          item['favorite'],
+        ),
+        comments: this.readNumber(
+          stats?.['comment_count'],
+          stats?.['reply'],
+          item['review'],
+          item['comment_count'],
+        ),
+        shares: this.readNumber(
+          stats?.['share_count'],
+          stats?.['share'],
+          item['share'],
+          item['share_count'],
+        ),
+      })
+    })
+
+    return summaries.filter(item => Boolean(item.videoId))
+  }
+
   private async resolveBilibiliSourceVideo(
     shareUrl: string,
     detailPayload: Record<string, unknown>,
@@ -841,6 +1448,109 @@ export class TikHubService implements ContentProvider {
         shares: input.shares,
       },
     }
+  }
+
+  private async resolveCreatorIdentity(
+    platform: TikHubPlatform,
+    creatorId: string,
+    accountUrl: string,
+  ) {
+    if (creatorId) {
+      return { creatorId }
+    }
+
+    const extracted = this.extractCreatorIdFromUrl(platform, accountUrl)
+    if (extracted) {
+      return { creatorId: extracted }
+    }
+
+    if (!accountUrl) {
+      throw new BadRequestException('creatorId or accountUrl is required')
+    }
+
+    const resolveContract = this.buildCreatorResolveContract(platform, accountUrl)
+    if (!resolveContract) {
+      throw new BadRequestException('Unable to resolve creatorId from accountUrl')
+    }
+
+    const response = await this.requestWithRetry<Record<string, unknown>>(resolveContract)
+    const resolvedCreatorId = this.readString(
+      this.readNested(response, ['data', 'sec_user_id']),
+      this.readNested(response, ['data', 'user_id']),
+      this.readNested(response, ['data', 'mid']),
+      this.readNested(response, ['data', 'uid']),
+      this.readNested(response, ['sec_user_id']),
+      this.readNested(response, ['user_id']),
+      this.readNested(response, ['mid']),
+      this.readNested(response, ['uid']),
+    )
+
+    if (!resolvedCreatorId) {
+      throw new BadRequestException('Unable to resolve creatorId from accountUrl')
+    }
+
+    return { creatorId: resolvedCreatorId }
+  }
+
+  private buildCreatorResolveContract(
+    platform: TikHubPlatform,
+    accountUrl: string,
+  ): TikHubRequestContract | null {
+    const baseUrl = this.getBaseUrl()
+    const headers = this.getHeaders()
+
+    switch (platform) {
+      case 'douyin':
+        return {
+          method: 'GET',
+          url: `${baseUrl}/api/v1/douyin/web/get_sec_user_id`,
+          headers,
+          query: {
+            profile_url: accountUrl,
+          },
+          note: 'Douyin sec_user_id resolver resolves creator id from profile url.',
+        }
+      case 'bilibili':
+        return {
+          method: 'GET',
+          url: `${baseUrl}/api/v1/bilibili/web/fetch_get_user_id`,
+          headers,
+          query: {
+            url: accountUrl,
+          },
+          note: 'Bilibili user id resolver resolves creator mid from profile url.',
+        }
+      default:
+        return null
+    }
+  }
+
+  private extractCreatorIdFromUrl(platform: TikHubPlatform, accountUrl: string) {
+    if (!accountUrl) {
+      return ''
+    }
+
+    let pathname = accountUrl
+    try {
+      pathname = new URL(accountUrl).pathname
+    }
+    catch {
+      pathname = accountUrl
+    }
+
+    const segments = pathname
+      .split('/')
+      .map(segment => segment.trim())
+      .filter(Boolean)
+
+    if (platform === 'bilibili') {
+      const midMatch = accountUrl.match(/space\.bilibili\.com\/(\d+)/i)
+      if (midMatch?.[1]) {
+        return midMatch[1]
+      }
+    }
+
+    return segments.at(-1) || ''
   }
 
   private assertPlatform(platform: string): TikHubPlatform {
@@ -1140,6 +1850,21 @@ export class TikHubService implements ContentProvider {
 
   private buildSourceFilename(platform: TikHubPlatform, videoId: string): string {
     return `${platform}-${videoId || 'source-video'}.mp4`
+  }
+
+  private defaultProfileUrl(platform: TikHubPlatform, creatorId: string): string {
+    if (!creatorId) {
+      return ''
+    }
+
+    const profileUrlMap: Record<TikHubPlatform, string> = {
+      douyin: `https://www.douyin.com/user/${creatorId}`,
+      xhs: `https://www.xiaohongshu.com/user/profile/${creatorId}`,
+      kuaishou: `https://www.kuaishou.com/profile/${creatorId}`,
+      bilibili: `https://space.bilibili.com/${creatorId}`,
+    }
+
+    return profileUrlMap[platform]
   }
 
   private stripMarkup(text: string): string {

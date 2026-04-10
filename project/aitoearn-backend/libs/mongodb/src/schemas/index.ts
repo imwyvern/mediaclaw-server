@@ -31,6 +31,7 @@ import {
   CopyPerformance,
   CopyPerformanceSchema,
 } from "./copy-performance.schema";
+import { CrawlerResult, CrawlerResultSchema } from "./crawler-result.schema";
 import { CreditsBalance, CreditsBalanceSchema } from "./credits-balance.schema";
 import { CreditsRecord, CreditsRecordSchema } from "./credits-record.schema";
 import { DeliveryRecord, DeliveryRecordSchema } from "./delivery-record.schema";
@@ -150,6 +151,7 @@ export * from "./content-hash.schema";
 export * from "./content-generation-task.schema";
 export * from "./copy-history.schema";
 export * from "./copy-performance.schema";
+export * from "./crawler-result.schema";
 export * from "./credits-balance.schema";
 export * from "./credits-record.schema";
 export * from "./delivery-record.schema";
@@ -218,6 +220,7 @@ export const schemas = [
   { name: ContentGenerationTask.name, schema: ContentGenerationTaskSchema },
   { name: CopyHistory.name, schema: CopyHistorySchema },
   { name: CopyPerformance.name, schema: CopyPerformanceSchema },
+  { name: CrawlerResult.name, schema: CrawlerResultSchema },
   { name: DiscoveryNotification.name, schema: DiscoveryNotificationSchema },
   { name: DistributionRule.name, schema: DistributionRuleSchema },
   { name: EmployeeAssignment.name, schema: EmployeeAssignmentSchema },

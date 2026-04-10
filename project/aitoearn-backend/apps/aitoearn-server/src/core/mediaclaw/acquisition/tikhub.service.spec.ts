@@ -238,4 +238,142 @@ describe('tikHubService', () => {
       }),
     )
   })
+
+  it('should fetch and normalize video comments from TikHub', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        code: 200,
+        data: {
+          comments: [
+            {
+              cid: 'comment-1',
+              text: '这个教程很实用',
+              like_count: 32,
+              reply_count: 4,
+              create_time: 1775754401,
+              user: {
+                nickname: '护肤控',
+              },
+            },
+          ],
+        },
+      })),
+    }))
+
+    const result = await service.getVideoComments('douyin', {
+      videoId: '7491626347946781989',
+      limit: 20,
+    })
+
+    expect(result.request).toEqual(expect.objectContaining({
+      method: 'POST',
+      url: 'https://api.tikhub.io/api/v1/douyin/web/fetch_video_comments',
+      body: expect.objectContaining({
+        aweme_id: '7491626347946781989',
+        count: 20,
+      }),
+    }))
+    expect(result.comments).toEqual([
+      expect.objectContaining({
+        commentId: 'comment-1',
+        author: '护肤控',
+        content: '这个教程很实用',
+        likeCount: 32,
+        replyCount: 4,
+      }),
+    ])
+  })
+
+  it('should fetch creator profile and recent posts from TikHub', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({
+          code: 200,
+          data: {
+            user: {
+              sec_user_id: 'creator-sec-id',
+              nickname: '达人成长记',
+              avatar_thumb: {
+                url_list: ['https://example.com/avatar.jpg'],
+              },
+              signature: '分享护肤日常',
+              stats: {
+                follower_count: 12000,
+                following_count: 88,
+                total_favorited: 53000,
+              },
+            },
+          },
+        })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(JSON.stringify({
+          code: 200,
+          data: {
+            aweme_list: [
+              {
+                aweme_id: 'video-1',
+                desc: '达人最新作品',
+                create_time: 1775754401,
+                share_url: 'https://www.douyin.com/video/video-1',
+                author: {
+                  nickname: '达人成长记',
+                },
+                statistics: {
+                  play_count: 5000,
+                  digg_count: 300,
+                  comment_count: 25,
+                  share_count: 10,
+                },
+                video: {
+                  cover: {
+                    url_list: ['https://example.com/cover.jpg'],
+                  },
+                },
+              },
+            ],
+          },
+        })),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await service.getCreatorProfile('douyin', {
+      creatorId: 'creator-sec-id',
+      limit: 10,
+      accountUrl: 'https://www.douyin.com/user/creator-sec-id',
+    })
+
+    expect(result.requests.profile).toEqual(expect.objectContaining({
+      method: 'POST',
+      url: 'https://api.tikhub.io/api/v1/douyin/web/handler_user_profile',
+      body: {
+        sec_user_id: 'creator-sec-id',
+      },
+    }))
+    expect(result.requests.posts).toEqual(expect.objectContaining({
+      method: 'POST',
+      url: 'https://api.tikhub.io/api/v1/douyin/web/fetch_user_post_videos',
+      body: expect.objectContaining({
+        sec_user_id: 'creator-sec-id',
+        count: 10,
+      }),
+    }))
+    expect(result.data?.profile).toEqual(
+      expect.objectContaining({
+        creatorId: 'creator-sec-id',
+        nickname: '达人成长记',
+        followerCount: 12000,
+      }),
+    )
+    expect(result.data?.recentPosts).toEqual([
+      expect.objectContaining({
+        videoId: 'video-1',
+        title: '达人最新作品',
+        author: '达人成长记',
+      }),
+    ])
+  })
 })

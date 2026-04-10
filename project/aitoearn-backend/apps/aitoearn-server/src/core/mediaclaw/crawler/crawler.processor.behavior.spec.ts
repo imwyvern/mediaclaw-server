@@ -16,9 +16,27 @@ describe('crawlerProcessor behavior', () => {
     const mediaCrawlerProClient = {
       submitSupplementalJob: vi.fn(),
     }
+    const tikHubService = {
+      getVideoComments: vi.fn(),
+      getCreatorProfile: vi.fn(),
+    }
+    const crawlerResultService = {
+      recordCompleted: vi.fn().mockResolvedValue(undefined),
+      recordFailed: vi.fn().mockResolvedValue(undefined),
+    }
+    const contentRemixService = {
+      analyzeViralElements: vi.fn(),
+    }
+    const crawlerSchedulerService = {
+      processScheduledCrawl: vi.fn(),
+    }
     const processor = new CrawlerProcessor(
       discoveryService as any,
       mediaCrawlerProClient as any,
+      tikHubService as any,
+      crawlerResultService as any,
+      contentRemixService as any,
+      crawlerSchedulerService as any,
     )
 
     const result = await processor.process({
@@ -86,6 +104,12 @@ describe('crawlerProcessor behavior', () => {
       }),
     )
     expect(mediaCrawlerProClient.submitSupplementalJob).not.toHaveBeenCalled()
+    expect(crawlerResultService.recordCompleted).toHaveBeenCalledWith(
+      'crawl-1',
+      expect.objectContaining({
+        contentIds: ['content-1'],
+      }),
+    )
   })
 
   it('should dispatch MediaCrawlerPro supplemental crawl and ingest returned items when tikhub is insufficient', async () => {
@@ -134,9 +158,27 @@ describe('crawlerProcessor behavior', () => {
         ],
       }),
     }
+    const tikHubService = {
+      getVideoComments: vi.fn(),
+      getCreatorProfile: vi.fn(),
+    }
+    const crawlerResultService = {
+      recordCompleted: vi.fn().mockResolvedValue(undefined),
+      recordFailed: vi.fn().mockResolvedValue(undefined),
+    }
+    const contentRemixService = {
+      analyzeViralElements: vi.fn(),
+    }
+    const crawlerSchedulerService = {
+      processScheduledCrawl: vi.fn(),
+    }
     const processor = new CrawlerProcessor(
       discoveryService as any,
       mediaCrawlerProClient as any,
+      tikHubService as any,
+      crawlerResultService as any,
+      contentRemixService as any,
+      crawlerSchedulerService as any,
     )
 
     const result = await processor.process({
@@ -212,6 +254,139 @@ describe('crawlerProcessor behavior', () => {
         supplementalResults: [
           expect.objectContaining({
             videoId: 'video-2',
+          }),
+        ],
+      }),
+    )
+    expect(crawlerResultService.recordCompleted).toHaveBeenCalledWith(
+      'crawl-2',
+      expect.objectContaining({
+        supplementalPersisted: expect.objectContaining({
+          upsertedCount: 1,
+        }),
+      }),
+    )
+  })
+
+  it('should crawl creator profile, ingest recent posts, and auto analyze scheduled competitor content', async () => {
+    const discoveryService = {
+      ingestSearchResults: vi.fn().mockResolvedValue({
+        industry: 'beauty',
+        platform: 'douyin',
+        scannedCount: 1,
+        upsertedCount: 1,
+        pendingCount: 1,
+        contentIds: ['content-creator-1'],
+      }),
+    }
+    const mediaCrawlerProClient = {
+      submitSupplementalJob: vi.fn(),
+    }
+    const tikHubService = {
+      getVideoComments: vi.fn(),
+      getCreatorProfile: vi.fn().mockResolvedValue({
+        source: 'tikhub',
+        creatorId: 'creator-sec-id',
+        data: {
+          profile: {
+            creatorId: 'creator-sec-id',
+            nickname: '达人成长记',
+            avatarUrl: 'https://example.com/avatar.jpg',
+            followerCount: 1000,
+            followingCount: 10,
+            likeCount: 2000,
+            bio: 'bio',
+            profileUrl: 'https://example.com/u/creator-sec-id',
+          },
+          recentPosts: [
+            {
+              platform: 'douyin',
+              videoId: 'video-3',
+              title: '达人新作',
+              author: '达人成长记',
+              contentUrl: 'https://example.com/video-3',
+              thumbnailUrl: 'https://example.com/thumb-3.jpg',
+              publishedAt: '2026-04-08T00:00:00.000Z',
+              metrics: {
+                views: 9000,
+                likes: 700,
+                comments: 60,
+                shares: 30,
+              },
+            },
+          ],
+        },
+      }),
+    }
+    const crawlerResultService = {
+      recordCompleted: vi.fn().mockResolvedValue(undefined),
+      recordFailed: vi.fn().mockResolvedValue(undefined),
+    }
+    const contentRemixService = {
+      analyzeViralElements: vi.fn().mockResolvedValue({
+        summary: '强钩子开场',
+        source: 'fallback',
+      }),
+    }
+    const crawlerSchedulerService = {
+      processScheduledCrawl: vi.fn(),
+    }
+    const processor = new CrawlerProcessor(
+      discoveryService as any,
+      mediaCrawlerProClient as any,
+      tikHubService as any,
+      crawlerResultService as any,
+      contentRemixService as any,
+      crawlerSchedulerService as any,
+    )
+
+    const result = await processor.process({
+      id: 'crawl-3',
+      name: 'crawl',
+      data: {
+        crawlType: 'competitor_schedule',
+        platform: 'douyin',
+        keyword: 'beauty',
+        depth: 2,
+        resultLimit: 20,
+        industry: 'beauty',
+        keywords: ['beauty', '护肤'],
+        source: 'competitor_scheduler',
+        createdAt: '2026-04-08T00:00:00.000Z',
+        seedResults: [],
+        route: null,
+        accountUrl: 'https://www.douyin.com/user/creator-sec-id',
+        creatorId: 'creator-sec-id',
+      },
+    } as any)
+
+    expect(tikHubService.getCreatorProfile).toHaveBeenCalledWith('douyin', {
+      creatorId: 'creator-sec-id',
+      accountUrl: 'https://www.douyin.com/user/creator-sec-id',
+      limit: 20,
+    })
+    expect(discoveryService.ingestSearchResults).toHaveBeenCalledWith({
+      platform: 'douyin',
+      industry: 'beauty',
+      keywords: ['beauty', '护肤', '达人成长记'],
+      items: [
+        expect.objectContaining({
+          videoId: 'video-3',
+        }),
+      ],
+      discoveredAt: new Date('2026-04-08T00:00:00.000Z'),
+    })
+    expect(contentRemixService.analyzeViralElements).toHaveBeenCalledWith('content-creator-1')
+    expect(result).toEqual(
+      expect.objectContaining({
+        creatorProfile: expect.objectContaining({
+          creatorId: 'creator-sec-id',
+        }),
+        contentIds: ['content-creator-1'],
+        analysisItems: [
+          expect.objectContaining({
+            contentId: 'content-creator-1',
+            analyzed: true,
           }),
         ],
       }),

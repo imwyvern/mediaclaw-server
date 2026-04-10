@@ -1,68 +1,18 @@
 import { InjectQueue } from '@nestjs/bullmq'
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
-import { Job, Queue } from 'bullmq'
+import { Queue } from 'bullmq'
 import { AcquisitionService } from '../acquisition/acquisition.service'
+import { CrawlerResultService } from './crawler-result.service'
+import { MEDIACLAW_CRAWL_QUEUE } from './crawler.constants'
+import {
+  CrawlJobData,
+  CrawlOptions,
+  CrawlQuery,
+  CrawlRouteDecision,
+  CrawlSeedResult,
+} from './crawler.types'
 
-export const MEDIACLAW_CRAWL_QUEUE = 'mediaclaw_crawl'
-
-interface CrawlQuery {
-  platform: string
-  keyword: string
-  depth: number
-}
-
-export interface CrawlSeedResult {
-  platform: string
-  videoId: string
-  title: string
-  author: string
-  contentUrl: string
-  thumbnailUrl: string
-  publishedAt: string
-  views: number
-  likes: number
-  comments: number
-  shares: number
-}
-
-export interface CrawlOptions {
-  industry?: string
-  keywords?: string[]
-  source?: string
-}
-
-export interface CrawlRouteDecision {
-  mode: 'tikhub_only' | 'tikhub_plus_media_crawler_pro'
-  reason: string
-  tikhubResultCount: number
-  requestedDepth: number
-  tikhubResponse: Awaited<ReturnType<AcquisitionService['searchVideos']>>
-  mediaCrawlerPro?: {
-    source: 'MediaCrawlerPro'
-    request: {
-      method: 'POST'
-      endpoint: string
-      body: {
-        platform: string
-        keyword: string
-        depth: number
-      }
-      note: string
-    }
-  }
-}
-
-export interface CrawlJobData {
-  platform: string
-  keyword: string
-  depth: number
-  industry: string
-  keywords: string[]
-  source: string
-  route: CrawlRouteDecision
-  seedResults: CrawlSeedResult[]
-  createdAt: string
-}
+export { MEDIACLAW_CRAWL_QUEUE } from './crawler.constants'
 
 @Injectable()
 export class CrawlerService {
@@ -70,6 +20,7 @@ export class CrawlerService {
     @InjectQueue(MEDIACLAW_CRAWL_QUEUE)
     private readonly crawlQueue: Queue<CrawlJobData>,
     private readonly acquisitionService: AcquisitionService,
+    private readonly crawlerResultService: CrawlerResultService,
   ) {}
 
   async enqueueCrawl(
@@ -78,44 +29,53 @@ export class CrawlerService {
     depth = 1,
     options: CrawlOptions = {},
   ) {
-    const safeKeyword = keyword.trim()
-    if (!safeKeyword) {
-      throw new BadRequestException('keyword is required')
-    }
-
+    const normalizedPlatform = this.normalizePlatform(platform)
     const normalizedDepth = this.normalizeDepth(depth)
-    const normalizedIndustry = options.industry?.trim() || safeKeyword
+    const crawlType = options.crawlType || 'keyword'
+    const resultLimit = this.normalizeResultLimit(crawlType, options.limit)
+    const normalizedKeyword = this.normalizeText(keyword)
+    const normalizedIndustry = this.normalizeText(options.industry) || normalizedKeyword
     const normalizedKeywords = this.mergeKeywords(
       options.keywords || [],
-      [safeKeyword, normalizedIndustry],
+      [normalizedKeyword, normalizedIndustry],
     )
-    const route = await this.dualLayerRoute({
-      platform,
-      keyword: safeKeyword,
-      depth: normalizedDepth,
+
+    this.validateRequest(crawlType, {
+      keyword: normalizedKeyword,
+      videoUrl: this.normalizeText(options.videoUrl),
+      videoId: this.normalizeText(options.videoId),
+      creatorId: this.normalizeText(options.creatorId),
+      accountUrl: this.normalizeText(options.accountUrl),
     })
 
+    const route = crawlType === 'keyword'
+      ? await this.dualLayerRoute({
+          platform: normalizedPlatform,
+          keyword: normalizedKeyword,
+          depth: normalizedDepth,
+        })
+      : null
+    const seedResults = route
+      ? route.tikhubResponse.items.map(item => this.toSeedResult(item))
+      : []
+
     const data: CrawlJobData = {
-      platform,
-      keyword: safeKeyword,
+      crawlType,
+      platform: normalizedPlatform,
+      keyword: normalizedKeyword,
       depth: normalizedDepth,
+      resultLimit,
       industry: normalizedIndustry,
       keywords: normalizedKeywords,
-      source: options.source?.trim() || 'manual',
+      source: this.normalizeText(options.source) || 'manual',
       route,
-      seedResults: route.tikhubResponse.items.map(item => ({
-        platform: item.platform,
-        videoId: item.videoId,
-        title: item.title,
-        author: item.author,
-        contentUrl: item.contentUrl,
-        thumbnailUrl: item.thumbnailUrl,
-        publishedAt: item.publishedAt,
-        views: item.metrics.views,
-        likes: item.metrics.likes,
-        comments: item.metrics.comments,
-        shares: item.metrics.shares,
-      })),
+      seedResults,
+      videoUrl: this.normalizeText(options.videoUrl) || undefined,
+      videoId: this.normalizeText(options.videoId) || undefined,
+      creatorId: this.normalizeText(options.creatorId) || undefined,
+      accountUrl: this.normalizeText(options.accountUrl) || undefined,
+      orgId: this.normalizeText(options.orgId) || undefined,
+      competitorId: this.normalizeText(options.competitorId) || undefined,
       createdAt: new Date().toISOString(),
     }
 
@@ -123,65 +83,109 @@ export class CrawlerService {
       'crawl',
       data,
       {
-        jobId: `crawl:${platform}:${Date.now()}`,
+        jobId: `crawl:${crawlType}:${normalizedPlatform}:${Date.now()}`,
       },
     )
 
+    const jobId = String(job.id || '')
+    await this.crawlerResultService.recordQueued(jobId, data)
+
     return {
-      jobId: String(job.id || ''),
+      jobId,
       queueName: MEDIACLAW_CRAWL_QUEUE,
       status: await job.getState(),
+      crawlType,
       industry: normalizedIndustry,
       keywords: normalizedKeywords,
       source: data.source,
       route,
-      seededResults: data.seedResults,
+      seededResults: seedResults,
+      targetId: data.videoId || data.creatorId || '',
+      targetUrl: data.videoUrl || data.accountUrl || '',
     }
   }
 
   async getCrawlStatus(jobId: string) {
-    const job = await this.findJob(jobId)
-    const state = await job.getState()
+    const job = await this.crawlQueue.getJob(jobId)
+    const stored = await this.crawlerResultService.getByJobId(jobId)
+    if (!job && !stored) {
+      throw new NotFoundException('Crawl job not found')
+    }
+
+    if (job) {
+      const state = await job.getState()
+      return {
+        jobId,
+        queueName: MEDIACLAW_CRAWL_QUEUE,
+        state,
+        progress: typeof job.progress === 'number' ? job.progress : 0,
+        attemptsMade: job.attemptsMade,
+        createdAt: typeof job.timestamp === 'number'
+          ? new Date(job.timestamp).toISOString()
+          : job.data.createdAt,
+        finishedAt: typeof job.finishedOn === 'number'
+          ? new Date(job.finishedOn).toISOString()
+          : stored?.completedAt || null,
+        crawlType: job.data.crawlType,
+        routeMode: job.data.route?.mode || '',
+        industry: job.data.industry,
+        keywords: job.data.keywords,
+        source: job.data.source,
+      }
+    }
 
     return {
       jobId,
       queueName: MEDIACLAW_CRAWL_QUEUE,
-      state,
-      progress: typeof job.progress === 'number' ? job.progress : 0,
-      attemptsMade: job.attemptsMade,
-      createdAt: typeof job.timestamp === 'number'
-        ? new Date(job.timestamp).toISOString()
-        : job.data.createdAt,
-      finishedAt: typeof job.finishedOn === 'number'
-        ? new Date(job.finishedOn).toISOString()
-        : null,
-      routeMode: job.data.route.mode,
-      industry: job.data.industry,
-      keywords: job.data.keywords,
-      source: job.data.source,
+      state: stored?.status || 'unknown',
+      progress: stored?.status === 'completed' ? 100 : 0,
+      attemptsMade: 0,
+      createdAt: stored?.createdAt || null,
+      finishedAt: stored?.completedAt || null,
+      crawlType: stored?.crawlType || 'keyword',
+      routeMode: stored?.routeMode || '',
+      industry: stored?.industry || '',
+      keywords: stored?.keywords || [],
+      source: stored?.source || '',
     }
   }
 
   async getCrawlResults(jobId: string) {
-    const job = await this.findJob(jobId)
-    const state = await job.getState()
-    const results = job.returnvalue
-      ? job.returnvalue
-      : job.data.seedResults
-    const total = Array.isArray(results)
-      ? results.length
-      : Number((results as Record<string, unknown>)?.['persisted'] && (results as Record<string, any>)['persisted']['upsertedCount'])
-        || job.data.seedResults.length
+    const stored = await this.crawlerResultService.getByJobId(jobId)
+    const job = await this.crawlQueue.getJob(jobId)
+
+    if (!stored && !job) {
+      throw new NotFoundException('Crawl job not found')
+    }
+
+    if (stored) {
+      return {
+        jobId,
+        queueName: MEDIACLAW_CRAWL_QUEUE,
+        state: stored.status,
+        crawlType: stored.crawlType,
+        industry: stored.industry,
+        keywords: stored.keywords,
+        source: stored.source,
+        route: stored.route,
+        total: this.resolveStoredTotal(stored),
+        results: stored,
+      }
+    }
+
+    const state = await job!.getState()
+    const results = job!.returnvalue || job!.data.seedResults
 
     return {
       jobId,
       queueName: MEDIACLAW_CRAWL_QUEUE,
       state,
-      industry: job.data.industry,
-      keywords: job.data.keywords,
-      source: job.data.source,
-      route: job.data.route,
-      total,
+      crawlType: job!.data.crawlType,
+      industry: job!.data.industry,
+      keywords: job!.data.keywords,
+      source: job!.data.source,
+      route: job!.data.route,
+      total: Array.isArray(results) ? results.length : job!.data.seedResults.length,
       results,
     }
   }
@@ -201,7 +205,15 @@ export class CrawlerService {
         reason: 'TikHub 搜索结果已满足当前抓取深度，不触发补采。',
         tikhubResultCount: tikhubResponse.items.length,
         requestedDepth: query.depth,
-        tikhubResponse,
+        tikhubResponse: {
+          provider: tikhubResponse.provider,
+          source: tikhubResponse.source,
+          platform: tikhubResponse.platform,
+          keyword: tikhubResponse.keyword,
+          limit: tikhubResponse.limit,
+          request: tikhubResponse.request,
+          items: tikhubResponse.items,
+        },
       }
     }
 
@@ -210,7 +222,15 @@ export class CrawlerService {
       reason: 'TikHub 返回结果不足，追加 MediaCrawlerPro 作为第二层补采。',
       tikhubResultCount: tikhubResponse.items.length,
       requestedDepth: query.depth,
-      tikhubResponse,
+      tikhubResponse: {
+        provider: tikhubResponse.provider,
+        source: tikhubResponse.source,
+        platform: tikhubResponse.platform,
+        keyword: tikhubResponse.keyword,
+        limit: tikhubResponse.limit,
+        request: tikhubResponse.request,
+        items: tikhubResponse.items,
+      },
       mediaCrawlerPro: {
         source: 'MediaCrawlerPro',
         request: {
@@ -227,13 +247,68 @@ export class CrawlerService {
     }
   }
 
-  private async findJob(jobId: string): Promise<Job<CrawlJobData>> {
-    const job = await this.crawlQueue.getJob(jobId)
-    if (!job) {
-      throw new NotFoundException('Crawl job not found')
+  private resolveStoredTotal(stored: Awaited<ReturnType<CrawlerResultService['getByJobId']>>) {
+    if (!stored) {
+      return 0
     }
 
-    return job
+    if (stored.comments.length > 0) {
+      return stored.comments.length
+    }
+
+    if (stored.recentPosts.length > 0) {
+      return stored.recentPosts.length
+    }
+
+    if (stored.seededResults.length > 0) {
+      return stored.seededResults.length
+    }
+
+    return stored.contentIds.length
+  }
+
+  private validateRequest(
+    crawlType: CrawlJobData['crawlType'],
+    input: {
+      keyword: string
+      videoUrl: string
+      videoId: string
+      creatorId: string
+      accountUrl: string
+    },
+  ) {
+    if (crawlType === 'keyword' && !input.keyword) {
+      throw new BadRequestException('keyword is required')
+    }
+
+    if (crawlType === 'video_comments' && !input.videoUrl && !input.videoId) {
+      throw new BadRequestException('videoUrl or videoId is required for video_comments crawl')
+    }
+
+    if (
+      (crawlType === 'creator_profile' || crawlType === 'competitor_schedule')
+      && !input.creatorId
+      && !input.accountUrl
+    ) {
+      throw new BadRequestException('creatorId or accountUrl is required for creator profile crawl')
+    }
+  }
+
+  private normalizePlatform(platform: string) {
+    const normalized = platform.trim().toLowerCase()
+    if (!normalized) {
+      throw new BadRequestException('platform is required')
+    }
+
+    if (normalized === 'xiaohongshu' || normalized === 'rednote') {
+      return 'xhs'
+    }
+
+    return normalized
+  }
+
+  private normalizeText(value?: string | null) {
+    return value?.trim() || ''
   }
 
   private normalizeDepth(depth?: number) {
@@ -244,7 +319,17 @@ export class CrawlerService {
     return Math.min(Math.max(Math.trunc(depth as number), 1), 10)
   }
 
-  private mergeKeywords(primary: string[], secondary: string[]) {
+  private normalizeResultLimit(crawlType: CrawlJobData['crawlType'], limit?: number) {
+    const defaultLimit = crawlType === 'video_comments' ? 50 : crawlType === 'keyword' ? 10 : 20
+    if (!Number.isFinite(limit)) {
+      return defaultLimit
+    }
+
+    const upperBound = crawlType === 'video_comments' ? 50 : 20
+    return Math.min(Math.max(Math.trunc(limit as number), 1), upperBound)
+  }
+
+  private mergeKeywords(primary: string[], secondary: Array<string | undefined>) {
     return Array.from(
       new Set(
         [...primary, ...secondary]
@@ -253,5 +338,21 @@ export class CrawlerService {
           .filter(Boolean),
       ),
     )
+  }
+
+  private toSeedResult(item: CrawlRouteDecision['tikhubResponse']['items'][number]): CrawlSeedResult {
+    return {
+      platform: item.platform,
+      videoId: item.videoId,
+      title: item.title,
+      author: item.author,
+      contentUrl: item.contentUrl,
+      thumbnailUrl: item.thumbnailUrl,
+      publishedAt: item.publishedAt,
+      views: item.metrics.views,
+      likes: item.metrics.likes,
+      comments: item.metrics.comments,
+      shares: item.metrics.shares,
+    }
   }
 }

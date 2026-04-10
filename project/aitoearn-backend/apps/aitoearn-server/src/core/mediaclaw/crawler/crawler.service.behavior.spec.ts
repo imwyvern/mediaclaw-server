@@ -5,6 +5,7 @@ describe('crawlerService behavior', () => {
   let service: CrawlerService
   let crawlQueue: Record<string, Mock>
   let tikHubService: Record<string, Mock>
+  let crawlerResultService: Record<string, Mock>
 
   beforeEach(() => {
     crawlQueue = {
@@ -13,8 +14,16 @@ describe('crawlerService behavior', () => {
     tikHubService = {
       searchVideos: vi.fn(),
     }
+    crawlerResultService = {
+      recordQueued: vi.fn().mockResolvedValue(undefined),
+      getByJobId: vi.fn().mockResolvedValue(null),
+    }
 
-    service = new CrawlerService(crawlQueue as any, tikHubService as any)
+    service = new CrawlerService(
+      crawlQueue as any,
+      tikHubService as any,
+      crawlerResultService as any,
+    )
   })
 
   it('should preserve industry and keyword metadata when enqueueing a crawl', async () => {
@@ -75,14 +84,22 @@ describe('crawlerService behavior', () => {
         ]),
         source: 'competitor_account',
       }),
-      expect.objectContaining({
-        jobId: expect.stringContaining('crawl:douyin:'),
-      }),
+      {
+        jobId: expect.stringContaining('crawl:keyword:douyin:'),
+      },
     )
     expect(result.queueName).toBe(MEDIACLAW_CRAWL_QUEUE)
+    expect(result.crawlType).toBe('keyword')
     expect(result.industry).toBe('beauty')
     expect(result.keywords).toEqual(
       expect.arrayContaining(['竞品达人', 'beauty', 'skincare']),
+    )
+    expect(crawlerResultService.recordQueued).toHaveBeenCalledWith(
+      expect.stringContaining('crawl:keyword:douyin:'),
+      expect.objectContaining({
+        crawlType: 'keyword',
+        resultLimit: 10,
+      }),
     )
     expect(result.seededResults[0]).toEqual(
       expect.objectContaining({
@@ -91,5 +108,18 @@ describe('crawlerService behavior', () => {
         likes: 150,
       }),
     )
+  })
+
+  it('should require video target when enqueueing a comment crawl', async () => {
+    await expect(
+      service.enqueueCrawl(
+        'douyin',
+        '',
+        1,
+        {
+          crawlType: 'video_comments',
+        },
+      ),
+    ).rejects.toThrow('videoUrl or videoId is required')
   })
 })
