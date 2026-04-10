@@ -20,11 +20,19 @@ import {
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import AdmZip from 'adm-zip'
+import { PassThrough } from 'node:stream'
 import { Model, Types } from 'mongoose'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 import { NotificationService } from '../notification/notification.service'
 import { createStatusTransitionIterationEntry, mapVideoTaskStatusToProductionStage } from '../video-task-lifecycle.util'
 import { WebhookService } from '../webhook/webhook.service'
+
+const createArchive = require('archiver') as (format: 'zip', options?: Record<string, unknown>) => {
+  append: (data: Buffer | string, options: { name: string }) => void
+  finalize: () => void
+  on: (event: string, listener: (...args: any[]) => void) => void
+  pipe: (target: PassThrough) => void
+}
 
 interface ContentFilters {
   status?: VideoTaskStatus
@@ -43,6 +51,13 @@ interface BatchUpdateInput {
   ids: string[]
   caption?: string
   status?: string
+}
+
+interface BatchApproveResultItem {
+  id: string
+  approved: boolean
+  content?: Record<string, unknown>
+  error?: string
 }
 
 type BatchDownloadFormat = 'links' | 'zip'
@@ -628,6 +643,50 @@ export class ContentMgmtService {
     throw new BadRequestException('caption 或 status=published 至少提供一个')
   }
 
+  async batchApprove(
+    orgId: string,
+    contentIds: string[],
+    reviewerId: string,
+    comment?: string,
+  ) {
+    const ids = Array.from(
+      new Set(
+        (contentIds || [])
+          .map(item => String(item || '').trim())
+          .filter(Boolean),
+      ),
+    )
+
+    if (ids.length === 0) {
+      throw new BadRequestException('ids is required')
+    }
+
+    const results = await Promise.allSettled(
+      ids.map(contentId => this.approveContent(orgId, contentId, reviewerId, comment)),
+    )
+
+    const items = results.map<BatchApproveResultItem>((result, index) =>
+      result.status === 'fulfilled'
+        ? {
+            id: ids[index],
+            approved: true,
+            content: result.value,
+          }
+        : {
+            id: ids[index],
+            approved: false,
+            error: result.reason instanceof Error ? result.reason.message : 'approve_failed',
+          },
+    )
+
+    return {
+      total: ids.length,
+      successCount: items.filter(item => item.approved).length,
+      failureCount: items.filter(item => !item.approved).length,
+      items,
+    }
+  }
+
   async exportContent(orgId: string, format: string, filters: ContentFilters) {
     const normalizedFormat = this.normalizeExportFormat(format)
     const query = this.buildQuery(orgId, filters)
@@ -739,8 +798,8 @@ export class ContentMgmtService {
   private async buildDownloadArchive(
     items: Array<Record<string, unknown>>,
   ) {
-    const zip = new AdmZip()
     const archivedItems: Array<Record<string, unknown>> = []
+    const files: Array<{ name: string, data: Buffer | string }> = []
 
     for (const item of items) {
       const downloadUrl = typeof item['downloadUrl'] === 'string' ? item['downloadUrl'] : ''
@@ -759,7 +818,10 @@ export class ContentMgmtService {
         }
 
         const arrayBuffer = await response.arrayBuffer()
-        zip.addFile(fileName, Buffer.from(arrayBuffer))
+        files.push({
+          name: fileName,
+          data: Buffer.from(arrayBuffer),
+        })
         archivedItems.push({
           ...item,
           archived: true,
@@ -782,14 +844,18 @@ export class ContentMgmtService {
       failureCount: archivedItems.filter(item => item['archived'] !== true).length,
       items: archivedItems,
     }
-    zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2)))
+    files.push({
+      name: 'manifest.json',
+      data: Buffer.from(JSON.stringify(manifest, null, 2)),
+    })
+    const archiveBuffer = await this.buildZipBuffer(files)
 
     return {
       format: 'zip',
       fileName: `content-download-${manifest.exportedAt}.zip`,
       mimeType: 'application/zip',
       encoding: 'base64',
-      data: zip.toBuffer().toString('base64'),
+      data: archiveBuffer.toString('base64'),
       total: archivedItems.length,
       successCount: manifest.successCount,
       failureCount: manifest.failureCount,
@@ -988,6 +1054,32 @@ export class ContentMgmtService {
     )
 
     return zip.toBuffer()
+  }
+
+  private async buildZipBuffer(files: Array<{ name: string, data: Buffer | string }>) {
+    const archive = createArchive('zip', {
+      zlib: { level: 9 },
+    })
+    const output = new PassThrough()
+    const chunks: Buffer[] = []
+
+    const completion = new Promise<Buffer>((resolve, reject) => {
+      output.on('data', chunk => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      })
+      output.on('end', () => resolve(Buffer.concat(chunks)))
+      output.on('error', reject)
+      archive.on('error', reject)
+    })
+
+    archive.pipe(output)
+
+    for (const file of files) {
+      archive.append(file.data, { name: file.name })
+    }
+
+    archive.finalize()
+    return completion
   }
 
   private escapeCsvValue(value: unknown) {

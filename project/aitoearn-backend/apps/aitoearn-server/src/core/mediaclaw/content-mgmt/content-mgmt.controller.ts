@@ -74,6 +74,16 @@ class BatchDownloadCompatDto {
   format?: 'links' | 'zip'
 }
 
+class BatchApproveDto {
+  @IsArray()
+  @IsString({ each: true })
+  ids: string[]
+
+  @IsOptional()
+  @IsString()
+  comment?: string
+}
+
 class BatchUpdateCompatDto {
   @IsArray()
   @IsString({ each: true })
@@ -269,6 +279,19 @@ export class ContentMgmtController {
       user.orgId || user.id || '',
       body.ids,
       body.format,
+    )
+  }
+
+  @Post('batch-approve')
+  async batchApprove(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: BatchApproveDto,
+  ) {
+    return this.contentMgmtService.batchApprove(
+      user.orgId || user.id || '',
+      body.ids,
+      user.id || '',
+      body.comment,
     )
   }
 

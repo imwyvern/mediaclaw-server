@@ -289,6 +289,44 @@ describe('contentMgmtService approval workflow', () => {
     )
   })
 
+  it('should batch approve content and aggregate failures', async () => {
+    const reviewerId = new Types.ObjectId().toString()
+    const firstId = new Types.ObjectId().toString()
+    const secondId = new Types.ObjectId().toString()
+    const approvedContent = {
+      id: firstId,
+      status: VideoTaskStatus.APPROVED,
+    }
+
+    const approveSpy = vi.spyOn(service, 'approveContent')
+      .mockResolvedValueOnce(approvedContent as any)
+      .mockRejectedValueOnce(new BadRequestException('Content is not pending review'))
+
+    const result = await service.batchApprove(
+      new Types.ObjectId().toString(),
+      [firstId, secondId],
+      reviewerId,
+      '批量通过',
+    )
+
+    expect(approveSpy).toHaveBeenNthCalledWith(1, expect.any(String), firstId, reviewerId, '批量通过')
+    expect(approveSpy).toHaveBeenNthCalledWith(2, expect.any(String), secondId, reviewerId, '批量通过')
+    expect(result.successCount).toBe(1)
+    expect(result.failureCount).toBe(1)
+    expect(result.items).toEqual([
+      {
+        id: firstId,
+        approved: true,
+        content: approvedContent,
+      },
+      {
+        id: secondId,
+        approved: false,
+        error: 'Content is not pending review',
+      },
+    ])
+  })
+
   it('should block publishing when content is still pending review', async () => {
     const task = createTask({
       status: VideoTaskStatus.PENDING_REVIEW,
