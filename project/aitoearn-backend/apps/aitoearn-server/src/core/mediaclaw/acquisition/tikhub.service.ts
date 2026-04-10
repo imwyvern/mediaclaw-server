@@ -68,6 +68,8 @@ export class TikHubService implements ContentProvider {
   private readonly logger = new Logger(TikHubService.name)
   private readonly defaultBaseUrl = 'https://api.tikhub.io'
   private readonly requestTimeoutMs = 5000
+  // Search endpoints are materially slower than detail/share-url endpoints in production.
+  private readonly searchRequestTimeoutMs = 12000
   private readonly maxAttempts = 2
   readonly providerName = 'tikhub'
   readonly priority = 10
@@ -75,7 +77,7 @@ export class TikHubService implements ContentProvider {
   /**
    * TikHub contract notes:
    * - All requests use `Authorization: Bearer ${TIKHUB_API_KEY}`.
-   * - Douyin search/detail endpoints align to the documented search and single-video APIs.
+   * - Douyin search/detail endpoints align to the documented search-v2 and single-video APIs.
    * - Xiaohongshu uses search-notes and video-note-detail endpoints.
    * - Kuaishou search/detail use the documented `search_video_v2` and single-video endpoints.
    * - Bilibili search/detail use the documented general-search and single-video endpoints.
@@ -107,7 +109,10 @@ export class TikHubService implements ContentProvider {
       }
     }
 
-    const response = await this.requestWithRetry<Record<string, unknown>>(contract.search)
+    const response = await this.requestWithRetry<Record<string, unknown>>(
+      contract.search,
+      this.resolveSearchTimeoutMs(),
+    )
     const items = this.parseSearchResponse(normalizedPlatform, response, safeLimit)
 
     return {
@@ -274,16 +279,19 @@ export class TikHubService implements ContentProvider {
       douyin: {
         search: {
           method: 'POST',
-          url: `${baseUrl}/api/v1/douyin/search/fetch_video_search_v4`,
+          url: `${baseUrl}/api/v1/douyin/search/fetch_video_search_v2`,
           headers,
           body: {
             keyword: params.keyword || '',
-            offset: 0,
-            page: 0,
+            cursor: 0,
+            sort_type: '0',
+            publish_time: '0',
+            filter_duration: '0',
+            content_type: '0',
             backtrace: '',
             search_id: '',
           },
-          note: 'Douyin video search V4 uses POST body with keyword and pagination cursor fields.',
+          note: 'Douyin video search V2 uses POST body with keyword, cursor, and search filters.',
         },
         detail: {
           method: 'GET',
@@ -308,20 +316,16 @@ export class TikHubService implements ContentProvider {
       xhs: {
         search: {
           method: 'GET',
-          url: `${baseUrl}/api/v1/xiaohongshu/app_v2/search_notes`,
+          url: `${baseUrl}/api/v1/xiaohongshu/web/search_notes`,
           headers,
           query: {
             keyword: params.keyword || '',
             page: 1,
-            sort_type: 'general',
-            note_type: '视频笔记',
-            time_filter: '不限',
-            search_id: '',
-            search_session_id: '',
-            source: 'explore_feed',
-            ai_mode: 0,
+            sort: 'general',
+            noteType: '_1',
+            noteTime: '',
           },
-          note: 'Xiaohongshu search is page-based and supports note-type and time filters.',
+          note: 'Xiaohongshu web search is page-based and supports sort, noteType, and noteTime filters.',
         },
         detail: {
           method: 'GET',
@@ -349,9 +353,9 @@ export class TikHubService implements ContentProvider {
           headers,
           query: {
             keyword: params.keyword || '',
-            pcursor: '',
+            page: 1,
           },
-          note: 'Kuaishou search V2 uses keyword plus cursor-based pagination.',
+          note: 'Kuaishou search V2 uses keyword plus page-based pagination.',
         },
         detail: {
           method: 'GET',
@@ -410,12 +414,15 @@ export class TikHubService implements ContentProvider {
     return contractMap[platform]
   }
 
-  private async requestWithRetry<T>(request: TikHubRequestContract): Promise<T> {
+  private async requestWithRetry<T>(
+    request: TikHubRequestContract,
+    timeoutMs = this.requestTimeoutMs,
+  ): Promise<T> {
     let lastError: Error | null = null
 
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       try {
-        return await this.executeRequest<T>(request)
+        return await this.executeRequest<T>(request, timeoutMs)
       }
       catch (error) {
         lastError = error instanceof Error ? error : new Error('Unknown TikHub request error')
@@ -430,9 +437,12 @@ export class TikHubService implements ContentProvider {
     throw lastError || new Error('TikHub request failed')
   }
 
-  private async executeRequest<T>(request: TikHubRequestContract): Promise<T> {
+  private async executeRequest<T>(
+    request: TikHubRequestContract,
+    timeoutMs = this.requestTimeoutMs,
+  ): Promise<T> {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
     const url = this.buildRequestUrl(request)
 
     try {
@@ -458,7 +468,7 @@ export class TikHubService implements ContentProvider {
     }
     catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`TikHub request timed out after ${this.requestTimeoutMs}ms: ${url}`)
+        throw new Error(`TikHub request timed out after ${timeoutMs}ms: ${url}`)
       }
 
       throw error
@@ -476,6 +486,10 @@ export class TikHubService implements ContentProvider {
     }
 
     return url.toString()
+  }
+
+  private resolveSearchTimeoutMs() {
+    return this.searchRequestTimeoutMs
   }
 
   private parseSearchResponse(
@@ -496,29 +510,43 @@ export class TikHubService implements ContentProvider {
   private parseDouyinSearchResponse(payload: Record<string, unknown>, limit: number) {
     const container = this.unwrapData(payload)
     const items = this.pickRecordList(
+      container?.['business_data'],
       container?.['data'],
       container?.['items'],
+      payload['business_data'],
       payload['data'],
       payload['items'],
     )
 
     return items.slice(0, limit).map((item) => {
-      const author = this.asRecord(item['author'])
-      const statistics = this.asRecord(item['statistics'])
-      const video = this.asRecord(item['video'])
+      const aweme = this.pickFirstRecord(
+        this.readNested(item, ['data', 'aweme_info']),
+        item['aweme_info'],
+        item,
+      ) || {}
+      const author = this.pickFirstRecord(aweme['author'], item['author'])
+      const statistics = this.pickFirstRecord(aweme['statistics'], item['statistics'])
+      const video = this.pickFirstRecord(aweme['video'], item['video'])
 
       return this.buildSearchSummary('douyin', {
-        videoId: this.readString(item['aweme_id'], item['id']),
-        title: this.readString(item['desc'], item['title']),
+        videoId: this.readString(aweme['aweme_id'], aweme['id'], item['aweme_id'], item['id']),
+        title: this.readString(aweme['desc'], aweme['title'], item['desc'], item['title']),
         author: this.readString(author?.['nickname'], author?.['name']),
-        contentUrl: this.readString(item['share_url'], item['aweme_url']),
+        contentUrl: this.readString(
+          aweme['share_url'],
+          aweme['aweme_url'],
+          item['share_url'],
+          item['aweme_url'],
+        ),
         thumbnailUrl: this.readImageUrl(
-          item['cover'],
-          item['dynamic_cover'],
           video?.['cover'],
           video?.['origin_cover'],
+          aweme['cover'],
+          aweme['dynamic_cover'],
+          item['cover'],
+          item['dynamic_cover'],
         ),
-        publishedAt: this.normalizeDate(item['create_time']),
+        publishedAt: this.normalizeDate(aweme['create_time'], item['create_time']),
         views: this.readNumber(statistics?.['play_count'], statistics?.['view_count']),
         likes: this.readNumber(statistics?.['digg_count'], statistics?.['like_count']),
         comments: this.readNumber(statistics?.['comment_count']),
