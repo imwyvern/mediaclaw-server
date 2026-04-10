@@ -5,6 +5,7 @@ import {
   Logger,
   NestInterceptor,
 } from '@nestjs/common'
+import { isMediaClawApiKey } from '@yikart/mongodb'
 import { Observable } from 'rxjs'
 import { finalize } from 'rxjs/operators'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
@@ -85,7 +86,7 @@ export class UsageTrackingInterceptor implements NestInterceptor {
   private resolveApiKey(request: UsageTrackingRequest) {
     const authorization = request.headers.authorization || ''
     const [scheme, token] = authorization.split(' ')
-    if (scheme === 'Bearer' && token?.startsWith('mc_live_')) {
+    if (scheme === 'Bearer' && isMediaClawApiKey(token)) {
       return token.slice(0, 16)
     }
 

@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import { JwtService } from '@nestjs/jwt'
-import { ApiKeyRepository, UserRepository, UserStatus } from '@yikart/mongodb'
+import { ApiKeyRepository, isMediaClawApiKey, UserRepository, UserStatus } from '@yikart/mongodb'
 import { AitoearnAuthConfig } from './aitoearn-auth.config'
 import { IS_PUBLIC_KEY } from './aitoearn-auth.constants'
 
@@ -47,7 +47,7 @@ export class AitoearnAuthGuard implements CanActivate {
       if (!this.isKeyUsable(record)) {
         throw new UnauthorizedException()
       }
-      if (apiKey.startsWith('mc_live_')) {
+      if (isMediaClawApiKey(apiKey)) {
         request['user'] = this.buildMediaClawUser(record)
         await this.apiKeyRepository.updateLastUsedAt(record.id)
         return true
@@ -74,7 +74,7 @@ export class AitoearnAuthGuard implements CanActivate {
       throw new UnauthorizedException()
     }
 
-    if (token.startsWith('mc_live_')) {
+    if (isMediaClawApiKey(token)) {
       const record = await this.apiKeyRepository.getByHashedKeys([this.hashKey(token)])
       if (!record || !this.isKeyUsable(record)) {
         throw new UnauthorizedException()

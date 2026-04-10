@@ -77,7 +77,7 @@ export class CompetitorController {
     )
   }
 
-  @Get(['industry-hot', 'trending'])
+  @Get('trending')
   @ApiOperation({ summary: '获取行业热点内容榜单' })
   @ApiQuery({ name: 'industry', required: true, description: '行业关键词' })
   @ApiQuery({ name: 'platform', required: false, description: '平台过滤' })

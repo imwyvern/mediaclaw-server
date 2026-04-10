@@ -33,11 +33,11 @@ class UploadAssetDto {
   metadata?: Record<string, unknown>
 }
 
-@MediaClawApiController(['api/v1/assets', 'api/v1/asset'])
+@MediaClawApiController('api/v1/assets')
 export class AssetController {
   constructor(private readonly assetService: AssetService) {}
 
-  @Post(['', 'upload'])
+  @Post()
   @UseInterceptors(FileInterceptor('file'))
   async uploadAsset(
     @GetToken() user: MediaClawAuthUser,

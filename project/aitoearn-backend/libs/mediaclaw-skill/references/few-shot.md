@@ -7,6 +7,7 @@ Goal: 初始化一个新的本地 agent，会接收投递、审核内容并拉�
 ```bash
 export MEDIACLAW_BASE_URL="https://api.mediaclaw.com"
 export MEDIACLAW_API_KEY="mc_live_xxx"
+# 或测试环境：export MEDIACLAW_API_KEY="mc_test_xxx"
 export MEDIACLAW_AGENT_ID="editor-mbp-01"
 export MEDIACLAW_AGENT_CAPABILITIES="delivery,review,analytics,pipeline,campaign"
 ./scripts/mc-api.sh register "$MEDIACLAW_AGENT_ID" delivery review analytics scheduling

@@ -68,7 +68,7 @@ class TestWebhookDto {
   payload?: Record<string, unknown>
 }
 
-@MediaClawApiController(['api/v1/webhook', 'api/v1/webhooks'])
+@MediaClawApiController('api/v1/webhooks')
 export class WebhookController {
   constructor(private readonly webhookService: WebhookService) {}
 

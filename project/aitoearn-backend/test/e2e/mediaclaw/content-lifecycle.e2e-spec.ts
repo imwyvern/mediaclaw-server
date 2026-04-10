@@ -89,7 +89,7 @@ describe('MediaClaw Content Lifecycle E2E', () => {
 
   it('应完成创建任务、查状态、读内容、改文案并标记发布', async () => {
     const createResponse = await client
-      .post('/api/v1/video')
+      .post('/api/v1/videos')
       .set('authorization', `Bearer ${testAccessToken}`)
       .send({
         taskType: VideoTaskType.REMIX,
@@ -109,7 +109,7 @@ describe('MediaClaw Content Lifecycle E2E', () => {
     )
 
     const taskResponse = await client
-      .get('/api/v1/video/507f1f77bcf86cd799439031')
+      .get('/api/v1/videos/507f1f77bcf86cd799439031')
       .set('authorization', `Bearer ${testAccessToken}`)
 
     expect(taskResponse.status).toBe(200)

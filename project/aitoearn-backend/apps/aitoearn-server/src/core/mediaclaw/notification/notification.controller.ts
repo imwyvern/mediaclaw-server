@@ -61,7 +61,7 @@ class UpdateNotificationConfigDto {
   isActive?: boolean
 }
 
-@MediaClawApiController(['api/v1/notifications', 'api/v1/notification'])
+@MediaClawApiController('api/v1/notifications')
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 

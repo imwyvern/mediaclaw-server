@@ -1,4 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common'
+import { isMediaClawApiKey } from '@yikart/mongodb'
 import { MediaClawApiKeyService } from './apikey.service'
 
 @Injectable()
@@ -15,7 +16,7 @@ export class MediaClawApiKeyGuard implements CanActivate {
     }
 
     const [type, token] = request.headers.authorization?.split(' ') ?? []
-    if (type !== 'Bearer' || !token?.startsWith('mc_live_')) {
+    if (type !== 'Bearer' || !isMediaClawApiKey(token)) {
       throw new UnauthorizedException('Missing MediaClaw API key')
     }
 

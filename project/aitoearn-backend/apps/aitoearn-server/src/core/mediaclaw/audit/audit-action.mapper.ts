@@ -194,9 +194,6 @@ function mapKnownRoute(
     method === 'POST'
     && (
       routePattern === '/api/v1/assets'
-      || routePattern === '/api/v1/assets/upload'
-      || routePattern === '/api/v1/asset'
-      || routePattern === '/api/v1/asset/upload'
     )
   ) {
     return {
@@ -216,7 +213,6 @@ function mapKnownRoute(
     method === 'PATCH'
     && (
       routePattern === '/api/v1/assets/:id/activate'
-      || routePattern === '/api/v1/asset/:id/activate'
     )
   ) {
     return {
@@ -232,7 +228,6 @@ function mapKnownRoute(
     method === 'DELETE'
     && (
       routePattern === '/api/v1/assets/:id'
-      || routePattern === '/api/v1/asset/:id'
     )
   ) {
     return {

@@ -29,7 +29,7 @@ class SetApiKeyDto {
   validateNow?: boolean
 }
 
-@MediaClawApiController(['api/v1/settings/api-keys', 'api/v1/settings/apikeys'])
+@MediaClawApiController('api/v1/settings/api-keys')
 export class SettingsController {
   constructor(private readonly byokService: ByokService) {}
 

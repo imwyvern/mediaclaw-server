@@ -127,16 +127,16 @@ class UpdateBrandAssetsDto {
   referenceImages?: string[]
 }
 
-@MediaClawApiController(['api/v1/brand', 'api/v1/brands'])
+@MediaClawApiController('api/v1/brand')
 export class BrandController {
   constructor(private readonly brandService: BrandService) {}
 
-  @Post(['', 'create'])
+  @Post()
   async create(@GetToken() user: MediaClawAuthUser, @Body() body: UpsertBrandDto) {
     return this.brandService.create(user.orgId || user.id, this.toBrandPayload(body))
   }
 
-  @Get(['', 'list'])
+  @Get()
   async list(@GetToken() user: MediaClawAuthUser) {
     return this.brandService.findByOrg(user.orgId || user.id)
   }

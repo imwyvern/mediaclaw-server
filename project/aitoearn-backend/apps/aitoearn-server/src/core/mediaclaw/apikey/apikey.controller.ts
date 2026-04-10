@@ -1,10 +1,11 @@
 import { Body, Delete, Get, Param, Post } from '@nestjs/common'
 import { GetToken } from '@yikart/aitoearn-auth'
-import { OrgApiKeyProvider } from '@yikart/mongodb'
+import { MEDIA_CLAW_API_KEY_ENVIRONMENTS, OrgApiKeyProvider } from '@yikart/mongodb'
 import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   MaxLength,
@@ -17,6 +18,10 @@ class CreateApiKeyDto {
   @IsString()
   @MaxLength(128)
   name: string
+
+  @IsOptional()
+  @IsIn(MEDIA_CLAW_API_KEY_ENVIRONMENTS)
+  environment?: 'live' | 'test'
 
   @IsOptional()
   @IsArray()
@@ -92,6 +97,7 @@ export class MediaClawApiKeyController {
       permissions: body.permissions || [],
       expiresAt: body.expiresAt || null,
       role: user.role || null,
+      environment: body.environment || 'live',
     })
   }
 

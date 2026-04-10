@@ -65,7 +65,7 @@
 ## 推荐环境变量
 
 - `MEDIACLAW_API_URL=https://mediaclawbot.com`
-- `MEDIACLAW_API_KEY=mc_live_xxx`
+- `MEDIACLAW_API_KEY=mc_live_xxx` 或 `MEDIACLAW_API_KEY=mc_test_xxx`
 - `MEDIACLAW_INDUSTRY=美妆`
 - `MEDIACLAW_BRAND=你的品牌名`
 - `MEDIACLAW_BRAND_ID=brand-id`

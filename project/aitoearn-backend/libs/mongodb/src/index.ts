@@ -1,3 +1,4 @@
+export * from './api-key-format'
 export * from './decorators/transactional.decorator'
 export * from './enums'
 export * from './mongodb.config'

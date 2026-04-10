@@ -1,7 +1,19 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { ApiKey, normalizeUserRole, OrgApiKeyProvider, UserRole } from '@yikart/mongodb'
+import {
+  ApiKey,
+  buildMediaClawApiKey,
+  buildMediaClawApiKeyPrefix,
+  extractMediaClawApiKeyPrefix,
+  isMediaClawApiKey,
+  maskMediaClawApiKeyPrefix,
+  MediaClawApiKeyEnvironment,
+  normalizeMediaClawApiKeyEnvironment,
+  normalizeUserRole,
+  OrgApiKeyProvider,
+  UserRole,
+} from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { ByokService } from '../settings/byok.service'
 
@@ -11,6 +23,7 @@ interface CreateApiKeyInput {
   permissions?: string[]
   expiresAt?: string | null
   role?: string | null
+  environment?: MediaClawApiKeyEnvironment | string | null
 }
 
 interface ValidateApiKeyInput {
@@ -51,7 +64,8 @@ export class MediaClawApiKeyService {
     }
 
     const secret = randomBytes(16).toString('hex')
-    const rawKey = `mc_live_${secret}`
+    const environment = normalizeMediaClawApiKeyEnvironment(input.environment)
+    const rawKey = buildMediaClawApiKey(secret, environment)
     const hashedKey = this.hashKey(rawKey)
     const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null
     const role = normalizeUserRole(input.role, UserRole.EMPLOYEE)
@@ -64,7 +78,7 @@ export class MediaClawApiKeyService {
       userId,
       orgId: this.toObjectId(input.orgId),
       key: hashedKey,
-      prefix: `mc_live_${secret.slice(0, 8)}`,
+      prefix: buildMediaClawApiKeyPrefix(secret, environment),
       name: input.name.trim(),
       permissions: input.permissions || [],
       role,
@@ -119,7 +133,7 @@ export class MediaClawApiKeyService {
     const rawKey = input.key?.trim()
     const prefix = input.prefix?.trim() || this.extractPrefix(rawKey)
 
-    if (rawKey?.startsWith('mc_live_')) {
+    if (isMediaClawApiKey(rawKey)) {
       const identity = await this.validate(rawKey)
       if (identity.id !== userId) {
         throw new UnauthorizedException('API key does not belong to current user')
@@ -146,7 +160,7 @@ export class MediaClawApiKeyService {
   }
 
   async validate(rawKey: string) {
-    if (!rawKey.startsWith('mc_live_')) {
+    if (!isMediaClawApiKey(rawKey)) {
       throw new UnauthorizedException('Unsupported API key format')
     }
 
@@ -221,12 +235,7 @@ export class MediaClawApiKeyService {
   }
 
   private extractPrefix(rawKey?: string) {
-    if (!rawKey) {
-      return undefined
-    }
-
-    const match = rawKey.match(/^(mc_live_[a-z0-9]{8})/i)
-    return match?.[1]
+    return extractMediaClawApiKeyPrefix(rawKey)
   }
 
   private buildValidationResult(record: ApiKey | null) {
@@ -284,7 +293,6 @@ export class MediaClawApiKeyService {
   }
 
   private maskKey(prefix?: string | null) {
-    const suffix = prefix?.slice(-4) || '****'
-    return `mc_live_************************${suffix}`
+    return maskMediaClawApiKeyPrefix(prefix)
   }
 }

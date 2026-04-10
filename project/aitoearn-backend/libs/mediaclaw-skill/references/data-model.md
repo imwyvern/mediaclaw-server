@@ -2,7 +2,7 @@
 
 ## Environment Contract
 
-- `MEDIACLAW_API_KEY`: required bearer token for all API calls
+- `MEDIACLAW_API_KEY`: required bearer token for all API calls, format `mc_live_xxx` or `mc_test_xxx`
 - `MEDIACLAW_BASE_URL`: optional API origin, defaults to `https://api.mediaclaw.com`
 - `MEDIACLAW_AGENT_ID`: optional agent id for skill registration, capability discovery, heartbeat, delivery polling, and feedback submission
 - `MEDIACLAW_CLIENT_VERSION`: optional version string reported by `heartbeat`
@@ -54,6 +54,16 @@
 - `POST /api/v1/tasks/:id/retry`
 - `GET /api/v1/tasks/timeline/:id`
 
+### Video Production
+
+- `POST /api/v1/videos`
+- `GET /api/v1/videos`
+- `GET /api/v1/videos/:id`
+- `PATCH /api/v1/videos/:id/copy`
+- `PATCH /api/v1/videos/:id/publish`
+- `POST /api/v1/videos/batch`
+- `GET /api/v1/videos/batch/:id`
+
 ### Brand, Pipeline, Campaign
 
 - `GET /api/v1/brand`
@@ -72,6 +82,25 @@
 - `GET /api/v1/campaigns/:id/videos`
 - `PATCH /api/v1/campaigns/:id`
 - `DELETE /api/v1/campaigns/:id`
+
+### Webhooks, Notifications, API Keys
+
+- `GET /api/v1/webhooks`
+- `POST /api/v1/webhooks`
+- `PATCH /api/v1/webhooks/:id`
+- `DELETE /api/v1/webhooks/:id`
+- `GET /api/v1/notifications`
+- `POST /api/v1/notifications`
+- `PATCH /api/v1/notifications/:id`
+- `DELETE /api/v1/notifications/:id`
+- `GET /api/v1/settings/api-keys`
+- `POST /api/v1/settings/api-keys`
+- `DELETE /api/v1/settings/api-keys/:provider`
+- `POST /api/v1/settings/api-keys/:provider/validate`
+- `GET /api/v1/apikey`
+- `POST /api/v1/apikey`
+- `POST /api/v1/apikey/validate`
+- `DELETE /api/v1/apikey/:id`
 
 ## Enum Contract
 

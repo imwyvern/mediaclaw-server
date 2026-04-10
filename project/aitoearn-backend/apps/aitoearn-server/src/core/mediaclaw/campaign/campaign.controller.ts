@@ -31,16 +31,16 @@ class UpdateCampaignStatusDto {
 
 class UpdateCampaignDto extends CreateCampaignDto {}
 
-@MediaClawApiController(['api/v1/campaign', 'api/v1/campaigns'])
+@MediaClawApiController('api/v1/campaigns')
 export class CampaignController {
   constructor(private readonly campaignService: CampaignService) {}
 
-  @Post(['', 'create'])
+  @Post()
   async create(@GetToken() user: MediaClawAuthUser, @Body() body: CreateCampaignDto) {
     return this.campaignService.create(user.orgId || user.id, this.toCampaignPayload(body))
   }
 
-  @Get(['', 'list'])
+  @Get()
   async list(
     @GetToken() user: MediaClawAuthUser,
     @Query('status') status?: CampaignStatus,

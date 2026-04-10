@@ -195,8 +195,8 @@ describe('MediaClaw API Smoke E2E', () => {
     )
   })
 
-  it('POST /api/v1/pipeline should create pipeline', async () => {
-    const response = await request('/api/v1/pipeline', {
+  it('POST /api/v1/pipelines should create pipeline', async () => {
+    const response = await request('/api/v1/pipelines', {
       method: 'POST',
       body: JSON.stringify({
         brandId: '507f1f77bcf86cd799439012',

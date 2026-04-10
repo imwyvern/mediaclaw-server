@@ -20,7 +20,7 @@ import {
 } from './pipeline.dto'
 import { PipelineService } from './pipeline.service'
 
-@MediaClawApiController(['api/v1/pipeline', 'api/v1/pipelines'])
+@MediaClawApiController('api/v1/pipelines')
 export class PipelineController {
   constructor(private readonly pipelineService: PipelineService) {}
 

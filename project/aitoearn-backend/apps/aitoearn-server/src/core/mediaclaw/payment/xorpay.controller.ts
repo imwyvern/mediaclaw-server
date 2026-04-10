@@ -82,7 +82,7 @@ export class XorPayController {
     })
   }
 
-  @Post(['callback', 'notify'])
+  @Post('callback')
   @Public()
   @ApiOperation({ summary: '接收 XorPay 支付回调' })
   @ApiBody({

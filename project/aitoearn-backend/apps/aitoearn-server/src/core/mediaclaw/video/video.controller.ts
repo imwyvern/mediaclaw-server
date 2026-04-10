@@ -92,7 +92,7 @@ class VideoCopyUpdateDto {
   commentGuide?: string
 }
 
-@MediaClawApiController(['api/v1/video', 'api/v1/videos'])
+@MediaClawApiController('api/v1/videos')
 export class VideoController {
   constructor(private readonly videoService: VideoService) {}
 
@@ -101,12 +101,12 @@ export class VideoController {
     return this.videoService.createTask(user.orgId || user.id, user.id, body)
   }
 
-  @Post(['batch', 'batches'])
+  @Post('batch')
   async createBatch(@GetToken() user: MediaClawAuthUser, @Body() body: CreateVideoBatchDto) {
     return this.videoService.createBatch(user.orgId || user.id, user.id, body)
   }
 
-  @Get(['batch/:id', 'batches/:id'])
+  @Get('batch/:id')
   async getBatchStatus(@GetToken() user: MediaClawAuthUser, @Param('id') id: string) {
     return this.videoService.getBatchStatus(user.orgId || user.id, id)
   }
