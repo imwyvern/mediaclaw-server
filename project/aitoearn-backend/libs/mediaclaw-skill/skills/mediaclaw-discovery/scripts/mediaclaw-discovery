@@ -22,6 +22,23 @@ require_command() {
 
 require_command curl
 
+urlencode_component() {
+  local value="$1"
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$value"
+    return 0
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$value" | jq -sRr @uri
+    return 0
+  fi
+
+  echo "缺少依赖命令: python3 或 jq" >&2
+  exit 1
+}
+
 api_get() {
   local path="$1"
   curl -fsS "${MEDIACLAW_API_URL}${path}" \
@@ -85,7 +102,7 @@ render_pool() {
 
   local summary
   summary="$(printf '%s\n' "$response" | jq -r '
-    .items // []
+    .data.items // .items // []
     | if length == 0 then
         "暂时没有可展示的爆款数据。"
       else
@@ -93,7 +110,7 @@ render_pool() {
         | map(
             "🔥 \(.key + 1). \(.value.title // "未命名内容") [" + (.value.platform // "unknown") + "]\n" +
             "   Viral Score: \((.value.viralScore // 0) | tostring)\n" +
-            "   播放: \((.value.views // 0) | tostring) | 点赞: \((.value.likes // 0) | tostring) | 评论: \((.value.comments // 0) | tostring) | 分享: \((.value.shares // 0) | tostring)\n" +
+            "   播放: \((.value.metrics.views // .value.views // 0) | tostring) | 点赞: \((.value.metrics.likes // .value.likes // 0) | tostring) | 评论: \((.value.metrics.comments // .value.comments // 0) | tostring) | 分享: \((.value.metrics.shares // .value.shares // 0) | tostring)\n" +
             "   链接: \(.value.contentUrl // .value.videoUrl // "-")"
           )
         | join("\n")
@@ -112,15 +129,23 @@ render_trending() {
   fi
 
   printf '%s\n' "$response" | jq -r '
-    if type == "array" then . else (.items // .data // []) end
-    | if length == 0 then
+    (
+      if type == "array" then .
+      elif (.data.items? | type) == "array" then .data.items
+      elif (.items? | type) == "array" then .items
+      elif (.data? | type) == "array" then .data
+      else []
+      end
+    ) as $items
+    | if ($items | length) == 0 then
         "暂时没有可展示的趋势数据。"
       else
-        to_entries
+        $items
+        | to_entries
         | map(
             "📈 \(.key + 1). \(.value.title // .value.topic // "未命名趋势")\n" +
             "   平台: \(.value.platform // "-") | Viral Score: \((.value.viralScore // 0) | tostring)\n" +
-            "   指标: 播放 \((.value.views // 0) | tostring), 点赞 \((.value.likes // 0) | tostring), 评论 \((.value.comments // 0) | tostring)"
+            "   指标: 播放 \((.value.metrics.views // .value.views // 0) | tostring), 点赞 \((.value.metrics.likes // .value.likes // 0) | tostring), 评论 \((.value.metrics.comments // .value.comments // 0) | tostring)"
           )
         | join("\n")
       end
@@ -136,10 +161,11 @@ render_recipe() {
   fi
 
   printf '%s\n' "$response" | jq -r '
-    .recipe as $recipe
+    (.data // .) as $data
+    | $data.recipe as $recipe
     | [
         "🧬 Video Recipe",
-        "链接: " + (.videoUrl // "-"),
+        "链接: " + ($data.videoUrl // "-"),
         "核心角度: " + ($recipe.coreAngle // "-"),
         "开场钩子: " + ($recipe.openingHook // "-"),
         "结构: " + (($recipe.structure.beats // []) | join(" / ")),
@@ -161,27 +187,33 @@ render_brief() {
   fi
 
   printf '%s\n' "$response" | jq -r '
-    [
+    (.data // .) as $data
+    | [
       "💡 Remix Brief",
-      "标题: " + (.briefTitle // "-"),
-      "核心角度: " + (.coreAngle // "-"),
-      "受众: " + (.targetAudience // "-"),
-      "开场钩子: " + (.openingHook // "-"),
-      "场景计划: " + ((.scenePlan // []) | join("；")),
-      "文案方向: " + ((.copyIdeas // []) | join("；")),
-      "品牌安全: " + ((.brandSafetyNotes // []) | join("；")),
-      "制作建议: " + ((.productionNotes // []) | join("；"))
+      "标题: " + ($data.briefTitle // "-"),
+      "核心角度: " + ($data.coreAngle // "-"),
+      "受众: " + ($data.targetAudience // "-"),
+      "开场钩子: " + ($data.openingHook // "-"),
+      "场景计划: " + (($data.scenePlan // []) | join("；")),
+      "文案方向: " + (($data.copyIdeas // []) | join("；")),
+      "品牌安全: " + (($data.brandSafetyNotes // []) | join("；")),
+      "制作建议: " + (($data.productionNotes // []) | join("；"))
     ] | join("\n")
   '
 }
 
 INDUSTRY="$(detect_industry)"
+INDUSTRY_ENCODED=""
+if [[ -n "${INDUSTRY}" ]]; then
+  INDUSTRY_ENCODED="$(urlencode_component "${INDUSTRY}")"
+fi
+
 URL="$(extract_url)"
 
 if printf '%s\n' "$INPUT" | grep -qiE '爆款|热门|推荐|trending|viral|hot'; then
   PARAMS="limit=5"
-  if [[ -n "${INDUSTRY}" ]]; then
-    PARAMS="${PARAMS}&industry=${INDUSTRY}"
+  if [[ -n "${INDUSTRY_ENCODED}" ]]; then
+    PARAMS="${PARAMS}&industry=${INDUSTRY_ENCODED}"
   fi
 
   RESPONSE="$(api_get "/api/v1/discovery/pool?${PARAMS}")"
@@ -201,7 +233,7 @@ if printf '%s\n' "$INPUT" | grep -qiE '趋势|trend|行业|话题'; then
     exit 0
   fi
 
-  RESPONSE="$(api_get "/api/v1/competitors/trending?industry=${INDUSTRY}")"
+  RESPONSE="$(api_get "/api/v1/competitors/trending?industry=${INDUSTRY_ENCODED}")"
   render_trending "$RESPONSE"
   exit 0
 fi
@@ -226,7 +258,7 @@ if printf '%s\n' "$INPUT" | grep -qiE '混剪|灵感|brief|创意'; then
   ANALYSIS="$(api_post "/api/v1/discovery/remix-analyze" "{\"videoUrl\":\"${URL}\"}")"
 
   if [[ -n "${MEDIACLAW_BRAND_ID}" ]] && command -v jq >/dev/null 2>&1; then
-    CONTENT_ID="$(printf '%s\n' "$ANALYSIS" | jq -r '.contentId // empty')"
+    CONTENT_ID="$(printf '%s\n' "$ANALYSIS" | jq -r '.data.contentId // .contentId // empty')"
     if [[ -n "${CONTENT_ID}" ]]; then
       BRIEF="$(api_post "/api/v1/discovery/generate-remix-brief" "{\"contentId\":\"${CONTENT_ID}\",\"brandId\":\"${MEDIACLAW_BRAND_ID}\"}")"
       render_brief "$BRIEF"
