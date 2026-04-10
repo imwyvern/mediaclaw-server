@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
@@ -15,82 +16,101 @@ import { EnterpriseAuthService } from './enterprise-auth.service'
 
 class SendSmsDto {
   @IsString()
+  @MaxLength(32)
   phone: string
 }
 
 class VerifySmsDto {
   @IsString()
+  @MaxLength(32)
   phone: string
 
   @IsString()
+  @MaxLength(32)
   code: string
 }
 
 class WechatCallbackDto {
   @IsString()
+  @MaxLength(512)
   code: string
 }
 
 class RefreshTokenDto {
   @IsString()
+  @MaxLength(4096)
   refreshToken: string
 }
 
 class CompatLoginDto {
   @IsOptional()
   @IsString()
+  @MaxLength(32)
   type?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   phone?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(32)
   code?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(256)
   email?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(128)
   password?: string
 }
 
 class CompatRegisterDto {
   @IsString()
+  @MaxLength(128)
   account: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(128)
   password?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(128)
   company?: string
 }
 
 class RegisterEnterpriseDto {
   @IsString()
+  @MaxLength(128)
   orgName: string
 
   @IsString()
+  @MaxLength(32)
   adminPhone: string
 
   @IsString()
+  @MaxLength(32)
   code: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   adminName?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(256)
   contactEmail?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   contactName?: string
 
   @IsOptional()
@@ -100,39 +120,48 @@ class RegisterEnterpriseDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(128)
   companyName?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
   businessLicenseUrl?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   unifiedSocialCreditCode?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   legalRepresentative?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(256)
   registeredAddress?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   industry?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
   officialWebsite?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   description?: string
 }
 
 class InviteEnterpriseMemberDto {
   @IsString()
+  @MaxLength(32)
   phone: string
 
   @IsEnum(UserRole)
@@ -141,17 +170,21 @@ class InviteEnterpriseMemberDto {
 
 class AcceptInviteDto {
   @IsString()
+  @MaxLength(2048)
   token: string
 
   @IsString()
+  @MaxLength(32)
   phone: string
 
   @IsString()
+  @MaxLength(32)
   code: string
 }
 
 class SwitchOrgDto {
   @IsString()
+  @MaxLength(64)
   orgId: string
 }
 

@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
@@ -14,25 +15,30 @@ import { MediaClawApiKeyService } from './apikey.service'
 
 class CreateApiKeyDto {
   @IsString()
+  @MaxLength(128)
   name: string
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   permissions?: string[]
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   expiresAt?: string | null
 }
 
 class ValidateApiKeyDto {
   @IsOptional()
   @IsString()
+  @MaxLength(512)
   key?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
   prefix?: string
 }
 
@@ -42,10 +48,12 @@ class UpsertByokDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(4096)
   key?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(4096)
   apiKey?: string
 
   @IsOptional()
@@ -56,10 +64,12 @@ class UpsertByokDto {
 class RotateByokDto {
   @IsOptional()
   @IsString()
+  @MaxLength(4096)
   key?: string
 
   @IsOptional()
   @IsString()
+  @MaxLength(4096)
   apiKey?: string
 
   @IsOptional()

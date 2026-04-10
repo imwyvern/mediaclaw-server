@@ -25,6 +25,19 @@ interface UpsertByokInput {
   validateNow?: boolean
 }
 
+interface ListedApiKeyRecord {
+  id: string
+  name: string
+  prefix: string
+  maskedKey: string
+  permissions: string[]
+  role: string
+  lastUsedAt: Date | null
+  expiresAt: Date | null
+  isActive: boolean
+  createdAt: Date
+}
+
 @Injectable()
 export class MediaClawApiKeyService {
   constructor(
@@ -75,12 +88,14 @@ export class MediaClawApiKeyService {
   }
 
   async list(userId: string) {
-    return this.apiKeyModel.find({
+    const records = await this.apiKeyModel.find({
       userId,
       isActive: true,
     })
       .sort({ createdAt: -1 })
       .exec()
+
+    return records.map(record => this.toListedRecord(record))
   }
 
   async revoke(id: string, userId: string) {
@@ -249,5 +264,27 @@ export class MediaClawApiKeyService {
       return null
     }
     return new Types.ObjectId(value)
+  }
+
+  private toListedRecord(record: ApiKey): ListedApiKeyRecord {
+    const id = record.id || (record as ApiKey & { _id?: { toString: () => string } })._id?.toString() || ''
+
+    return {
+      id,
+      name: record.name,
+      prefix: record.prefix,
+      maskedKey: this.maskKey(record.prefix),
+      permissions: record.permissions || [],
+      role: normalizeUserRole(record.role, UserRole.EMPLOYEE),
+      lastUsedAt: record.lastUsedAt,
+      expiresAt: record.expiresAt,
+      isActive: record.isActive,
+      createdAt: record.createdAt,
+    }
+  }
+
+  private maskKey(prefix?: string | null) {
+    const suffix = prefix?.slice(-4) || '****'
+    return `mc_live_************************${suffix}`
   }
 }
