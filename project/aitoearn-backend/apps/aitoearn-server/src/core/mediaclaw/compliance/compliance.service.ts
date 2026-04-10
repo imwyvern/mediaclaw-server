@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto'
 import {
   BadRequestException,
   Injectable,
@@ -52,6 +53,8 @@ interface ComplianceDeletionRequestRecord {
   requesterPhone?: string
   evidenceUrls?: string[]
   source?: string
+  publicTrackingTokenHash?: string
+  publicTrackingTokenPreview?: string
   matchedVideoTaskIds?: unknown[]
   submittedAt?: Date | null
   reviewedBy?: string | null
@@ -132,6 +135,7 @@ export class ComplianceService {
     }
 
     const matchedTasks = await this.findMatchedVideoTasks(contentUrl, platformPostUrl)
+    const publicTrackingToken = this.generatePublicTrackingToken()
     const created = await this.complianceDeletionRequestModel.create({
       status: ComplianceDeletionRequestStatus.PENDING,
       contentUrl,
@@ -143,6 +147,8 @@ export class ComplianceService {
       requesterPhone: this.normalizeOptionalString(input.requesterPhone),
       evidenceUrls: this.normalizeStringArray(input.evidenceUrls),
       source: this.normalizeOptionalString(input.source) || 'public_api',
+      publicTrackingTokenHash: this.hashPublicTrackingToken(publicTrackingToken),
+      publicTrackingTokenPreview: this.maskPublicTrackingToken(publicTrackingToken),
       matchedVideoTaskIds: matchedTasks.map(task => this.toObjectId(this.stringifyId(task._id), 'matchedVideoTaskId')),
       submittedAt: new Date(),
       metadata: {
@@ -151,7 +157,12 @@ export class ComplianceService {
       },
     })
 
-    return this.toResponse(created.toObject() as ComplianceDeletionRequestRecord)
+    return this.toResponse(
+      created.toObject() as ComplianceDeletionRequestRecord,
+      {
+        includePublicTrackingToken: publicTrackingToken,
+      },
+    )
   }
 
   async listRequests(query: ListComplianceDeletionRequestQuery) {
@@ -307,6 +318,35 @@ export class ComplianceService {
     }
 
     return this.executeApprovedRequest(approved as ComplianceDeletionRequestRecord, actorId, matchedTasks)
+  }
+
+  async getPublicRequestStatus(requestId: string, token: string) {
+    const normalizedToken = this.normalizeRequiredString(token, 'token')
+    const request = await this.findRequestOrFail(requestId)
+    const storedHash = this.normalizeOptionalString(request.publicTrackingTokenHash)
+    if (!storedHash || storedHash !== this.hashPublicTrackingToken(normalizedToken)) {
+      throw new BadRequestException('Invalid public tracking token')
+    }
+
+    return {
+      requestId: request.requestId,
+      status: request.status,
+      contentUrl: this.normalizeOptionalString(request.contentUrl),
+      platformPostUrl: this.normalizeOptionalString(request.platformPostUrl),
+      reason: request.reason,
+      description: this.normalizeOptionalString(request.description),
+      requesterName: this.maskPublicName(request.requesterName),
+      evidenceCount: this.normalizeStringArray(request.evidenceUrls).length,
+      submittedAt: request.submittedAt || null,
+      reviewedAt: request.reviewedAt || null,
+      executedAt: request.executedAt || null,
+      reviewComment: this.normalizeOptionalString(request.reviewComment),
+      executionError: this.normalizeOptionalString(request.executionError),
+      executionResult: request.executionResult || null,
+      tracking: {
+        preview: this.normalizeOptionalString(request.publicTrackingTokenPreview),
+      },
+    }
   }
 
   private async executeApprovedRequest(
@@ -629,8 +669,13 @@ export class ComplianceService {
     return request as ComplianceDeletionRequestRecord
   }
 
-  private toResponse(record: ComplianceDeletionRequestRecord) {
-    return {
+  private toResponse(
+    record: ComplianceDeletionRequestRecord,
+    options: {
+      includePublicTrackingToken?: string
+    } = {},
+  ) {
+    const response = {
       id: this.stringifyId(record._id),
       requestId: record.requestId,
       status: record.status,
@@ -655,7 +700,13 @@ export class ComplianceService {
       metadata: record.metadata || {},
       createdAt: record.createdAt || null,
       updatedAt: record.updatedAt || null,
+      tracking: {
+        preview: this.normalizeOptionalString(record.publicTrackingTokenPreview),
+        token: options.includePublicTrackingToken || undefined,
+      },
     }
+
+    return response
   }
 
   private normalizeRequiredString(value: string | undefined, field: string) {
@@ -680,6 +731,34 @@ export class ComplianceService {
 
   private escapeRegex(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  private generatePublicTrackingToken() {
+    return `cdr_${randomBytes(18).toString('hex')}`
+  }
+
+  private hashPublicTrackingToken(token: string) {
+    return createHash('sha256')
+      .update(this.normalizeRequiredString(token, 'token'))
+      .digest('hex')
+  }
+
+  private maskPublicTrackingToken(token: string) {
+    const normalized = this.normalizeRequiredString(token, 'token')
+    return `${normalized.slice(0, 8)}***${normalized.slice(-4)}`
+  }
+
+  private maskPublicName(name?: string | null) {
+    const normalized = this.normalizeOptionalString(name)
+    if (!normalized) {
+      return ''
+    }
+
+    if (normalized.length <= 2) {
+      return `${normalized.slice(0, 1)}*`
+    }
+
+    return `${normalized.slice(0, 1)}${'*'.repeat(Math.max(1, normalized.length - 2))}${normalized.slice(-1)}`
   }
 
   private stringifyId(value: unknown) {

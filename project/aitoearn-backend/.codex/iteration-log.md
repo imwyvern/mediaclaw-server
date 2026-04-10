@@ -49,3 +49,12 @@
   - `pnpm nx lint aitoearn-server` 通过，无新增 warning
   - `pnpm nx test aitoearn-server -- --run` 通过，`111` 个测试文件、`356` 个测试全部通过
 - 下一步计划：Batch 1 后端补完已满足停止条件，整理本批次提交与剩余无关工作树残留，等待进入下一批 gap 收口。
+
+## 2026-04-10 11:20:45 PDT
+- 当前改动：补完公开数据删除/合规下线通道的对外追踪闭环。删除申请新增公开 tracking token、公开状态查询接口 `GET /api/v1/compliance/deletion-requests/:requestId/public-status`，并补 `ComplianceService` 行为测试覆盖 token 签发与公开状态查询。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/compliance/compliance.service.spec.ts` 首轮失败，定位为 spec 触发 `@yikart/assets -> ../../../config -> @yikart/channel-db` 运行时依赖链
+  - 在 spec 中补齐 `@yikart/mongodb`、`@yikart/assets` 和 `../../../config` mock 后，`pnpm nx test aitoearn-server -- --run src/core/mediaclaw/compliance/compliance.service.spec.ts` 通过
+- 下一步计划：进入趋势预测引擎，把 discovery/analytics 的历史数据补成可查询的趋势预测结果与对应 API。

@@ -55,6 +55,12 @@ export class ComplianceDeletionRequest extends WithTimestampSchema {
   @Prop({ type: String, default: 'public_api' })
   source: string
 
+  @Prop({ type: String, default: '' })
+  publicTrackingTokenHash: string
+
+  @Prop({ type: String, default: '' })
+  publicTrackingTokenPreview: string
+
   @Prop({ type: [MongooseSchema.Types.ObjectId], default: [] })
   matchedVideoTaskIds: MongooseSchema.Types.ObjectId[]
 
@@ -91,3 +97,4 @@ ComplianceDeletionRequestSchema.index({ status: 1, createdAt: -1 })
 ComplianceDeletionRequestSchema.index({ requesterEmail: 1, createdAt: -1 })
 ComplianceDeletionRequestSchema.index({ contentUrl: 1, status: 1, createdAt: -1 })
 ComplianceDeletionRequestSchema.index({ platformPostUrl: 1, status: 1, createdAt: -1 })
+ComplianceDeletionRequestSchema.index({ requestId: 1, publicTrackingTokenHash: 1 })

@@ -100,6 +100,12 @@ class ReviewComplianceDeletionRequestDto {
   comment?: string
 }
 
+class GetComplianceDeletionRequestPublicStatusQueryDto {
+  @IsString()
+  @MaxLength(256)
+  token: string
+}
+
 @MediaClawApiController('api/v1/compliance')
 export class ComplianceController {
   constructor(private readonly complianceService: ComplianceService) {}
@@ -108,6 +114,15 @@ export class ComplianceController {
   @Post('deletion-request')
   async createDeletionRequest(@Body() body: CreateComplianceDeletionRequestDto) {
     return this.complianceService.createRequest(body)
+  }
+
+  @Public()
+  @Get('deletion-requests/:requestId/public-status')
+  async getDeletionRequestPublicStatus(
+    @Param('requestId') requestId: string,
+    @Query() query: GetComplianceDeletionRequestPublicStatusQueryDto,
+  ) {
+    return this.complianceService.getPublicRequestStatus(requestId, query.token)
   }
 
   @Roles(UserRole.SUPER_ADMIN)
