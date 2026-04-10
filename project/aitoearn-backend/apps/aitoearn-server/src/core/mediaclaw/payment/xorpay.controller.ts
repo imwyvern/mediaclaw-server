@@ -27,8 +27,12 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PaymentCreateThrottleGuard } from './payment-create-throttle.guard'
 import {
   CreatePaymentOrderDto,
+  CreateRefundRequestDto,
+  ListRefundRequestQueryDto,
+  ReviewRefundRequestDto,
   XorPayCallbackDto,
 } from './payment.dto'
+import { RefundRequestService } from './refund-request.service'
 import { XorPayService } from './xorpay.service'
 
 interface AuthenticatedPaymentUser {
@@ -39,7 +43,10 @@ interface AuthenticatedPaymentUser {
 
 @MediaClawApiController('api/v1/payment')
 export class XorPayController {
-  constructor(private readonly xorPayService: XorPayService) {}
+  constructor(
+    private readonly xorPayService: XorPayService,
+    private readonly refundRequestService: RefundRequestService,
+  ) {}
 
   @Get('products')
   @Public()
@@ -150,6 +157,36 @@ export class XorPayController {
         limit: this.parsePositiveInt(limit, 20),
       },
     )
+  }
+
+  @Post('refund-request')
+  @ApiOperation({ summary: '创建退款申请' })
+  @ApiBody({ type: CreateRefundRequestDto })
+  async createRefundRequest(
+    @GetToken() user: AuthenticatedPaymentUser,
+    @Body() body: CreateRefundRequestDto,
+  ) {
+    return this.refundRequestService.create(user, body)
+  }
+
+  @Get('refund-request')
+  @ApiOperation({ summary: '查询退款申请列表' })
+  async listRefundRequests(
+    @GetToken() user: AuthenticatedPaymentUser,
+    @Query() query: ListRefundRequestQueryDto,
+  ) {
+    return this.refundRequestService.list(user, query)
+  }
+
+  @Post('refund-request/:id/review')
+  @ApiOperation({ summary: '管理员审核并执行退款' })
+  @ApiBody({ type: ReviewRefundRequestDto })
+  async reviewRefundRequest(
+    @GetToken() user: AuthenticatedPaymentUser,
+    @Param('id') id: string,
+    @Body() body: ReviewRefundRequestDto,
+  ) {
+    return this.refundRequestService.review(user, id, body)
   }
 
   private parsePositiveInt(rawValue: string | undefined, fallback: number) {

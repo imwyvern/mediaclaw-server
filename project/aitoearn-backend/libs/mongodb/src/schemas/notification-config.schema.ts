@@ -27,6 +27,9 @@ export enum NotificationEvent {
   ASSET_VERSION_UPLOADED = 'asset.version_uploaded',
   ASSET_VERSION_ACTIVATED = 'asset.version_activated',
   ASSET_VERSION_DELETED = 'asset.version_deleted',
+  PAYMENT_REFUND_REQUESTED = 'payment.refund_requested',
+  PAYMENT_REFUND_REJECTED = 'payment.refund_rejected',
+  PAYMENT_REFUNDED = 'payment.refunded',
 }
 
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'notification_configs' })

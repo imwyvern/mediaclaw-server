@@ -584,6 +584,39 @@ export class NotificationService {
           relatedId,
         }
       }
+      case NotificationEvent.PAYMENT_REFUND_REQUESTED: {
+        const orderId = this.pickPayloadString(payload, ['orderId'])
+        const amount = this.pickPayloadString(payload, ['amount'])
+        const currency = this.pickPayloadString(payload, ['currency'])
+        const reason = this.pickPayloadString(payload, ['reason'])
+        return {
+          type: NotificationType.TaskSubmitted,
+          title: '退款申请待处理',
+          content: `订单 ${orderId || this.describeRelatedId(relatedId)} 已提交退款申请，金额 ${amount || '--'} ${currency || 'CNY'}${reason ? `，原因：${reason}` : ''}。`,
+          relatedId,
+        }
+      }
+      case NotificationEvent.PAYMENT_REFUND_REJECTED: {
+        const orderId = this.pickPayloadString(payload, ['orderId'])
+        const comment = this.pickPayloadString(payload, ['reviewComment'])
+        return {
+          type: NotificationType.TaskReviewRejected,
+          title: '退款申请未通过',
+          content: `订单 ${orderId || this.describeRelatedId(relatedId)} 的退款申请未通过${comment ? `：${comment}` : '。'}`,
+          relatedId,
+        }
+      }
+      case NotificationEvent.PAYMENT_REFUNDED: {
+        const orderId = this.pickPayloadString(payload, ['orderId'])
+        const amount = this.pickPayloadString(payload, ['amount'])
+        const currency = this.pickPayloadString(payload, ['currency'])
+        return {
+          type: NotificationType.TaskSettled,
+          title: '退款已完成',
+          content: `订单 ${orderId || this.describeRelatedId(relatedId)} 已完成退款，金额 ${amount || '--'} ${currency || 'CNY'}。`,
+          relatedId,
+        }
+      }
       case NotificationEvent.TOKEN_QUOTA_WARNING: {
         const usageRate = this.pickPayloadString(payload, ['usageRate'])
         const usedTokens = this.pickPayloadString(payload, ['usedTokens'])

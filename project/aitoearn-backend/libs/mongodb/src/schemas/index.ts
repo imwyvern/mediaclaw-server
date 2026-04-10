@@ -111,6 +111,7 @@ import {
 } from "./publish-day-info.schema";
 import { PublishInfo, PublishInfoSchema } from "./publish-info.schema";
 import { PublishRecord, PublishRecordSchema } from "./publish-record.schema";
+import { RefundRequest, RefundRequestSchema } from "./refund-request.schema";
 import {
   QrCodeArtImage,
   QrCodeArtImageSchema,
@@ -186,6 +187,7 @@ export * from "./publish-info.schema";
 export * from "./publish-record.schema";
 export * from "./publishing-task-meta.schema";
 export * from "./qr-code-art-image.schema";
+export * from "./refund-request.schema";
 export * from "./report.schema";
 export * from "./reply-comment-record.schema";
 export * from "./subscription.schema";
@@ -245,6 +247,7 @@ export const schemas = [
   { name: PublishInfo.name, schema: PublishInfoSchema },
   { name: PublishRecord.name, schema: PublishRecordSchema },
   { name: ProductionBatch.name, schema: ProductionBatchSchema },
+  { name: RefundRequest.name, schema: RefundRequestSchema },
   { name: OAuth2Credential.name, schema: OAuth2CredentialSchema },
   { name: Organization.name, schema: OrganizationSchema },
   { name: Subscription.name, schema: SubscriptionSchema },
