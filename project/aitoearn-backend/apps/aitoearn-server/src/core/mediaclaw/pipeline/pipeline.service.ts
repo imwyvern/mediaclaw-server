@@ -1,7 +1,7 @@
 import type { GeneratedCopy } from '../copy/copy.service'
-import { copyFile, rm } from 'node:fs/promises'
+import { copyFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Brand, Pipeline, PipelineStatus, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
@@ -19,11 +19,12 @@ import {
   PipelineStyleRewriteConfig,
   PipelineSubtitleVariant,
 } from './pipeline.types'
-import { buildPublicFileUrl, ensureDirectory, resolveRenderSize } from './pipeline.utils'
+import { buildPublicFileUrl, ensureDirectory, resolveRenderSize, runCommand } from './pipeline.utils'
 import { QualityCheckService } from './quality-check.service'
 import { SubtitleService } from './subtitle.service'
 import { TemplateBrandContext, TemplateResult } from './templates/base-template'
 import { TemplateRegistry } from './templates/template-registry'
+import { MINIMAX_TTS_VOICE_IDS, TtsService } from './tts.service'
 import { VideoGenService } from './video-gen.service'
 
 @Injectable()
@@ -52,6 +53,7 @@ export class PipelineService {
     private readonly modelResolverService: ModelResolverService,
     private readonly pipelinePreferenceLearningService: PipelinePreferenceLearningService,
     private readonly templateRegistry: TemplateRegistry,
+    @Optional() private readonly ttsService?: TtsService,
   ) {}
 
   async create(orgId: string, brandId: string, data: Record<string, any>) {
@@ -327,14 +329,26 @@ export class PipelineService {
       preserveAudio: context.preserveSourceAudio,
     })
 
-    const outputVideoUrl = await this.persistOutput(task._id.toString(), finalVideoPath)
+    const voiceover = await this.generateVoiceoverArtifact(task, context, copy)
+    const resolvedFinalVideoPath = voiceover?.voiceoverPath
+      ? await this.mixVoiceoverTrack(
+          finalVideoPath,
+          voiceover.voiceoverPath,
+          join(context.workspaceDir, 'final-voiceover.mp4'),
+          context.preserveSourceAudio && context.sourceMetadata.hasAudio,
+        )
+      : finalVideoPath
+    const outputVideoUrl = await this.persistOutput(task._id.toString(), resolvedFinalVideoPath)
 
     return {
       ...context,
       subtitles,
       subtitledVideoPath: subtitleResult.outputPath,
-      finalVideoPath,
+      finalVideoPath: resolvedFinalVideoPath,
       outputVideoUrl,
+      voiceoverPath: voiceover?.voiceoverPath,
+      voiceoverUrl: voiceover?.voiceoverUrl,
+      voiceoverMeta: voiceover?.voiceoverMeta,
       deepSynthesisMarker: subtitleResult.deepSynthesisMarker,
     }
   }
@@ -1164,11 +1178,119 @@ export class PipelineService {
   }
 
   private async persistOutput(taskId: string, inputVideoPath: string) {
+    return this.persistArtifact(taskId, inputVideoPath, 'mp4')
+  }
+
+  private async persistArtifact(
+    taskId: string,
+    inputPath: string,
+    extension: string,
+    suffix = '',
+  ) {
     const outputDir = resolve(process.cwd(), 'tmp', 'mediaclaw-output')
     await ensureDirectory(outputDir)
-    const outputPath = join(outputDir, `${taskId}.mp4`)
-    await copyFile(inputVideoPath, outputPath)
+    const normalizedExtension = extension.replace(/^\./, '')
+    const normalizedSuffix = this.normalizeOptionalString(suffix)
+    const outputPath = join(
+      outputDir,
+      normalizedSuffix
+        ? `${taskId}-${normalizedSuffix}.${normalizedExtension}`
+        : `${taskId}.${normalizedExtension}`,
+    )
+    await copyFile(inputPath, outputPath)
     return buildPublicFileUrl(outputPath)
+  }
+
+  private async generateVoiceoverArtifact(
+    task: VideoTask,
+    context: PipelineJobContext,
+    copy: GeneratedCopy,
+  ) {
+    if (!this.ttsService?.isConfigured()) {
+      return null
+    }
+
+    const text = this.buildVoiceoverText(copy)
+    if (!text) {
+      return null
+    }
+
+    try {
+      const voiceover = await this.ttsService.generateVoiceover({
+        text,
+        voiceId: this.resolveVoiceIdFromTask(task),
+        speed: this.resolveVoiceSpeedFromTask(task),
+      })
+      const voiceoverPath = join(context.workspaceDir, 'voiceover.mp3')
+      await writeFile(voiceoverPath, voiceover.buffer)
+
+      return {
+        voiceoverPath,
+        voiceoverUrl: await this.persistArtifact(task._id.toString(), voiceoverPath, 'mp3', 'voiceover'),
+        voiceoverMeta: {
+          provider: voiceover.provider,
+          voiceId: voiceover.voiceId,
+          format: voiceover.format,
+          sampleRate: voiceover.sampleRate,
+          durationMs: voiceover.durationMs,
+          text,
+        },
+      }
+    }
+    catch (error) {
+      this.logger.warn(
+        `Voiceover generation skipped for ${task._id.toString()}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      return null
+    }
+  }
+
+  private async mixVoiceoverTrack(
+    inputVideoPath: string,
+    voiceoverPath: string,
+    outputPath: string,
+    mixSourceAudio: boolean,
+  ) {
+    const args = mixSourceAudio
+      ? [
+          '-y',
+          '-i',
+          inputVideoPath,
+          '-i',
+          voiceoverPath,
+          '-filter_complex',
+          '[0:a][1:a]amix=inputs=2:duration=first:weights=0.25 1[aout]',
+          '-map',
+          '0:v',
+          '-map',
+          '[aout]',
+          '-c:v',
+          'copy',
+          '-c:a',
+          'aac',
+          '-shortest',
+          outputPath,
+        ]
+      : [
+          '-y',
+          '-i',
+          inputVideoPath,
+          '-i',
+          voiceoverPath,
+          '-map',
+          '0:v',
+          '-map',
+          '1:a:0',
+          '-c:v',
+          'copy',
+          '-c:a',
+          'aac',
+          '-shortest',
+          outputPath,
+        ]
+
+    await runCommand('ffmpeg', args, { timeoutMs: 180_000 })
+    return outputPath
   }
 
   private requirePath(value: string | undefined, field: string) {
@@ -1188,6 +1310,56 @@ export class PipelineService {
     return typeof value === 'string' && value.trim()
       ? value.trim()
       : ''
+  }
+
+  private buildVoiceoverText(copy: GeneratedCopy) {
+    const segments = [
+      this.normalizeOptionalString(copy.title),
+      this.normalizeOptionalString(copy.subtitle),
+      this.normalizeOptionalString(copy.description),
+      ...this.normalizeStringList(copy.commentGuides).slice(0, 1),
+    ]
+
+    return [...new Set(segments)]
+      .filter(Boolean)
+      .join('。')
+      .replace(/[#@]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/[。.!?]{2,}/g, '。')
+      .trim()
+      .slice(0, 600)
+  }
+
+  private resolveVoiceIdFromTask(task: VideoTask) {
+    const metadata = this.asRecord(task.metadata) || {}
+    const voiceover = this.asRecord(metadata['voiceover']) || {}
+    const candidates = [
+      this.normalizeOptionalString(voiceover['voiceId']),
+      this.normalizeOptionalString(metadata['voiceId']),
+      this.normalizeOptionalString(metadata['voiceoverVoiceId']),
+    ]
+
+    const resolved = candidates.find(candidate => (MINIMAX_TTS_VOICE_IDS as readonly string[]).includes(candidate))
+    return resolved || MINIMAX_TTS_VOICE_IDS[0]
+  }
+
+  private resolveVoiceSpeedFromTask(task: VideoTask) {
+    const metadata = this.asRecord(task.metadata) || {}
+    const voiceover = this.asRecord(metadata['voiceover']) || {}
+    const candidates = [
+      voiceover['speed'],
+      metadata['voiceoverSpeed'],
+      metadata['speechSpeed'],
+    ]
+
+    for (const candidate of candidates) {
+      const normalized = Number(candidate)
+      if (Number.isFinite(normalized)) {
+        return normalized
+      }
+    }
+
+    return 1
   }
 
   private normalizeStringList(value: unknown) {

@@ -156,6 +156,16 @@ export interface PipelineJobContext {
   subtitledVideoPath?: string
   finalVideoPath?: string
   outputVideoUrl?: string
+  voiceoverPath?: string
+  voiceoverUrl?: string
+  voiceoverMeta?: {
+    provider: string
+    voiceId: string
+    format: string
+    sampleRate: number
+    durationMs: number | null
+    text: string
+  }
   deepSynthesisMarker?: PipelineDeepSynthesisMarker
   brandEditResult?: PipelineStepExecutionResult
   videoGenResult?: PipelineStepExecutionResult

@@ -254,4 +254,49 @@ describe('videoService batch status', () => {
       { new: true },
     )
   })
+
+  it('应在状态更新时把音频地址写入内容产出元数据', async () => {
+    const voiceoverTaskId = new Types.ObjectId().toString()
+
+    videoTaskModel.findById.mockReturnValue(createQuery({
+      _id: new Types.ObjectId(voiceoverTaskId),
+      userId: new Types.ObjectId().toString(),
+      orgId: new Types.ObjectId(),
+      status: VideoTaskStatus.RENDERING,
+      metadata: {},
+    }))
+    videoTaskModel.findByIdAndUpdate.mockReturnValue(createQuery({
+      _id: new Types.ObjectId(voiceoverTaskId),
+      status: VideoTaskStatus.GENERATING_COPY,
+    }))
+
+    await service.updateStatus(voiceoverTaskId, VideoTaskStatus.GENERATING_COPY, {
+      outputVideoUrl: 'https://cdn.test/final.mp4',
+      audioUrl: 'https://cdn.test/final-voiceover.mp3',
+      voiceover: {
+        provider: 'minimax',
+        voiceId: 'Chinese_Female_Gentle',
+        url: 'https://cdn.test/final-voiceover.mp3',
+      },
+    })
+
+    expect(videoTaskModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      voiceoverTaskId,
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          'output.metadata.audioUrl': 'https://cdn.test/final-voiceover.mp3',
+          'output.metadata.voiceoverUrl': 'https://cdn.test/final-voiceover.mp3',
+          'output.metadata.voiceover': expect.objectContaining({
+            provider: 'minimax',
+            voiceId: 'Chinese_Female_Gentle',
+          }),
+          'metadata.voiceover': expect.objectContaining({
+            provider: 'minimax',
+            voiceId: 'Chinese_Female_Gentle',
+          }),
+        }),
+      }),
+      { new: true },
+    )
+  })
 })

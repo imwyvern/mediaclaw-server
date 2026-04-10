@@ -97,8 +97,15 @@ export class VideoWorkerProcessor extends WorkerHost {
           await this.videoService.updateStatus(taskId, VideoTaskStatus.GENERATING_COPY, {
             step,
             outputVideoUrl: context.outputVideoUrl,
+            audioUrl: context.voiceoverUrl,
             copy,
             deepSynthesis: context.deepSynthesisMarker?.manifest,
+            voiceover: context.voiceoverMeta
+              ? {
+                  ...context.voiceoverMeta,
+                  url: context.voiceoverUrl || '',
+                }
+              : undefined,
             metadata: {
               pipeline: {
                 brandEdit: context.brandEditResult || null,
@@ -258,6 +265,8 @@ export class VideoWorkerProcessor extends WorkerHost {
       case 'generate-copy':
         return {
           outputVideoUrl: context.outputVideoUrl || '',
+          voiceoverUrl: context.voiceoverUrl || '',
+          voiceoverProvider: context.voiceoverMeta?.provider || '',
           finalVideoPath: context.finalVideoPath || '',
         }
       case 'quality-check':

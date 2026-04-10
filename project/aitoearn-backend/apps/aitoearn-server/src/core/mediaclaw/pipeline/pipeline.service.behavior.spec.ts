@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Types } from 'mongoose'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PipelineFeedbackSourceType } from './pipeline-feedback.constants'
@@ -39,9 +42,13 @@ describe('pipelineService', () => {
   let pipelineModel: Record<string, any>
   let brandModel: Record<string, any>
   let frameExtractService: Record<string, any>
+  let deepSynthesisMarkerService: Record<string, any>
   let dedupService: Record<string, any>
   let modelResolverService: Record<string, any>
+  let qualityCheckService: Record<string, any>
+  let subtitleService: Record<string, any>
   let templateRegistry: Record<string, any>
+  let ttsService: Record<string, any>
   let pipelinePreferenceLearningService: PipelinePreferenceLearningService
 
   beforeEach(() => {
@@ -62,8 +69,31 @@ describe('pipelineService', () => {
       probeVideoMetadata: vi.fn(),
       extractKeyFrames: vi.fn(),
     }
+    deepSynthesisMarkerService = {
+      createMarker: vi.fn().mockReturnValue({
+        visibleLabel: 'AI 生成',
+        watermarkText: 'MediaClaw',
+        metadata: {},
+        manifest: {
+          standard: 'mc-v1',
+          label: 'AI 生成',
+          watermarkText: 'MediaClaw',
+          brandName: '越小啤',
+          taskId: new Types.ObjectId().toString(),
+          appliedAt: new Date('2026-04-09T00:00:00.000Z').toISOString(),
+          metadata: {},
+        },
+      }),
+    }
+    subtitleService = {
+      renderSubtitles: vi.fn(),
+    }
     dedupService = {
       createStrategy: vi.fn(),
+      applyVideoPostProcess: vi.fn().mockResolvedValue(undefined),
+    }
+    qualityCheckService = {
+      assertQuality: vi.fn(),
     }
     modelResolverService = {
       validatePipelineOverrides: vi.fn().mockResolvedValue({}),
@@ -78,6 +108,10 @@ describe('pipelineService', () => {
     templateRegistry = {
       run: vi.fn(),
     }
+    ttsService = {
+      isConfigured: vi.fn().mockReturnValue(false),
+      generateVoiceover: vi.fn(),
+    }
     pipelinePreferenceLearningService = new PipelinePreferenceLearningService()
 
     service = new PipelineService(
@@ -86,13 +120,14 @@ describe('pipelineService', () => {
       frameExtractService as any,
       {} as any,
       {} as any,
-      {} as any,
-      {} as any,
+      deepSynthesisMarkerService as any,
+      subtitleService as any,
       dedupService as any,
-      {} as any,
+      qualityCheckService as any,
       modelResolverService as any,
       pipelinePreferenceLearningService as any,
       templateRegistry as any,
+      ttsService as any,
     )
   })
 
@@ -631,5 +666,82 @@ describe('pipelineService', () => {
     expect(result.learning).toEqual(expect.objectContaining({
       preferredPlatforms: ['xiaohongshu', 'douyin'],
     }))
+  })
+
+  it('应在视频收尾阶段生成配音并返回音频地址', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'pipeline-voiceover-'))
+    const taskId = new Types.ObjectId()
+    const task = {
+      _id: taskId,
+      metadata: {},
+    }
+    const context = {
+      workspaceDir,
+      composedVideoPath: join(workspaceDir, 'composed.mp4'),
+      dedupStrategy: {},
+      preserveSourceAudio: false,
+      sourceMetadata: {
+        hasAudio: false,
+      },
+      brand: {
+        name: '越小啤',
+        slogans: [],
+        keywords: [],
+      },
+      targetDurationSeconds: 15,
+      subtitles: [],
+    }
+    const copy = {
+      title: '三步搞定精酿种草视频',
+      subtitle: '开头三秒先抛记忆点',
+      description: '结尾引导评论区互动',
+      commentGuides: ['评论区告诉我你最想看的口味'],
+    }
+    const deepSynthesisMarker = deepSynthesisMarkerService.createMarker()
+
+    subtitleService.renderSubtitles.mockResolvedValue({
+      outputPath: join(workspaceDir, 'subtitled.mp4'),
+      deepSynthesisMarker,
+    })
+    ttsService.isConfigured.mockReturnValue(true)
+    ttsService.generateVoiceover.mockResolvedValue({
+      buffer: Buffer.from('voiceover'),
+      provider: 'minimax',
+      voiceId: 'Chinese_Female_Gentle',
+      format: 'mp3',
+      sampleRate: 32000,
+      durationMs: 1200,
+    })
+
+    const persistArtifactSpy = vi.spyOn(service as any, 'persistArtifact').mockImplementation(
+      async (id: string, _inputPath: string, extension: string, suffix = '') =>
+        `https://cdn.example.com/${id}${suffix ? `-${suffix}` : ''}.${extension}`,
+    )
+    const mixVoiceoverTrackSpy = vi.spyOn(service as any, 'mixVoiceoverTrack')
+      .mockResolvedValue(join(workspaceDir, 'final-voiceover.mp4'))
+
+    try {
+      const result = await service.finalizeVideo(task as any, context as any, copy as any)
+
+      expect(ttsService.generateVoiceover).toHaveBeenCalledWith(expect.objectContaining({
+        text: '三步搞定精酿种草视频。开头三秒先抛记忆点。结尾引导评论区互动。评论区告诉我你最想看的口味',
+      }))
+      expect(persistArtifactSpy).toHaveBeenCalledWith(taskId.toString(), join(workspaceDir, 'voiceover.mp3'), 'mp3', 'voiceover')
+      expect(mixVoiceoverTrackSpy).toHaveBeenCalledWith(
+        join(workspaceDir, 'final.mp4'),
+        join(workspaceDir, 'voiceover.mp3'),
+        join(workspaceDir, 'final-voiceover.mp4'),
+        false,
+      )
+      expect(result.voiceoverUrl).toBe(`https://cdn.example.com/${taskId.toString()}-voiceover.mp3`)
+      expect(result.outputVideoUrl).toBe(`https://cdn.example.com/${taskId.toString()}.mp4`)
+      expect(result.voiceoverMeta).toEqual(expect.objectContaining({
+        provider: 'minimax',
+        voiceId: 'Chinese_Female_Gentle',
+      }))
+    }
+    finally {
+      await rm(workspaceDir, { recursive: true, force: true })
+    }
   })
 })

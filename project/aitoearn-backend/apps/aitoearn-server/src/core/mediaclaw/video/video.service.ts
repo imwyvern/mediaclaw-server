@@ -58,10 +58,12 @@ interface CreateBatchInput {
 
 interface UpdateTaskStatusInput {
   outputVideoUrl?: string
+  audioUrl?: string
   errorMessage?: string
   quality?: Record<string, any>
   copy?: Record<string, any>
   deepSynthesis?: Record<string, any>
+  voiceover?: Record<string, any>
   step?: string
   metadata?: Record<string, any>
 }
@@ -562,6 +564,14 @@ export class VideoService {
       updateSet['outputVideoUrl'] = data.outputVideoUrl
       updateSet['output.url'] = data.outputVideoUrl
     }
+    const resolvedAudioUrl = this.normalizeOptionalString(
+      data?.audioUrl
+      || (data?.voiceover && typeof data.voiceover['url'] === 'string' ? data.voiceover['url'] : ''),
+    )
+    if (resolvedAudioUrl) {
+      updateSet['output.metadata.audioUrl'] = resolvedAudioUrl
+      updateSet['output.metadata.voiceoverUrl'] = resolvedAudioUrl
+    }
     if (data && Object.prototype.hasOwnProperty.call(data, 'errorMessage')) {
       updateSet['errorMessage'] = data.errorMessage || ''
     }
@@ -575,6 +585,10 @@ export class VideoService {
     }
     if (data?.deepSynthesis) {
       updateSet['metadata.compliance.aiDeepSynthesis'] = data.deepSynthesis
+    }
+    if (data?.voiceover) {
+      updateSet['output.metadata.voiceover'] = data.voiceover
+      updateSet['metadata.voiceover'] = data.voiceover
     }
     if (data?.metadata) {
       for (const [key, value] of Object.entries(data.metadata)) {
@@ -1501,6 +1515,12 @@ export class VideoService {
     const width = Number(quality['width'] || 0)
     const height = Number(quality['height'] || 0)
     return width > 0 && height > 0 ? `${width}x${height}` : ''
+  }
+
+  private normalizeOptionalString(value: unknown) {
+    return typeof value === 'string' && value.trim()
+      ? value.trim()
+      : ''
   }
 
   private mapTimelineStatus(status: VideoTaskStatus) {

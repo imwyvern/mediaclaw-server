@@ -17,6 +17,7 @@ import { B7AiLiveTemplate } from './templates/b7-ai-live'
 import { B9ProductShowcaseTemplate } from './templates/b9-product-showcase'
 import { B10ExplainerTemplate } from './templates/b10-explainer'
 import { TemplateRegistry } from './templates/template-registry'
+import { TtsService } from './tts.service'
 import { VideoGenService } from './video-gen.service'
 
 @Module({
@@ -41,6 +42,7 @@ import { VideoGenService } from './video-gen.service'
     SubtitleService,
     DedupService,
     QualityCheckService,
+    TtsService,
     B7AiLiveTemplate,
     B9ProductShowcaseTemplate,
     B10ExplainerTemplate,
