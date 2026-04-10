@@ -36,3 +36,48 @@ groups:
         annotations:
           summary: 'Host disk space is running low'
           description: '{{ $labels.instance }} has less than 15% free disk space remaining.'
+
+      - alert: MediaClawApiHigh5xxRate
+        expr: (sum(rate(http_requests_total{status_class="5xx"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001)) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'MediaClaw API 5xx rate is above 5%'
+          description: 'The aggregated 5xx rate has exceeded 5% for at least 5 minutes.'
+
+      - alert: MediaClawVideoFailureRateHigh
+        expr: (sum(rate(video_production_total{status="failed"}[15m])) / clamp_min(sum(rate(video_production_total[15m])), 0.001)) > 0.3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Video production failure rate is above 30%'
+          description: 'Video production terminal failures have exceeded 30% over the last 15 minutes.'
+
+      - alert: MediaClawQueueBacklogHigh
+        expr: queue_depth{queue="mediaclaw_pipeline"} > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'MediaClaw pipeline queue backlog is high'
+          description: 'The mediaclaw_pipeline queue depth has stayed above 100 for 10 minutes.'
+
+      - alert: MediaClawQueueLatencyHigh
+        expr: queue_latency{queue="mediaclaw_pipeline"} > 1800000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'MediaClaw pipeline queue latency is high'
+          description: 'The oldest waiting pipeline job has been queued for more than 30 minutes.'
+
+      - alert: MediaClawHostMemoryHigh
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Host memory usage is high'
+          description: '{{ $labels.instance }} memory usage has been above 90% for 10 minutes.'

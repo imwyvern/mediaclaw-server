@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: MediaClaw Dashboards
+    orgId: 1
+    folder: MediaClaw
+    type: file
+    disableDeletion: false
+    editable: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
