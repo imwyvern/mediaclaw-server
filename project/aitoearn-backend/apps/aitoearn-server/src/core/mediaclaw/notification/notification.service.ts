@@ -549,6 +549,41 @@ export class NotificationService {
           content: `内容 ${this.describeRelatedId(relatedId)} 已发布${platform ? ` 到 ${platform}` : ''}。`,
           relatedId,
         }
+      case NotificationEvent.ASSET_VERSION_UPLOADED: {
+        const assetType = this.pickPayloadString(payload, ['assetType'])
+        const brandName = this.pickPayloadString(payload, ['brandName'])
+        const version = this.pickPayloadString(payload, ['version'])
+        return {
+          type: NotificationType.TaskSubmitted,
+          title: '品牌素材已上传新版本',
+          content: `${brandName || '品牌'} 的 ${assetType || '素材'} 已上传到版本 ${version || '--'}，并已切换为当前生效版本。`,
+          relatedId,
+        }
+      }
+      case NotificationEvent.ASSET_VERSION_ACTIVATED: {
+        const assetType = this.pickPayloadString(payload, ['assetType'])
+        const brandName = this.pickPayloadString(payload, ['brandName'])
+        const version = this.pickPayloadString(payload, ['version'])
+        const previousVersion = this.pickPayloadString(payload, ['previousVersion'])
+        return {
+          type: NotificationType.TaskReminder,
+          title: '品牌素材版本已切换',
+          content: `${brandName || '品牌'} 的 ${assetType || '素材'} 已切换到版本 ${version || '--'}${previousVersion ? `，上一生效版本为 ${previousVersion}` : ''}。`,
+          relatedId,
+        }
+      }
+      case NotificationEvent.ASSET_VERSION_DELETED: {
+        const assetType = this.pickPayloadString(payload, ['assetType'])
+        const brandName = this.pickPayloadString(payload, ['brandName'])
+        const version = this.pickPayloadString(payload, ['version'])
+        const fallbackVersion = this.pickPayloadString(payload, ['fallbackVersion'])
+        return {
+          type: NotificationType.TaskReminder,
+          title: '品牌素材版本已删除',
+          content: `${brandName || '品牌'} 的 ${assetType || '素材'} 版本 ${version || '--'} 已删除${fallbackVersion ? `，当前回退到版本 ${fallbackVersion}` : ''}。`,
+          relatedId,
+        }
+      }
       case NotificationEvent.TOKEN_QUOTA_WARNING: {
         const usageRate = this.pickPayloadString(payload, ['usageRate'])
         const usedTokens = this.pickPayloadString(payload, ['usedTokens'])

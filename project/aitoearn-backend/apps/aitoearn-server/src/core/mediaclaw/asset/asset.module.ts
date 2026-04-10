@@ -6,11 +6,13 @@ import {
   BrandAssetVersionSchema,
   BrandSchema,
 } from '@yikart/mongodb'
+import { NotificationModule } from '../notification/notification.module'
 import { AssetController } from './asset.controller'
 import { AssetService } from './asset.service'
 
 @Module({
   imports: [
+    NotificationModule,
     MongooseModule.forFeature([
       { name: Brand.name, schema: BrandSchema },
       { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },

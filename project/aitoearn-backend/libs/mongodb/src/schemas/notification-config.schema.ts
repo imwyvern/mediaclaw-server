@@ -24,6 +24,9 @@ export enum NotificationEvent {
   TOKEN_QUOTA_WARNING = 'token.quota_warning',
   TOKEN_QUOTA_EXCEEDED = 'token.quota_exceeded',
   DISCOVERY_VIRAL_ALERT = 'discovery.viral_alert',
+  ASSET_VERSION_UPLOADED = 'asset.version_uploaded',
+  ASSET_VERSION_ACTIVATED = 'asset.version_activated',
+  ASSET_VERSION_DELETED = 'asset.version_deleted',
 }
 
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'notification_configs' })

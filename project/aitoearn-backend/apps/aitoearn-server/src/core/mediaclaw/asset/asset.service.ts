@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
@@ -8,8 +9,10 @@ import {
   Brand,
   BrandAssetType,
   BrandAssetVersion,
+  NotificationEvent,
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
+import { NotificationService } from '../notification/notification.service'
 
 interface AssetUploadInput {
   fileUrl?: string
@@ -22,11 +25,14 @@ interface AssetUploadInput {
 
 @Injectable()
 export class AssetService {
+  private readonly logger = new Logger(AssetService.name)
+
   constructor(
     @InjectModel(Brand.name)
     private readonly brandModel: Model<Brand>,
     @InjectModel(BrandAssetVersion.name)
     private readonly brandAssetVersionModel: Model<BrandAssetVersion>,
+    private readonly notificationService?: NotificationService,
   ) {}
 
   async uploadAsset(orgId: string, brandId: string, type: BrandAssetType, file: AssetUploadInput) {
@@ -66,6 +72,19 @@ export class AssetService {
     })
 
     await this.syncBrandAssetPointer(normalizedBrandId, type, created.fileUrl)
+    const brand = await this.getBrand(orgId, normalizedBrandId)
+    await this.safeSendNotification(orgId, NotificationEvent.ASSET_VERSION_UPLOADED, {
+      relatedId: created._id.toString(),
+      assetId: created._id.toString(),
+      brandId: normalizedBrandId.toString(),
+      brandName: brand.name,
+      assetType: type,
+      version: created.version,
+      fileName: created.fileName,
+      fileUrl: created.fileUrl,
+      uploadedBy: created.uploadedBy,
+    })
+
     return created
   }
 
@@ -105,6 +124,18 @@ export class AssetService {
     if (!asset || asset.deletedAt) {
       throw new NotFoundException('Asset version not found')
     }
+    const previousActive = asset.isActive
+      ? null
+      : await this.brandAssetVersionModel
+          .findOne({
+            brandId: asset.brandId,
+            assetType: asset.assetType,
+            deletedAt: null,
+            isActive: true,
+          })
+          .sort({ version: -1, createdAt: -1 })
+          .lean()
+          .exec()
 
     await this.brandAssetVersionModel.updateMany(
       {
@@ -122,6 +153,19 @@ export class AssetService {
     ).exec()
 
     await this.syncBrandAssetPointer(asset.brandId, asset.assetType, updated?.fileUrl)
+    const brand = await this.getBrand(orgId, asset.brandId)
+    await this.safeSendNotification(orgId, NotificationEvent.ASSET_VERSION_ACTIVATED, {
+      relatedId: updated?._id?.toString() || asset._id.toString(),
+      assetId: updated?._id?.toString() || asset._id.toString(),
+      brandId: asset.brandId.toString(),
+      brandName: brand.name,
+      assetType: asset.assetType,
+      version: updated?.version || asset.version,
+      previousVersion: previousActive?.version || null,
+      fileName: updated?.fileName || asset.fileName,
+      fileUrl: updated?.fileUrl || asset.fileUrl,
+    })
+
     return updated
   }
 
@@ -194,6 +238,32 @@ export class AssetService {
       }
     }
 
+    const brand = await this.getBrand(orgId, asset.brandId)
+    const fallbackVersion = asset.isActive
+      ? await this.brandAssetVersionModel
+          .findOne({
+            brandId: asset.brandId,
+            assetType: asset.assetType,
+            deletedAt: null,
+            isActive: true,
+          })
+          .sort({ version: -1, createdAt: -1 })
+          .lean()
+          .exec()
+      : null
+    await this.safeSendNotification(orgId, NotificationEvent.ASSET_VERSION_DELETED, {
+      relatedId: asset._id.toString(),
+      assetId: asset._id.toString(),
+      brandId: asset.brandId.toString(),
+      brandName: brand.name,
+      assetType: asset.assetType,
+      version: asset.version,
+      fileName: asset.fileName,
+      fileUrl: asset.fileUrl,
+      fallbackVersion: fallbackVersion?.version || null,
+      deletedAt: deletedAt.toISOString(),
+    })
+
     return {
       id: asset._id.toString(),
       deleted: true,
@@ -229,6 +299,23 @@ export class AssetService {
     if (!exists) {
       throw new NotFoundException('Brand not found')
     }
+  }
+
+  private async getBrand(orgId: string, brandId: unknown) {
+    const brand = await this.brandModel
+      .findOne({
+        _id: this.normalizeObjectId(brandId, 'brandId'),
+        orgId: this.toObjectId(orgId, 'orgId'),
+        isActive: true,
+      })
+      .lean()
+      .exec()
+
+    if (!brand) {
+      throw new NotFoundException('Brand not found')
+    }
+
+    return brand
   }
 
   private async findOwnedAsset(orgId: string, assetId: string) {
@@ -286,5 +373,24 @@ export class AssetService {
     }
 
     return new Types.ObjectId(value)
+  }
+
+  private async safeSendNotification(
+    orgId: string,
+    event: NotificationEvent,
+    payload: Record<string, unknown>,
+  ) {
+    if (!this.notificationService) {
+      return
+    }
+
+    try {
+      await this.notificationService.send(orgId, event, payload)
+    }
+    catch (error) {
+      this.logger.warn(
+        `Asset notification failed for ${event}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   }
 }
