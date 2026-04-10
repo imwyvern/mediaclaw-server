@@ -15,6 +15,7 @@ import {
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { ReportService } from '../report/report.service'
 import { AnalyticsService } from './analytics.service'
+import { TrendPredictionService } from './trend-prediction.service'
 
 class RefreshAnalyticsDto {
   @IsOptional()
@@ -95,11 +96,32 @@ class LegacyAnalyticsExportDto {
   scheduleEmail?: string
 }
 
+class AnalyticsPredictionQueryDto {
+  @IsOptional()
+  @IsString()
+  industry?: string
+
+  @IsOptional()
+  @IsString()
+  platform?: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  horizonDays?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  windowDays?: number
+}
+
 @MediaClawApiController('api/v1/analytics')
 export class AnalyticsController {
   constructor(
     private readonly analyticsService: AnalyticsService,
     private readonly reportService: ReportService,
+    private readonly trendPredictionService: TrendPredictionService,
   ) {}
 
   @Get('overview')
@@ -208,6 +230,13 @@ export class AnalyticsController {
       metric,
       windowDays ? Number.parseInt(windowDays, 10) : 30,
     )
+  }
+
+  @Get('predictions')
+  async getPredictions(
+    @Query() query: AnalyticsPredictionQueryDto,
+  ) {
+    return this.trendPredictionService.getPredictions(query)
   }
 
   @Get('top')

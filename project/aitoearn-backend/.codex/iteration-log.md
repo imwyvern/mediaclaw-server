@@ -58,3 +58,14 @@
   - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/compliance/compliance.service.spec.ts` 首轮失败，定位为 spec 触发 `@yikart/assets -> ../../../config -> @yikart/channel-db` 运行时依赖链
   - 在 spec 中补齐 `@yikart/mongodb`、`@yikart/assets` 和 `../../../config` mock 后，`pnpm nx test aitoearn-server -- --run src/core/mediaclaw/compliance/compliance.service.spec.ts` 通过
 - 下一步计划：进入趋势预测引擎，把 discovery/analytics 的历史数据补成可查询的趋势预测结果与对应 API。
+
+## 2026-04-10 11:31:05 PDT
+- 当前改动：补完趋势预测引擎，新增 `TrendPredictionService` 和 `GET /api/v1/analytics/predictions`。预测结果基于 `viral_contents` 的市场热度信号与 `video_analytics` 的跨组织表现信号，输出未来 7 天内容方向、模板建议和最佳发布时间窗口，并补行为测试。
+- 验证结果：
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/analytics/trend-prediction.service.behavior.spec.ts` 首轮通过
+  - `pnpm nx build aitoearn-server` 首轮失败，定位为 `publishedAt` 经过 `toDate` 后仍可能为 `null`，已通过类型守卫收敛为 `CustomerPerformanceSignal`
+  - `pnpm nx lint aitoearn-server` 首轮失败，定位为未用参数和正则捕获组写法问题，已清理签名与正则
+  - 修复后 `pnpm nx build aitoearn-server` 通过
+  - 修复后 `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - 修复后 `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/analytics/trend-prediction.service.behavior.spec.ts` 通过
+- 下一步计划：进入企业 SSO，实现企业级 SSO 配置、登录入口和 callback 闭环，优先打通 OIDC + 企业平台 preset，再补 SAML 支持。
