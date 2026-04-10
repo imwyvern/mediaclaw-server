@@ -18,6 +18,11 @@ export enum ClawHostDeploymentMode {
   BYOC = 'byoc',
 }
 
+export enum ClawHostRuntimeKind {
+  DOCKER = 'docker',
+  K8S = 'k8s',
+}
+
 @Schema({ _id: false })
 export class ClawHostInstanceConfig {
   @Prop({ type: String, required: true })
@@ -101,6 +106,14 @@ export class ClawHostInstance extends WithTimestampSchema {
 
   @Prop({ type: String, default: '' })
   k8sPodName: string
+
+  @Prop({
+    type: String,
+    enum: Object.values(ClawHostRuntimeKind),
+    default: ClawHostRuntimeKind.DOCKER,
+    index: true,
+  })
+  runtimeKind: ClawHostRuntimeKind
 
   @Prop({ type: String, default: '', index: true })
   containerId: string

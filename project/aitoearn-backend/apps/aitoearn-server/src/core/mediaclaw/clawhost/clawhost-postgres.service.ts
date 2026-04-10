@@ -23,6 +23,7 @@ export interface ClawHostPostgresSyncInput {
   plan?: string
   status: string
   deploymentMode?: string
+  runtimeKind?: string
   config?: {
     cpu?: string
     memory?: string
@@ -33,6 +34,8 @@ export interface ClawHostPostgresSyncInput {
   requestedImChannel?: string
   accessUrl?: string
   healthUrl?: string
+  k8sNamespace?: string
+  k8sPodName?: string
   hostPort?: number
   runtimeImage?: string
   containerId?: string
@@ -379,6 +382,7 @@ export class ClawHostPostgresService implements OnModuleDestroy {
     return {
       plan: input.plan?.trim() || 'starter',
       deploymentMode: input.deploymentMode?.trim() || 'byoc',
+      runtimeKind: input.runtimeKind?.trim() || 'docker',
       resources: {
         cpu: input.config?.cpu?.trim() || '',
         memory: input.config?.memory?.trim() || '',
@@ -399,6 +403,9 @@ export class ClawHostPostgresService implements OnModuleDestroy {
       healthUrl: input.healthUrl?.trim() || '',
       hostPort: Number.isFinite(input.hostPort) ? Number(input.hostPort) : 0,
       runtimeImage: input.runtimeImage?.trim() || '',
+      runtimeKind: input.runtimeKind?.trim() || 'docker',
+      k8sNamespace: input.k8sNamespace?.trim() || '',
+      k8sPodName: input.k8sPodName?.trim() || '',
       containerId: input.containerId?.trim() || '',
       containerName: input.containerName?.trim() || '',
       lastClientVersion: input.lastClientVersion?.trim() || '',

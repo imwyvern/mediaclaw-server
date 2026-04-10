@@ -20,6 +20,10 @@ vi.mock('@yikart/mongodb', () => {
       UPGRADING: 'upgrading',
       ERROR: 'error',
     },
+    ClawHostRuntimeKind: {
+      DOCKER: 'docker',
+      K8S: 'k8s',
+    },
     UserRole: {
       OPERATOR: 'editor',
     },
@@ -74,6 +78,7 @@ function createManagedInstance(overrides: Record<string, unknown> = {}) {
     },
     k8sNamespace: 'clawhost-org-1',
     k8sPodName: 'pod-abc123',
+    runtimeKind: 'docker',
     containerId: 'container-1',
     containerName: 'mediaclaw-clawhost-1',
     runtimeImage: 'node:20-alpine',
@@ -129,6 +134,7 @@ describe('clawHostService behavior', () => {
       revokeInternal: vi.fn(),
     }
     clawHostRuntimeService = {
+      resolveRuntimeKind: vi.fn().mockReturnValue('docker'),
       createManagedContainer: vi.fn(),
       startContainer: vi.fn(),
       stopContainer: vi.fn(),
@@ -267,6 +273,7 @@ describe('clawHostService behavior', () => {
         orgId: created.orgId,
         clientName: created.clientName,
         status: RUNNING,
+        runtimeKind: 'docker',
       }),
       { ownerUserId: '' },
     )

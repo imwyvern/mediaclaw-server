@@ -95,3 +95,12 @@
   - `pnpm nx test aitoearn-server -- --run` 首轮失败，定位为 `@yikart/mongodb` 公共 mock 缺少企业 SSO 导出，导致 `auth.service.spec.ts` 和 `org.service.spec.ts` 报错
   - 修复后 `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/auth/auth.service.spec.ts src/core/mediaclaw/org/org.service.spec.ts` 通过，`2` 个测试文件、`8` 个测试全部通过
 - 下一步计划：重跑 `aitoearn-server` 全量 build/lint/test，确认 Batch 2 达到停止条件并整理提交。
+
+## 2026-04-10 12:15:10 PDT
+- 当前改动：完成 ClawHost runtime 架构升级。把单体 `dockerode` 实现拆成 `docker/k8s` 两个 driver，引入 `runtimeKind` 按实例持久化，支持通过 `MEDIACLAW_CLAWHOST_RUNTIME=docker|k8s` 选择运行时；`k8s` driver 使用真实 `kubectl` 创建 namespace、PVC、Deployment、Service，并把启停、重启、升级、日志、健康检查统一收敛到 runtime 抽象。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/clawhost/clawhost-runtime.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost-postgres.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.spec.ts` 首轮失败，定位为 `module-spec.factory` 装配下 `ClawHostRuntimeService` 未拿到新增 driver provider
+  - 对 `ClawHostRuntimeService` 增加 `@Optional()` 注入兜底后，定向测试通过，`4` 个测试文件、`14` 个测试全部通过
+- 下一步计划：进入监控链路升级，补 OpenTelemetry tracing 初始化与 Mongo 慢查询观测，并把告警/指标串起来。

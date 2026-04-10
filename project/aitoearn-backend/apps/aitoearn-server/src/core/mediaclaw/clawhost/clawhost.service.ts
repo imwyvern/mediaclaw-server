@@ -14,6 +14,7 @@ import {
   ClawHostInstance,
   ClawHostInstanceConfig,
   ClawHostInstanceStatus,
+  ClawHostRuntimeKind,
   UserRole,
 } from '@yikart/mongodb'
 import { RedisService } from '@yikart/redis'
@@ -22,6 +23,7 @@ import { MediaClawApiKeyService } from '../apikey/apikey.service'
 import { ClawHostAlertService } from './clawhost-alert.service'
 import { ClawHostPostgresService } from './clawhost-postgres.service'
 import { ClawHostRuntimeService } from './clawhost-runtime.service'
+import { ManagedRuntimeTarget } from './clawhost-runtime.types'
 
 interface ListInstancesFilters {
   orgId?: string
@@ -133,6 +135,8 @@ export class ClawHostService {
     const resolvedConfig = this.resolveConfig(plan, config)
     const deploymentMode = options.deploymentMode || ClawHostDeploymentMode.MANAGED
     const instanceId = this.buildInstanceId(normalizedOrgId, resolvedClientName)
+    const namespace = this.buildNamespace(normalizedOrgId)
+    const podName = this.buildPodName(instanceId)
     const now = new Date()
     const runtime = deploymentMode === ClawHostDeploymentMode.MANAGED
       ? await this.provisionManagedRuntime({
@@ -140,6 +144,9 @@ export class ClawHostService {
           orgId: normalizedOrgId,
           plan,
           clientName: resolvedClientName,
+          config: resolvedConfig,
+          namespace,
+          podName,
         })
       : null
     const created = await this.clawHostInstanceModel.create({
@@ -158,10 +165,11 @@ export class ClawHostService {
         installedAt: now,
       }],
       healthStatus: this.buildPendingHealthStatus(now),
-      k8sNamespace: this.buildNamespace(normalizedOrgId),
+      k8sNamespace: runtime?.namespace || namespace,
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
-        ? this.buildPodName(instanceId)
+        ? runtime?.podName || podName
         : '',
+      runtimeKind: runtime?.runtimeKind || this.clawHostRuntimeService.resolveRuntimeKind(),
       containerId: runtime?.containerId || '',
       containerName: runtime?.containerName || '',
       runtimeImage: runtime?.image || '',
@@ -221,12 +229,18 @@ export class ClawHostService {
 
     const instanceId = this.buildInstanceId(orgId, clientName)
     const deploymentMode = input.deploymentMode || ClawHostDeploymentMode.MANAGED
+    const resolvedConfig = this.resolveConfig(plan, input.config)
+    const namespace = this.buildNamespace(orgId)
+    const podName = this.buildPodName(instanceId)
     const runtime = deploymentMode === ClawHostDeploymentMode.MANAGED
       ? await this.provisionManagedRuntime({
           instanceId,
           orgId,
           plan,
           clientName,
+          config: resolvedConfig,
+          namespace,
+          podName,
         })
       : null
 
@@ -239,17 +253,18 @@ export class ClawHostService {
         ? ClawHostInstanceStatus.RUNNING
         : ClawHostInstanceStatus.CREATING,
       deploymentMode,
-      config: this.resolveConfig(plan, input.config),
+      config: resolvedConfig,
       skills: [{
         skillId: DEFAULT_OPENCLAW_SKILL_ID,
         version: DEFAULT_OPENCLAW_SKILL_VERSION,
         installedAt: new Date(),
       }],
       healthStatus: this.buildPendingHealthStatus(new Date()),
-      k8sNamespace: this.buildNamespace(orgId),
+      k8sNamespace: runtime?.namespace || namespace,
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
-        ? this.buildPodName(instanceId)
+        ? runtime?.podName || podName
         : '',
+      runtimeKind: runtime?.runtimeKind || this.clawHostRuntimeService.resolveRuntimeKind(),
       containerId: runtime?.containerId || '',
       containerName: runtime?.containerName || '',
       runtimeImage: runtime?.image || '',
@@ -448,7 +463,7 @@ export class ClawHostService {
   async startInstance(orgId: string, instanceId: string) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     if (this.isManagedInstance(instance)) {
-      await this.clawHostRuntimeService.startContainer(instance.containerId)
+      await this.clawHostRuntimeService.startContainer(this.buildManagedRuntimeTarget(instance))
     }
 
     const started = await this.clawHostInstanceModel.findByIdAndUpdate(
@@ -478,7 +493,7 @@ export class ClawHostService {
   async stopInstance(orgId: string, instanceId: string) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     if (this.isManagedInstance(instance)) {
-      await this.clawHostRuntimeService.stopContainer(instance.containerId)
+      await this.clawHostRuntimeService.stopContainer(this.buildManagedRuntimeTarget(instance))
     }
 
     const stopped = await this.clawHostInstanceModel.findOneAndUpdate(
@@ -516,7 +531,7 @@ export class ClawHostService {
     })
 
     if (this.isManagedInstance(existing)) {
-      await this.clawHostRuntimeService.restartContainer(existing.containerId)
+      await this.clawHostRuntimeService.restartContainer(this.buildManagedRuntimeTarget(existing))
     }
 
     const restarted = await this.clawHostInstanceModel.findByIdAndUpdate(
@@ -607,7 +622,10 @@ export class ClawHostService {
     }
 
     if (this.isManagedInstance(instance)) {
-      await this.clawHostRuntimeService.upgradeSkill(instance.containerId, normalizedVersion)
+      await this.clawHostRuntimeService.upgradeSkill(
+        this.buildManagedRuntimeTarget(instance),
+        normalizedVersion,
+      )
     }
 
     const upgradedAt = new Date()
@@ -712,7 +730,10 @@ export class ClawHostService {
       await instance.save()
 
       if (this.isManagedInstance(instance) && skillId === DEFAULT_OPENCLAW_SKILL_ID) {
-        await this.clawHostRuntimeService.upgradeSkill(instance.containerId, version)
+        await this.clawHostRuntimeService.upgradeSkill(
+          this.buildManagedRuntimeTarget(instance.toObject() as ClawHostInstance),
+          version,
+        )
       }
 
       const nextSkills = this.upsertSkill(instance.skills || [], skillId, version, upgradedAt)
@@ -845,7 +866,10 @@ export class ClawHostService {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     const normalizedLines = Math.min(Math.max(lines, 1), 500)
     const runtimeLogs = this.isManagedInstance(instance)
-      ? await this.clawHostRuntimeService.getContainerLogs(instance.containerId, normalizedLines).catch(() => [])
+      ? await this.clawHostRuntimeService.getContainerLogs(
+          this.buildManagedRuntimeTarget(instance),
+          normalizedLines,
+        ).catch(() => [])
       : []
 
     return {
@@ -951,9 +975,26 @@ export class ClawHostService {
     orgId: string
     plan: string
     clientName: string
+    config: ClawHostInstanceConfig
+    namespace: string
+    podName: string
   }) {
+    const runtimeKind = this.clawHostRuntimeService.resolveRuntimeKind()
+    const preferredPort = runtimeKind === ClawHostRuntimeKind.DOCKER
+      ? await this.resolvePreferredManagedPort()
+      : undefined
+
+    return this.clawHostRuntimeService.createManagedContainer({
+      ...input,
+      skillVersion: DEFAULT_OPENCLAW_SKILL_VERSION,
+      preferredPort,
+    })
+  }
+
+  private async resolvePreferredManagedPort() {
     const items = await this.clawHostInstanceModel.find({
       deploymentMode: ClawHostDeploymentMode.MANAGED,
+      runtimeKind: ClawHostRuntimeKind.DOCKER,
       hostPort: { $gt: 0 },
     }).select({ hostPort: 1 }).lean().exec() as Array<Record<string, unknown>>
 
@@ -963,12 +1004,7 @@ export class ClawHostService {
         .filter(port => Number.isFinite(port) && port > 0),
     )
 
-    const preferredPort = this.resolveAvailablePort(usedPorts)
-    return this.clawHostRuntimeService.createManagedContainer({
-      ...input,
-      skillVersion: DEFAULT_OPENCLAW_SKILL_VERSION,
-      preferredPort,
-    })
+    return this.resolveAvailablePort(usedPorts)
   }
 
   private resolveAvailablePort(usedPorts: Set<number>) {
@@ -1136,12 +1172,11 @@ export class ClawHostService {
 
   private async deriveManagedRuntimeState(instance: Pick<
     ClawHostInstance,
-    '_id' | 'status' | 'healthStatus' | 'containerId' | 'healthUrl' | 'lastHealthMessage'
+    '_id' | 'status' | 'healthStatus' | 'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl' | 'lastHealthMessage'
   >) {
     const now = new Date()
     const inspected = await this.clawHostRuntimeService.inspectManagedContainer(
-      instance.containerId,
-      instance.healthUrl,
+      this.buildManagedRuntimeTarget(instance as Pick<ClawHostInstance, 'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl'>),
     )
     const isHealthy = inspected.exists && inspected.running && inspected.apiHealthy
 
@@ -1205,12 +1240,15 @@ export class ClawHostService {
       | 'plan'
       | 'status'
       | 'deploymentMode'
+      | 'runtimeKind'
       | 'config'
       | 'skills'
       | 'healthStatus'
       | 'requestedImChannel'
       | 'accessUrl'
       | 'healthUrl'
+      | 'k8sNamespace'
+      | 'k8sPodName'
       | 'hostPort'
       | 'runtimeImage'
       | 'containerId'
@@ -1238,12 +1276,15 @@ export class ClawHostService {
         plan: instance.plan,
         status: instance.status,
         deploymentMode: instance.deploymentMode,
+        runtimeKind: instance.runtimeKind,
         config: instance.config,
         skills: instance.skills,
         healthStatus: instance.healthStatus,
         requestedImChannel: instance.requestedImChannel,
         accessUrl: instance.accessUrl,
         healthUrl: instance.healthUrl,
+        k8sNamespace: instance.k8sNamespace,
+        k8sPodName: instance.k8sPodName,
         hostPort: instance.hostPort,
         runtimeImage: instance.runtimeImage,
         containerId: instance.containerId,
@@ -1355,6 +1396,7 @@ export class ClawHostService {
       k8sPodName: instance.k8sPodName,
       connectionInfo: {
         deploymentMode: instance.deploymentMode || ClawHostDeploymentMode.BYOC,
+        runtimeKind: instance.runtimeKind || ClawHostRuntimeKind.DOCKER,
         requestedImChannel: instance.requestedImChannel || '',
         accessUrl: instance.accessUrl || '',
         healthUrl: instance.healthUrl || '',
@@ -1375,6 +1417,22 @@ export class ClawHostService {
       },
       createdAt: instance.createdAt,
       updatedAt: instance.updatedAt,
+    }
+  }
+
+  private buildManagedRuntimeTarget(
+    instance: Pick<
+      ClawHostInstance,
+      'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl'
+    >,
+  ): ManagedRuntimeTarget {
+    return {
+      runtimeKind: instance.runtimeKind || ClawHostRuntimeKind.DOCKER,
+      containerId: instance.containerId,
+      containerName: instance.containerName || '',
+      namespace: instance.k8sNamespace || '',
+      podName: instance.k8sPodName || '',
+      healthUrl: instance.healthUrl || '',
     }
   }
 }
