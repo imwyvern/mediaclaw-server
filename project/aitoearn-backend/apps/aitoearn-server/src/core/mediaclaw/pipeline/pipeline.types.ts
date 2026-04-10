@@ -133,6 +133,12 @@ export interface PipelineResolvedModels {
   videoGen: PipelineResolvedModel
 }
 
+export interface PipelineTemplatePayload {
+  topic?: string
+  script?: string
+  bulletPoints: string[]
+}
+
 export interface PipelineJobContext {
   taskId: string
   orgId?: string | null
@@ -152,6 +158,7 @@ export interface PipelineJobContext {
   preserveSourceAudio: boolean
   prompts: Record<string, string>
   models: PipelineResolvedModels
+  templatePayload?: PipelineTemplatePayload
   composedVideoPath?: string
   subtitledVideoPath?: string
   finalVideoPath?: string

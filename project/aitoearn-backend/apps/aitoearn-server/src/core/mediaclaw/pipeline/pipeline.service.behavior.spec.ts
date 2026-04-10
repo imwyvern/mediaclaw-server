@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Types } from 'mongoose'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { CanvasRendererService } from './canvas-renderer.service'
 import { PipelineFeedbackSourceType } from './pipeline-feedback.constants'
 import { PipelinePreferenceLearningService } from './pipeline-preference-learning.service'
 import { PipelineService } from './pipeline.service'
@@ -42,6 +43,9 @@ describe('pipelineService', () => {
   let pipelineModel: Record<string, any>
   let brandModel: Record<string, any>
   let frameExtractService: Record<string, any>
+  let brandEditService: Record<string, any>
+  let videoGenService: Record<string, any>
+  let canvasRendererService: Record<string, any>
   let deepSynthesisMarkerService: Record<string, any>
   let dedupService: Record<string, any>
   let modelResolverService: Record<string, any>
@@ -68,6 +72,16 @@ describe('pipelineService', () => {
       ensureLocalVideo: vi.fn(),
       probeVideoMetadata: vi.fn(),
       extractKeyFrames: vi.fn(),
+    }
+    brandEditService = {
+      applyBranding: vi.fn(),
+    }
+    videoGenService = {
+      generateSegments: vi.fn(),
+      composeSegments: vi.fn(),
+    }
+    canvasRendererService = {
+      renderSlides: vi.fn(),
     }
     deepSynthesisMarkerService = {
       createMarker: vi.fn().mockReturnValue({
@@ -118,8 +132,9 @@ describe('pipelineService', () => {
       pipelineModel as any,
       brandModel as any,
       frameExtractService as any,
-      {} as any,
-      {} as any,
+      brandEditService as any,
+      videoGenService as any,
+      canvasRendererService as unknown as CanvasRendererService,
       deepSynthesisMarkerService as any,
       subtitleService as any,
       dedupService as any,
@@ -741,6 +756,110 @@ describe('pipelineService', () => {
       }))
     }
     finally {
+      await rm(workspaceDir, { recursive: true, force: true })
+    }
+  })
+
+  it('应对 b10-explainer 使用 canvas renderer 直接出片', async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), 'pipeline-b10-render-'))
+    const taskId = new Types.ObjectId()
+    const composedPath = join(workspaceDir, 'canvas-composed.mp4')
+    const persistOutputSpy = vi.spyOn(service as any, 'persistOutput').mockResolvedValue('https://cdn.example.com/b10.mp4')
+    canvasRendererService.renderSlides.mockResolvedValue(composedPath)
+
+    try {
+      const result = await service.renderVideo(
+        { _id: taskId } as any,
+        {
+          workspaceDir,
+          templateId: 'b10-explainer',
+          renderWidth: 1080,
+          renderHeight: 1920,
+          targetDurationSeconds: 16,
+          brand: {
+            name: '越小啤',
+            colors: ['#112233', '#223344'],
+          },
+          sourceMetadata: {
+            durationSeconds: 12,
+            width: 1080,
+            height: 1920,
+            frameRate: 30,
+            hasAudio: false,
+          },
+          templatePayload: {
+            topic: '为什么这款精酿更适合新手',
+            script: '第一步认识口味。第二步理解香气。第三步告诉用户怎么选。',
+            bulletPoints: [],
+          },
+          frameArtifacts: [],
+          segmentVideoPaths: [],
+          subtitles: [],
+          dedupStrategy: {
+            cropScale: 1,
+            cropXRatio: 0,
+            cropYRatio: 0,
+            hueShift: 0,
+            saturation: 1,
+            contrast: 1,
+            brightness: 0,
+            noise: 0,
+            speedFactor: 1,
+            metadataFingerprint: 'fp-1',
+          },
+          preserveSourceAudio: false,
+          prompts: {},
+          models: {
+            copy: {
+              capability: 'copy',
+              id: 'copy',
+              label: 'copy',
+              provider: 'test',
+              runtimeModel: 'copy',
+              source: 'default',
+            },
+            frameEdit: {
+              capability: 'frameEdit',
+              id: 'frameEdit',
+              label: 'frameEdit',
+              provider: 'test',
+              runtimeModel: 'frameEdit',
+              source: 'default',
+            },
+            videoGen: {
+              capability: 'videoGen',
+              id: 'videoGen',
+              label: 'videoGen',
+              provider: 'test',
+              runtimeModel: 'videoGen',
+              source: 'default',
+            },
+          },
+        } as any,
+      )
+
+      expect(canvasRendererService.renderSlides).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            text: '为什么这款精酿更适合新手',
+            bgColor: '#112233',
+          }),
+        ]),
+        composedPath,
+        expect.objectContaining({
+          width: 1080,
+          height: 1920,
+        }),
+      )
+      expect(videoGenService.generateSegments).not.toHaveBeenCalled()
+      expect(persistOutputSpy).toHaveBeenCalledWith(taskId.toString(), composedPath)
+      expect(result.videoGenResult).toEqual({
+        provider: 'canvas-renderer',
+        status: 'completed',
+      })
+    }
+    finally {
+      persistOutputSpy.mockRestore()
       await rm(workspaceDir, { recursive: true, force: true })
     }
   })

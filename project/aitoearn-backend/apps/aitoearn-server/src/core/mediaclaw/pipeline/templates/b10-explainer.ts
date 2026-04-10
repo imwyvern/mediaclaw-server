@@ -25,7 +25,7 @@ export class B10ExplainerTemplate extends BasePipelineTemplate {
       templateId: this.templateId,
       name: this.normalizeOptionalString(input.pipelineName) || `${input.brand.name} 讲解视频线`,
       description: this.normalizeOptionalString(input.description)
-        || `${topic} 讲解脚本通过 Remotion 渲染成竖版 explainer 视频`,
+        || `${topic} 讲解脚本通过 Canvas + FFmpeg 渲染成竖版 explainer 视频`,
       type: this.type,
       styleConfig: {
         duration,
@@ -52,7 +52,7 @@ export class B10ExplainerTemplate extends BasePipelineTemplate {
         preferredStyles: this.normalizeStringList([
           'explainer',
           'educational',
-          'remotion',
+          'canvas-rendered',
           ...bulletPoints,
         ]),
         avoidStyles: this.normalizeStringList(params['avoidStyles']),
@@ -60,21 +60,21 @@ export class B10ExplainerTemplate extends BasePipelineTemplate {
         aspectRatio,
         subtitlePreferences: {
           templateId: this.templateId,
-          workflow: 'topic + script -> remotion render -> educational video',
+          workflow: 'topic + script -> canvas renderer -> educational video',
           topic,
           script,
           bulletPoints,
           zeroAiVideoCost: true,
-          remotionComposition: this.normalizeOptionalString(params['composition']) || 'ExplainerVertical',
+          renderer: 'canvas-renderer',
           templateRuntime: {
-            primaryEngine: 'remotion',
+            primaryEngine: 'canvas-renderer',
             deliveryMode: 'render_only',
             costMode: 'render_only',
           },
         },
       },
       modelOverrides: {
-        videoGen: 'remotion',
+        videoGen: 'canvas-renderer',
       },
       runtime: this.buildRuntimeProfile(
         {
@@ -93,7 +93,7 @@ export class B10ExplainerTemplate extends BasePipelineTemplate {
           optionalInputs: ['bullet_points', 'brand_assets'],
           stages: [
             { name: 'script_parse', engine: 'template parser', output: 'scene outline' },
-            { name: 'remotion_render', engine: 'remotion', output: 'vertical explainer video' },
+            { name: 'canvas_render', engine: 'ffmpeg + drawtext', output: 'vertical explainer video' },
             { name: 'caption_finalize', engine: 'subtitle renderer', output: 'branded final video' },
           ],
         },

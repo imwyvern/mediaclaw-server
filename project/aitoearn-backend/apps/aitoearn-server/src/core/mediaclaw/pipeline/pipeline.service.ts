@@ -7,6 +7,7 @@ import { Brand, Pipeline, PipelineStatus, VideoTask } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 import { ModelResolverService } from '../model-resolver/model-resolver.service'
 import { BrandEditService } from './brand-edit.service'
+import { CanvasRendererService } from './canvas-renderer.service'
 import { DedupService } from './dedup.service'
 import { DeepSynthesisMarkerService } from './deep-synthesis-marker.service'
 import { FrameExtractService } from './frame-extract.service'
@@ -18,6 +19,7 @@ import {
   PipelineResolvedModels,
   PipelineStyleRewriteConfig,
   PipelineSubtitleVariant,
+  PipelineTemplatePayload,
 } from './pipeline.types'
 import { buildPublicFileUrl, ensureDirectory, resolveRenderSize, runCommand } from './pipeline.utils'
 import { QualityCheckService } from './quality-check.service'
@@ -46,6 +48,7 @@ export class PipelineService {
     private readonly frameExtractService: FrameExtractService,
     private readonly brandEditService: BrandEditService,
     private readonly videoGenService: VideoGenService,
+    private readonly canvasRendererService: CanvasRendererService,
     private readonly deepSynthesisMarkerService: DeepSynthesisMarkerService,
     private readonly subtitleService: SubtitleService,
     private readonly dedupService: DedupService,
@@ -283,6 +286,7 @@ export class PipelineService {
       preserveSourceAudio: sourceMetadata.hasAudio && this.readBoolean(task.metadata, 'reuseSourceAudio', true),
       prompts: {},
       models,
+      templatePayload: this.resolveTemplatePayload(task.metadata, pipeline, templateId),
     }
   }
 
@@ -296,6 +300,32 @@ export class PipelineService {
   }
 
   async renderVideo(task: VideoTask, context: PipelineJobContext): Promise<PipelineJobContext> {
+    if (context.templateId === 'b10-explainer') {
+      const composedVideoPath = join(context.workspaceDir, 'canvas-composed.mp4')
+      const slides = this.buildExplainerSlides(context)
+      await this.canvasRendererService.renderSlides(
+        slides,
+        composedVideoPath,
+        {
+          width: context.renderWidth,
+          height: context.renderHeight,
+          textColor: '#FFFFFF',
+        },
+      )
+      const outputVideoUrl = await this.persistOutput(task._id.toString(), composedVideoPath)
+
+      return {
+        ...context,
+        segmentVideoPaths: [composedVideoPath],
+        composedVideoPath,
+        outputVideoUrl,
+        videoGenResult: {
+          provider: 'canvas-renderer',
+          status: 'completed',
+        },
+      }
+    }
+
     const { segmentPaths, result } = await this.videoGenService.generateSegments(context)
     const composedVideoPath = await this.videoGenService.composeSegments(context, segmentPaths)
     const outputVideoUrl = await this.persistOutput(task._id.toString(), composedVideoPath)
@@ -1034,6 +1064,41 @@ export class PipelineService {
     }
   }
 
+  private resolveTemplatePayload(
+    metadata: Record<string, any>,
+    pipeline: Pipeline | null,
+    templateId: string,
+  ): PipelineTemplatePayload | undefined {
+    if (this.normalizeOptionalString(templateId) !== 'b10-explainer') {
+      return undefined
+    }
+
+    const productionBatch = this.asRecord(metadata['productionBatch'])
+    const styleOverrides = this.asRecord(productionBatch?.['styleOverrides'])
+    const pipelinePreferences = this.asRecord(this.asRecord(pipeline?.preferences)?.['subtitlePreferences'])
+    const topic = this.normalizeOptionalString(styleOverrides?.['topic'])
+      || this.normalizeOptionalString(metadata['topic'])
+      || this.normalizeOptionalString(pipelinePreferences?.['topic'])
+    const script = this.normalizeOptionalString(styleOverrides?.['script'])
+      || this.normalizeOptionalString(metadata['script'])
+      || this.normalizeOptionalString(pipelinePreferences?.['script'])
+    const bulletPoints = this.normalizeStringList([
+      ...(Array.isArray(styleOverrides?.['bulletPoints']) ? styleOverrides?.['bulletPoints'] : []),
+      ...(Array.isArray(metadata['bulletPoints']) ? metadata['bulletPoints'] : []),
+      ...(Array.isArray(pipelinePreferences?.['bulletPoints']) ? pipelinePreferences?.['bulletPoints'] : []),
+    ])
+
+    if (!topic && !script && bulletPoints.length === 0) {
+      return undefined
+    }
+
+    return {
+      topic,
+      script,
+      bulletPoints,
+    }
+  }
+
   private buildDefaultStyleRewriteConfig(templateId: string): PipelineStyleRewriteConfig {
     const normalizedTemplateId = this.normalizeOptionalString(templateId)
     const enabled = normalizedTemplateId === 'b7-ai-live' || normalizedTemplateId === 'b9-product-showcase'
@@ -1046,6 +1111,71 @@ export class PipelineService {
       preserveProductPlacement: true,
       mutationDomains: [...this.defaultStyleRewriteMutationDomains],
     }
+  }
+
+  private buildExplainerSlides(context: PipelineJobContext) {
+    const templatePayload = context.templatePayload
+    const topic = this.normalizeOptionalString(templatePayload?.topic) || `${context.brand.name} 讲解`
+    const bulletPoints = this.normalizeStringList(templatePayload?.bulletPoints || [])
+    const script = this.normalizeOptionalString(templatePayload?.script)
+    const narrativeUnits = bulletPoints.length > 0
+      ? bulletPoints
+      : this.splitExplainerScript(script)
+
+    if (narrativeUnits.length === 0) {
+      throw new BadRequestException('b10-explainer requires script or bulletPoints')
+    }
+
+    const colors = context.brand.colors.length > 0
+      ? context.brand.colors
+      : ['#111827', '#1F2937', '#0F766E', '#312E81']
+    const slides = [
+      topic,
+      ...this.groupNarrativeUnits(narrativeUnits, context.targetDurationSeconds),
+    ]
+
+    return slides.map((text, index) => ({
+      text,
+      duration: this.resolveExplainerSlideDuration(slides.length, context.targetDurationSeconds, index),
+      bgColor: colors[index % colors.length] || '#111827',
+    }))
+  }
+
+  private splitExplainerScript(script: string) {
+    return script
+      .split(/[。！？!?；;\n]/g)
+      .map(item => item.trim())
+      .filter(Boolean)
+  }
+
+  private groupNarrativeUnits(units: string[], targetDurationSeconds: number) {
+    const targetSlideCount = Math.max(1, Math.ceil(Math.max(targetDurationSeconds - 4, 3) / 4))
+    const groupSize = Math.max(1, Math.ceil(units.length / targetSlideCount))
+    const grouped: string[] = []
+
+    for (let index = 0; index < units.length; index += groupSize) {
+      grouped.push(units.slice(index, index + groupSize).join('。'))
+    }
+
+    return grouped
+  }
+
+  private resolveExplainerSlideDuration(
+    slideCount: number,
+    targetDurationSeconds: number,
+    index: number,
+  ) {
+    if (slideCount <= 1) {
+      return Math.min(Math.max(targetDurationSeconds, 3), 5)
+    }
+
+    if (index === 0) {
+      return 3
+    }
+
+    const remaining = Math.max(targetDurationSeconds - 3, 3)
+    const duration = remaining / Math.max(slideCount - 1, 1)
+    return Number(Math.min(Math.max(duration, 3), 5).toFixed(3))
   }
 
   private async resolveModels(orgId: string | null, pipelineId: string | null): Promise<PipelineResolvedModels> {
