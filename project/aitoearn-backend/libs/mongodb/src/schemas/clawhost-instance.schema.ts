@@ -68,6 +68,9 @@ export class ClawHostInstance extends WithTimestampSchema {
   @Prop({ type: String, required: true, index: true })
   clientName: string
 
+  @Prop({ type: String, default: 'starter', index: true })
+  plan: string
+
   @Prop({
     type: String,
     enum: ClawHostInstanceStatus,
@@ -98,6 +101,24 @@ export class ClawHostInstance extends WithTimestampSchema {
 
   @Prop({ type: String, default: '' })
   k8sPodName: string
+
+  @Prop({ type: String, default: '', index: true })
+  containerId: string
+
+  @Prop({ type: String, default: '', index: true })
+  containerName: string
+
+  @Prop({ type: String, default: '' })
+  runtimeImage: string
+
+  @Prop({ type: Number, default: 0 })
+  hostPort: number
+
+  @Prop({ type: String, default: '' })
+  healthUrl: string
+
+  @Prop({ type: String, default: '' })
+  lastHealthMessage: string
 
   @Prop({ type: String, default: '' })
   requestedImChannel: string
@@ -147,4 +168,6 @@ export const ClawHostInstanceSchema = SchemaFactory.createForClass(ClawHostInsta
 ClawHostInstanceSchema.index({ orgId: 1, status: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ clientName: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ orgId: 1, deploymentMode: 1, createdAt: -1 })
+ClawHostInstanceSchema.index({ orgId: 1, plan: 1, createdAt: -1 })
+ClawHostInstanceSchema.index({ containerId: 1 }, { sparse: true })
 ClawHostInstanceSchema.index({ boundApiKeyId: 1 }, { sparse: true })

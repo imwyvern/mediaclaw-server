@@ -18,6 +18,7 @@ import {
   GetClawHostLogsQueryDto,
   InstallClawHostSkillDto,
   ListClawHostInstancesQueryDto,
+  UpgradeClawHostSkillDto,
 } from './clawhost.dto'
 import { ClawHostService } from './clawhost.service'
 
@@ -37,11 +38,20 @@ export class ClawHostController {
       body.config,
       body.clientName,
       {
+        plan: body.plan,
         deploymentMode: body.deploymentMode,
         requestedImChannel: body.requestedImChannel,
         issuedByUserId: user.id,
       },
     )
+  }
+
+  @Post('instances/:id/start')
+  async startInstance(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.startInstance(user.orgId || user.id, instanceId)
   }
 
   @Post('instances/:id/stop')
@@ -82,6 +92,19 @@ export class ClawHostController {
     @Param('id') instanceId: string,
   ) {
     return this.clawHostService.getInstanceHealth(user.orgId || user.id, instanceId)
+  }
+
+  @Post('instances/:id/upgrade-skill')
+  async upgradeSkill(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+    @Body() body: UpgradeClawHostSkillDto,
+  ) {
+    return this.clawHostService.upgradeSkill(
+      user.orgId || user.id,
+      instanceId,
+      body.version || 'latest',
+    )
   }
 
   @Post('instances/:id/skills')

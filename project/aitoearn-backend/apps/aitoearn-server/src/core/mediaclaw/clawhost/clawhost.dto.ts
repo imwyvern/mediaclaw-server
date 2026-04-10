@@ -32,9 +32,13 @@ export class CreateClawHostInstanceDto {
   @IsString()
   orgId?: string
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  clientName: string
+  plan?: string
+
+  @IsString()
+  @IsOptional()
+  clientName?: string
 
   @IsOptional()
   @IsEnum(ClawHostDeploymentMode)
@@ -44,10 +48,11 @@ export class CreateClawHostInstanceDto {
   @IsString()
   requestedImChannel?: string
 
+  @IsOptional()
   @IsObject()
   @ValidateNested()
   @Type(() => ClawHostInstanceConfigDto)
-  config: ClawHostInstanceConfigDto
+  config?: ClawHostInstanceConfigDto
 }
 
 export class ProvisionClawHostInstanceDto {
@@ -115,6 +120,12 @@ export class BatchUpgradeClawHostSkillDto {
   @IsString()
   @IsNotEmpty()
   version: string
+}
+
+export class UpgradeClawHostSkillDto {
+  @IsOptional()
+  @IsString()
+  version?: string
 }
 
 export class ListClawHostInstancesQueryDto {

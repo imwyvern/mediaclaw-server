@@ -19,6 +19,8 @@ import {
 import { RedisService } from '@yikart/redis'
 import { Model } from 'mongoose'
 import { MediaClawApiKeyService } from '../apikey/apikey.service'
+import { ClawHostAlertService } from './clawhost-alert.service'
+import { ClawHostRuntimeService } from './clawhost-runtime.service'
 
 interface ListInstancesFilters {
   orgId?: string
@@ -31,6 +33,7 @@ interface PaginationInput {
 }
 
 interface CreateInstanceOptions {
+  plan?: string
   deploymentMode?: ClawHostDeploymentMode
   requestedImChannel?: string
   issuedByUserId?: string
@@ -39,6 +42,7 @@ interface CreateInstanceOptions {
 interface ProvisionInstanceInput {
   orgId: string
   clientName: string
+  plan?: string
   config?: ClawHostInstanceConfig
   accessUrl?: string
   deploymentMode?: ClawHostDeploymentMode
@@ -73,6 +77,30 @@ const CONNECT_CODE_TTL_SECONDS = 10 * 60
 const HEARTBEAT_FRESH_MS = 3 * 60 * 1000
 const DEFAULT_OPENCLAW_SKILL_ID = 'mediaclaw-client'
 const DEFAULT_OPENCLAW_SKILL_VERSION = 'latest'
+const CLAWHOST_ALERT_TTL_SECONDS = 15 * 60
+
+const CLAWHOST_PLAN_PRESETS: Record<string, ClawHostInstanceConfig> = {
+  starter: {
+    cpu: '500m',
+    memory: '1Gi',
+    storage: '10Gi',
+  },
+  growth: {
+    cpu: '1000m',
+    memory: '2Gi',
+    storage: '20Gi',
+  },
+  pro: {
+    cpu: '2000m',
+    memory: '4Gi',
+    storage: '40Gi',
+  },
+  enterprise: {
+    cpu: '4000m',
+    memory: '8Gi',
+    storage: '80Gi',
+  },
+}
 
 @Injectable()
 export class ClawHostService {
@@ -83,42 +111,63 @@ export class ClawHostService {
     private readonly clawHostInstanceModel: Model<ClawHostInstance>,
     private readonly redisService: RedisService,
     private readonly apiKeyService: MediaClawApiKeyService,
+    private readonly clawHostRuntimeService: ClawHostRuntimeService,
+    private readonly clawHostAlertService: ClawHostAlertService,
   ) {}
 
   async createInstance(
     orgId: string,
-    config: ClawHostInstanceConfig,
-    clientName: string,
+    config: ClawHostInstanceConfig | undefined,
+    clientName: string | undefined,
     options: CreateInstanceOptions = {},
   ) {
-    if (!orgId?.trim()) {
+    const normalizedOrgId = orgId?.trim()
+    if (!normalizedOrgId) {
       throw new BadRequestException('orgId is required')
     }
 
-    if (!clientName?.trim()) {
-      throw new BadRequestException('clientName is required')
-    }
-
-    this.validateConfig(config)
-
-    const deploymentMode = options.deploymentMode || ClawHostDeploymentMode.BYOC
-    const instanceId = this.buildInstanceId(orgId, clientName)
+    const plan = this.normalizePlan(options.plan)
+    const resolvedClientName = clientName?.trim() || `${plan}-${normalizedOrgId.slice(-6)}`
+    const resolvedConfig = this.resolveConfig(plan, config)
+    const deploymentMode = options.deploymentMode || ClawHostDeploymentMode.MANAGED
+    const instanceId = this.buildInstanceId(normalizedOrgId, resolvedClientName)
     const now = new Date()
+    const runtime = deploymentMode === ClawHostDeploymentMode.MANAGED
+      ? await this.provisionManagedRuntime({
+          instanceId,
+          orgId: normalizedOrgId,
+          plan,
+          clientName: resolvedClientName,
+        })
+      : null
     const created = await this.clawHostInstanceModel.create({
       instanceId,
-      orgId: orgId.trim(),
-      clientName: clientName.trim(),
-      status: ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
+      orgId: normalizedOrgId,
+      clientName: resolvedClientName,
+      plan,
+      status: deploymentMode === ClawHostDeploymentMode.MANAGED
+        ? ClawHostInstanceStatus.RUNNING
+        : ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
       deploymentMode,
-      config,
-      skills: [],
+      config: resolvedConfig,
+      skills: [{
+        skillId: DEFAULT_OPENCLAW_SKILL_ID,
+        version: DEFAULT_OPENCLAW_SKILL_VERSION,
+        installedAt: now,
+      }],
       healthStatus: this.buildPendingHealthStatus(now),
-      k8sNamespace: this.buildNamespace(orgId),
+      k8sNamespace: this.buildNamespace(normalizedOrgId),
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
         ? this.buildPodName(instanceId)
         : '',
+      containerId: runtime?.containerId || '',
+      containerName: runtime?.containerName || '',
+      runtimeImage: runtime?.image || '',
+      hostPort: runtime?.hostPort || 0,
+      healthUrl: runtime?.healthUrl || '',
+      lastHealthMessage: '',
       requestedImChannel: options.requestedImChannel?.trim() || '',
-      accessUrl: this.buildAccessUrl(instanceId),
+      accessUrl: runtime?.accessUrl || this.buildAccessUrl(instanceId),
       installCommand: this.buildInstallCommand(),
       connectionCodePreview: '',
       connectionCodeHash: '',
@@ -137,8 +186,8 @@ export class ClawHostService {
     let connectionCode: Awaited<ReturnType<ClawHostService['issueConnectionCode']>> | null = null
 
     if (options.issuedByUserId?.trim()) {
-      connectionCode = await this.issueConnectionCode(orgId, instanceId, options.issuedByUserId)
-      latestInstance = await this.getInstanceOrThrow(orgId, instanceId)
+      connectionCode = await this.issueConnectionCode(normalizedOrgId, instanceId, options.issuedByUserId)
+      latestInstance = await this.getInstanceOrThrow(normalizedOrgId, instanceId)
     }
 
     return {
@@ -156,6 +205,7 @@ export class ClawHostService {
   async provisionInstance(input: ProvisionInstanceInput) {
     const orgId = input.orgId?.trim()
     const clientName = input.clientName?.trim()
+    const plan = this.normalizePlan(input.plan)
     if (!orgId) {
       throw new BadRequestException('orgId is required')
     }
@@ -164,14 +214,26 @@ export class ClawHostService {
     }
 
     const instanceId = this.buildInstanceId(orgId, clientName)
+    const deploymentMode = input.deploymentMode || ClawHostDeploymentMode.MANAGED
+    const runtime = deploymentMode === ClawHostDeploymentMode.MANAGED
+      ? await this.provisionManagedRuntime({
+          instanceId,
+          orgId,
+          plan,
+          clientName,
+        })
+      : null
 
     const instance = await this.clawHostInstanceModel.create({
       instanceId,
       orgId,
       clientName,
-      status: ClawHostInstanceStatus.CREATING,
-      deploymentMode: input.deploymentMode || ClawHostDeploymentMode.MANAGED,
-      config: input.config || this.defaultConfig(),
+      plan,
+      status: deploymentMode === ClawHostDeploymentMode.MANAGED
+        ? ClawHostInstanceStatus.RUNNING
+        : ClawHostInstanceStatus.CREATING,
+      deploymentMode,
+      config: this.resolveConfig(plan, input.config),
       skills: [{
         skillId: DEFAULT_OPENCLAW_SKILL_ID,
         version: DEFAULT_OPENCLAW_SKILL_VERSION,
@@ -179,9 +241,17 @@ export class ClawHostService {
       }],
       healthStatus: this.buildPendingHealthStatus(new Date()),
       k8sNamespace: this.buildNamespace(orgId),
-      k8sPodName: this.buildPodName(instanceId),
+      k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
+        ? this.buildPodName(instanceId)
+        : '',
+      containerId: runtime?.containerId || '',
+      containerName: runtime?.containerName || '',
+      runtimeImage: runtime?.image || '',
+      hostPort: runtime?.hostPort || 0,
+      healthUrl: runtime?.healthUrl || '',
+      lastHealthMessage: '',
       requestedImChannel: input.requestedImChannel?.trim() || '',
-      accessUrl: input.accessUrl?.trim() || this.buildAccessUrl(instanceId),
+      accessUrl: input.accessUrl?.trim() || runtime?.accessUrl || this.buildAccessUrl(instanceId),
       installCommand: this.buildInstallCommand(),
       connectionCodePreview: '',
       connectionCodeHash: '',
@@ -354,7 +424,40 @@ export class ClawHostService {
     }
   }
 
+  async startInstance(orgId: string, instanceId: string) {
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
+    if (this.isManagedInstance(instance)) {
+      await this.clawHostRuntimeService.startContainer(instance.containerId)
+    }
+
+    const started = await this.clawHostInstanceModel.findByIdAndUpdate(
+      instance._id,
+      {
+        $set: {
+          status: ClawHostInstanceStatus.RUNNING,
+          healthStatus: this.buildPendingHealthStatus(new Date()),
+          lastHealthMessage: '',
+        },
+      },
+      { new: true },
+    ).lean().exec()
+
+    if (!started) {
+      throw new NotFoundException('ClawHost instance not found')
+    }
+
+    return {
+      ...this.toResponse(started),
+      operation: 'starting',
+    }
+  }
+
   async stopInstance(orgId: string, instanceId: string) {
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
+    if (this.isManagedInstance(instance)) {
+      await this.clawHostRuntimeService.stopContainer(instance.containerId)
+    }
+
     const stopped = await this.clawHostInstanceModel.findOneAndUpdate(
       { instanceId, orgId: orgId.trim() },
       {
@@ -365,6 +468,7 @@ export class ClawHostService {
             isHealthy: false,
             latency: 0,
           },
+          lastHealthMessage: '',
         },
       },
       { new: true },
@@ -386,13 +490,22 @@ export class ClawHostService {
       previousStatus: existing.status,
     })
 
+    if (this.isManagedInstance(existing)) {
+      await this.clawHostRuntimeService.restartContainer(existing.containerId)
+    }
+
     const restarted = await this.clawHostInstanceModel.findByIdAndUpdate(
       existing._id,
       {
         $set: {
-          status: ClawHostInstanceStatus.CREATING,
+          status: this.isManagedInstance(existing)
+            ? ClawHostInstanceStatus.RUNNING
+            : ClawHostInstanceStatus.CREATING,
           healthStatus: this.buildPendingHealthStatus(new Date()),
-          lastHeartbeatAt: null,
+          lastHeartbeatAt: this.isManagedInstance(existing)
+            ? existing.lastHeartbeatAt
+            : null,
+          lastHealthMessage: '',
         },
       },
       { new: true },
@@ -410,7 +523,9 @@ export class ClawHostService {
 
   async getInstanceHealth(orgId: string, instanceId: string) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
-    const derived = this.deriveRuntimeState(instance)
+    const derived = this.isManagedInstance(instance)
+      ? await this.deriveManagedRuntimeState(instance)
+      : this.deriveRuntimeState(instance)
 
     if (derived.shouldPersist) {
       await this.clawHostInstanceModel.updateOne(
@@ -419,6 +534,7 @@ export class ClawHostService {
           $set: {
             status: derived.status,
             healthStatus: derived.healthStatus,
+            lastHealthMessage: derived.healthMessage || '',
           },
         },
       ).exec()
@@ -430,18 +546,57 @@ export class ClawHostService {
       healthStatus: derived.healthStatus,
       connectionStatus: derived.connectionStatus,
       lastHeartbeatAt: instance.lastHeartbeatAt,
+      message: derived.healthMessage || '',
     }
   }
 
   async getInstance(orgId: string, instanceId: string) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
-    const derived = this.deriveRuntimeState(instance)
+    const derived = this.isManagedInstance(instance)
+      ? this.deriveManagedRuntimeStateFromSnapshot(instance)
+      : this.deriveRuntimeState(instance)
 
     return this.toResponse({
       ...instance,
       status: derived.status,
       healthStatus: derived.healthStatus,
     })
+  }
+
+  async upgradeSkill(orgId: string, instanceId: string, version: string) {
+    const normalizedVersion = version?.trim() || DEFAULT_OPENCLAW_SKILL_VERSION
+    const instance = await this.clawHostInstanceModel.findOne({
+      instanceId,
+      orgId: orgId.trim(),
+    }).exec()
+    if (!instance) {
+      throw new NotFoundException('ClawHost instance not found')
+    }
+
+    if (this.isManagedInstance(instance)) {
+      await this.clawHostRuntimeService.upgradeSkill(instance.containerId, normalizedVersion)
+    }
+
+    const upgradedAt = new Date()
+    const nextSkills = this.upsertSkill(
+      instance.skills || [],
+      DEFAULT_OPENCLAW_SKILL_ID,
+      normalizedVersion,
+      upgradedAt,
+    )
+
+    instance.set('skills', nextSkills)
+    instance.set('status', ClawHostInstanceStatus.RUNNING)
+    instance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 1))
+    instance.set('lastHealthMessage', '')
+    await instance.save()
+
+    return {
+      instanceId: instance.instanceId,
+      skillId: DEFAULT_OPENCLAW_SKILL_ID,
+      version: normalizedVersion,
+      upgradedAt: upgradedAt.toISOString(),
+    }
   }
 
   async installSkill(orgId: string, instanceId: string, skillId: string, version: string) {
@@ -520,10 +675,15 @@ export class ClawHostService {
       instance.set('status', ClawHostInstanceStatus.UPGRADING)
       await instance.save()
 
+      if (this.isManagedInstance(instance) && skillId === DEFAULT_OPENCLAW_SKILL_ID) {
+        await this.clawHostRuntimeService.upgradeSkill(instance.containerId, version)
+      }
+
       const nextSkills = this.upsertSkill(instance.skills || [], skillId, version, upgradedAt)
       instance.set('skills', nextSkills)
       instance.set('status', ClawHostInstanceStatus.RUNNING)
       instance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 50))
+      instance.set('lastHealthMessage', '')
       await instance.save()
 
       upgradedItems.push({
@@ -561,11 +721,14 @@ export class ClawHostService {
 
     return {
       items: items.map((item) => {
-        const derived = this.deriveRuntimeState(item)
+        const derived = this.isManagedInstance(item)
+          ? this.deriveManagedRuntimeStateFromSnapshot(item)
+          : this.deriveRuntimeState(item)
         return this.toResponse({
           ...item,
           status: derived.status,
           healthStatus: derived.healthStatus,
+          lastHealthMessage: derived.healthMessage || item.lastHealthMessage || '',
         })
       }),
       pagination: {
@@ -597,7 +760,9 @@ export class ClawHostService {
     }>
 
     for (const instance of instances) {
-      const derived = this.deriveRuntimeState(instance)
+      const derived = this.isManagedInstance(instance)
+        ? await this.deriveManagedRuntimeState(instance)
+        : this.deriveRuntimeState(instance)
       if (derived.shouldPersist) {
         await this.clawHostInstanceModel.updateOne(
           { _id: instance._id },
@@ -605,9 +770,17 @@ export class ClawHostService {
             $set: {
               status: derived.status,
               healthStatus: derived.healthStatus,
+              lastHealthMessage: derived.healthMessage || '',
             },
           },
         ).exec()
+      }
+
+      if (!derived.healthStatus.isHealthy) {
+        await this.emitUnhealthyAlert(instance, derived.healthMessage || 'instance_unhealthy')
+      }
+      else {
+        await this.clearUnhealthyAlert(instance.instanceId)
       }
 
       results.push({
@@ -628,11 +801,17 @@ export class ClawHostService {
   async getInstanceLogs(orgId: string, instanceId: string, lines = 100) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     const normalizedLines = Math.min(Math.max(lines, 1), 500)
+    const runtimeLogs = this.isManagedInstance(instance)
+      ? await this.clawHostRuntimeService.getContainerLogs(instance.containerId, normalizedLines).catch(() => [])
+      : []
 
     return {
       instanceId: instance.instanceId,
       lines: normalizedLines,
-      logs: this.buildLifecycleLogs(instance).slice(0, normalizedLines),
+      logs: [
+        ...runtimeLogs,
+        ...this.buildLifecycleLogs(instance),
+      ].slice(0, normalizedLines),
     }
   }
 
@@ -693,11 +872,68 @@ export class ClawHostService {
   }
 
   private defaultConfig(): ClawHostInstanceConfig {
-    return {
-      cpu: '500m',
-      memory: '1Gi',
-      storage: '10Gi',
+    return { ...CLAWHOST_PLAN_PRESETS['starter'] }
+  }
+
+  private normalizePlan(plan?: string) {
+    const normalized = plan?.trim().toLowerCase()
+    if (!normalized) {
+      return 'starter'
     }
+
+    if (!CLAWHOST_PLAN_PRESETS[normalized]) {
+      throw new BadRequestException(`Unsupported ClawHost plan: ${normalized}`)
+    }
+
+    return normalized
+  }
+
+  private resolveConfig(plan: string, config?: ClawHostInstanceConfig) {
+    if (config) {
+      this.validateConfig(config)
+      return {
+        cpu: config.cpu.trim(),
+        memory: config.memory.trim(),
+        storage: config.storage.trim(),
+      }
+    }
+
+    return {
+      ...(CLAWHOST_PLAN_PRESETS[plan] || this.defaultConfig()),
+    }
+  }
+
+  private async provisionManagedRuntime(input: {
+    instanceId: string
+    orgId: string
+    plan: string
+    clientName: string
+  }) {
+    const items = await this.clawHostInstanceModel.find({
+      deploymentMode: ClawHostDeploymentMode.MANAGED,
+      hostPort: { $gt: 0 },
+    }).select({ hostPort: 1 }).lean().exec() as Array<Record<string, unknown>>
+
+    const usedPorts = new Set(
+      items
+        .map(item => Number(item['hostPort'] || 0))
+        .filter(port => Number.isFinite(port) && port > 0),
+    )
+
+    const preferredPort = this.resolveAvailablePort(usedPorts)
+    return this.clawHostRuntimeService.createManagedContainer({
+      ...input,
+      skillVersion: DEFAULT_OPENCLAW_SKILL_VERSION,
+      preferredPort,
+    })
+  }
+
+  private resolveAvailablePort(usedPorts: Set<number>) {
+    let port = 3900
+    while (usedPorts.has(port)) {
+      port += 1
+    }
+    return port
   }
 
   private buildInstallCommand() {
@@ -779,6 +1015,7 @@ export class ClawHostService {
           latency: 0,
         },
         connectionStatus: 'stopped',
+        healthMessage: '',
         shouldPersist: !instance.healthStatus?.lastCheck
           || instance.healthStatus.isHealthy
           || instance.healthStatus.latency !== 0,
@@ -796,6 +1033,7 @@ export class ClawHostService {
           latency: 0,
         },
         connectionStatus: 'waiting_for_bind',
+        healthMessage: '',
         shouldPersist: !instance.healthStatus?.lastCheck
           || instance.healthStatus.isHealthy
           || instance.healthStatus.latency !== 0,
@@ -811,6 +1049,7 @@ export class ClawHostService {
           latency: HEARTBEAT_FRESH_MS,
         },
         connectionStatus: 'bound_but_silent',
+        healthMessage: 'heartbeat_missing',
         shouldPersist: instance.status !== ClawHostInstanceStatus.ERROR
           || instance.healthStatus?.isHealthy !== false,
       }
@@ -829,9 +1068,89 @@ export class ClawHostService {
         latency: Math.max(1, Math.floor(delta / 1000)),
       },
       connectionStatus: isHealthy ? 'connected' : 'stale',
+      healthMessage: isHealthy ? '' : 'heartbeat_stale',
       shouldPersist: instance.status !== (isHealthy ? ClawHostInstanceStatus.RUNNING : ClawHostInstanceStatus.ERROR)
         || instance.healthStatus?.isHealthy !== isHealthy,
     }
+  }
+
+  private isManagedInstance(instance: Pick<ClawHostInstance, 'deploymentMode' | 'containerId'>) {
+    return instance.deploymentMode === ClawHostDeploymentMode.MANAGED && Boolean(instance.containerId?.trim())
+  }
+
+  private deriveManagedRuntimeStateFromSnapshot(instance: Pick<
+    ClawHostInstance,
+    'status' | 'healthStatus' | 'lastHealthMessage'
+  >) {
+    return {
+      status: instance.status,
+      healthStatus: instance.healthStatus || this.buildPendingHealthStatus(new Date()),
+      connectionStatus: instance.status === ClawHostInstanceStatus.RUNNING ? 'connected' : 'managed',
+      healthMessage: instance.lastHealthMessage || '',
+      shouldPersist: false,
+    }
+  }
+
+  private async deriveManagedRuntimeState(instance: Pick<
+    ClawHostInstance,
+    '_id' | 'status' | 'healthStatus' | 'containerId' | 'healthUrl' | 'lastHealthMessage'
+  >) {
+    const now = new Date()
+    const inspected = await this.clawHostRuntimeService.inspectManagedContainer(
+      instance.containerId,
+      instance.healthUrl,
+    )
+    const isHealthy = inspected.exists && inspected.running && inspected.apiHealthy
+
+    return {
+      status: isHealthy ? ClawHostInstanceStatus.RUNNING : ClawHostInstanceStatus.ERROR,
+      healthStatus: {
+        lastCheck: now,
+        isHealthy,
+        latency: inspected.latencyMs,
+      },
+      connectionStatus: isHealthy
+        ? 'connected'
+        : inspected.exists
+          ? inspected.running
+            ? 'api_unhealthy'
+            : 'container_stopped'
+          : 'container_missing',
+      healthMessage: inspected.errorMessage || '',
+      shouldPersist:
+        instance.status !== (isHealthy ? ClawHostInstanceStatus.RUNNING : ClawHostInstanceStatus.ERROR)
+        || instance.healthStatus?.isHealthy !== isHealthy
+        || instance.lastHealthMessage !== (inspected.errorMessage || ''),
+    }
+  }
+
+  private async emitUnhealthyAlert(
+    instance: Pick<ClawHostInstance, 'instanceId' | 'orgId' | 'plan' | 'healthUrl'>,
+    message: string,
+  ) {
+    const cacheKey = this.buildAlertCacheKey(instance.instanceId)
+    const alreadyAlerted = await this.redisService.get(cacheKey)
+    if (alreadyAlerted) {
+      return
+    }
+
+    await this.redisService.set(cacheKey, '1', CLAWHOST_ALERT_TTL_SECONDS)
+    await this.clawHostAlertService.notifyUnhealthyInstance({
+      instanceId: instance.instanceId,
+      orgId: instance.orgId,
+      plan: instance.plan || 'starter',
+      status: ClawHostInstanceStatus.ERROR,
+      message,
+      healthUrl: instance.healthUrl || '',
+    })
+  }
+
+  private async clearUnhealthyAlert(instanceId: string) {
+    await this.redisService.del(this.buildAlertCacheKey(instanceId))
+  }
+
+  private buildAlertCacheKey(instanceId: string) {
+    return `mediaclaw:clawhost:alert:${instanceId}`
   }
 
   private upsertSkill(
@@ -885,25 +1204,29 @@ export class ClawHostService {
   private buildLifecycleLogs(
     instance: Pick<
       ClawHostInstance,
-      'instanceId' | 'deploymentMode' | 'requestedImChannel' | 'boundAt' | 'boundApiKeyPrefix' | 'lastHeartbeatAt' | 'lastClientVersion' | 'status'
+      'instanceId' | 'deploymentMode' | 'requestedImChannel' | 'boundAt' | 'boundApiKeyPrefix' | 'lastHeartbeatAt' | 'lastClientVersion' | 'status' | 'plan' | 'containerName' | 'hostPort'
     >,
   ) {
     return [
       `[${new Date().toISOString()}] lifecycle_status=${instance.status} instance=${instance.instanceId}`,
-      `[${new Date().toISOString()}] deployment_mode=${instance.deploymentMode || ClawHostDeploymentMode.BYOC} im_channel=${instance.requestedImChannel || 'unset'}`,
+      `[${new Date().toISOString()}] deployment_mode=${instance.deploymentMode || ClawHostDeploymentMode.BYOC} plan=${instance.plan || 'starter'} im_channel=${instance.requestedImChannel || 'unset'}`,
+      `[${new Date().toISOString()}] runtime_container=${instance.containerName || 'n/a'} host_port=${instance.hostPort || 0}`,
       `[${new Date().toISOString()}] bound_api_key=${instance.boundApiKeyPrefix || 'unbound'} bound_at=${instance.boundAt?.toISOString?.() || 'n/a'}`,
       `[${new Date().toISOString()}] last_heartbeat=${instance.lastHeartbeatAt?.toISOString?.() || 'never'} client_version=${instance.lastClientVersion || 'unknown'}`,
     ]
   }
 
   private toResponse(instance: ClawHostInstance) {
-    const derived = this.deriveRuntimeState(instance)
+    const derived = this.isManagedInstance(instance)
+      ? this.deriveManagedRuntimeStateFromSnapshot(instance)
+      : this.deriveRuntimeState(instance)
 
     return {
       id: instance._id?.toString?.() || '',
       instanceId: instance.instanceId,
       orgId: instance.orgId,
       clientName: instance.clientName,
+      plan: instance.plan || 'starter',
       status: derived.status,
       config: instance.config,
       skills: (instance.skills || []).map(skill => ({
@@ -912,12 +1235,18 @@ export class ClawHostService {
         installedAt: skill.installedAt,
       })),
       healthStatus: derived.healthStatus,
+      lastHealthMessage: derived.healthMessage || instance.lastHealthMessage || '',
       k8sNamespace: instance.k8sNamespace,
       k8sPodName: instance.k8sPodName,
       connectionInfo: {
         deploymentMode: instance.deploymentMode || ClawHostDeploymentMode.BYOC,
         requestedImChannel: instance.requestedImChannel || '',
         accessUrl: instance.accessUrl || '',
+        healthUrl: instance.healthUrl || '',
+        containerId: instance.containerId || '',
+        containerName: instance.containerName || '',
+        runtimeImage: instance.runtimeImage || '',
+        hostPort: instance.hostPort || 0,
         installCommand: instance.installCommand || this.buildInstallCommand(),
         connectionStatus: derived.connectionStatus,
         connectionCodePreview: instance.connectionCodePreview || '',
