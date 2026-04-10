@@ -1,0 +1,70 @@
+services:
+  media-crawler-pro:
+    image: ${MEDIACLAW_CRAWLER_PRO_IMAGE:-ghcr.io/mediacrawlerpro/media-crawler-pro:latest}
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      PORT: ${MEDIACLAW_CRAWLER_PRO_PORT:-8888}
+      CRAWLER_REDIS_URL: ${CRAWLER_REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/1}
+      CRAWLER_MONGO_URI: ${CRAWLER_MONGO_URI:-mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@mongodb:27017/mediaclaw_crawler?authSource=admin}
+      SIGNSRV_HOST: ${SIGNSRV_HOST:-http://media-crawler-pro-signsrv:8890}
+      COOKIEBRIDGE_BASE_URL: ${COOKIEBRIDGE_BASE_URL:-http://media-crawler-pro-cookiebridge:8900}
+      PROXY_POOL_URL: ${PROXY_POOL_URL:-}
+    ports:
+      - 127.0.0.1:${MEDIACLAW_CRAWLER_PRO_PORT:-8888}:8888
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:8888/health >/dev/null 2>&1 || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - mediaclaw-net
+
+  media-crawler-pro-signsrv:
+    image: ${MEDIACLAW_SIGNSRV_IMAGE:-ghcr.io/mediacrawlerpro/signsrv:latest}
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      PORT: ${MEDIACLAW_SIGNSRV_PORT:-8890}
+    ports:
+      - 127.0.0.1:${MEDIACLAW_SIGNSRV_PORT:-8890}:8890
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:8890/health >/dev/null 2>&1 || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - mediaclaw-net
+
+  media-crawler-pro-cookiebridge:
+    image: ${MEDIACLAW_COOKIEBRIDGE_IMAGE:-ghcr.io/mediacrawlerpro/cookiebridge:latest}
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      PORT: ${MEDIACLAW_COOKIEBRIDGE_PORT:-8900}
+      COOKIEBRIDGE_DATA_DIR: /data/cookies
+    ports:
+      - 127.0.0.1:${MEDIACLAW_COOKIEBRIDGE_PORT:-8900}:8900
+    volumes:
+      - media-crawler-cookiebridge-data:/data/cookies
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:8900/health >/dev/null 2>&1 || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - mediaclaw-net
+
+networks:
+  mediaclaw-net:
+    external: true
+    name: mediaclaw-net
+
+volumes:
+  media-crawler-cookiebridge-data:

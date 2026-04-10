@@ -1,4 +1,4 @@
-import { Mock, vi } from 'vitest'
+import { beforeEach, describe, expect, it, Mock, vi } from 'vitest'
 import { CrawlerService, MEDIACLAW_CRAWL_QUEUE } from './crawler.service'
 
 describe('crawlerService behavior', () => {

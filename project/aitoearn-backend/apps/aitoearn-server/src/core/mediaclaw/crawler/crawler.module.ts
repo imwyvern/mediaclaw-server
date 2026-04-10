@@ -2,14 +2,17 @@ import { BullModule } from '@nestjs/bullmq'
 import { Module } from '@nestjs/common'
 import { AcquisitionModule } from '../acquisition/acquisition.module'
 import { DiscoveryModule } from '../discovery/discovery.module'
+import { MediaclawConfigModule } from '../mediaclaw-config.module'
 import { CrawlerController } from './crawler.controller'
 import { CrawlerProcessor } from './crawler.processor'
 import { CrawlerService, MEDIACLAW_CRAWL_QUEUE } from './crawler.service'
+import { MediaCrawlerProClient } from './media-crawler-pro.client'
 
 @Module({
   imports: [
     AcquisitionModule,
     DiscoveryModule,
+    MediaclawConfigModule,
     BullModule.registerQueue({
       name: MEDIACLAW_CRAWL_QUEUE,
       defaultJobOptions: {
@@ -24,7 +27,7 @@ import { CrawlerService, MEDIACLAW_CRAWL_QUEUE } from './crawler.service'
     }),
   ],
   controllers: [CrawlerController],
-  providers: [CrawlerService, CrawlerProcessor],
+  providers: [CrawlerService, CrawlerProcessor, MediaCrawlerProClient],
   exports: [CrawlerService],
 })
 export class CrawlerModule {}

@@ -221,7 +221,7 @@ export class CrawlerService {
             keyword: query.keyword,
             depth: query.depth,
           },
-          note: '当前只保留补采路由契约，后续再接入真实 worker 与结果回填。',
+          note: '当前 worker 会真实调度 MediaCrawlerPro；若响应里直接带补采结果，将合并写回发现池。',
         },
       },
     }
