@@ -111,6 +111,27 @@ class ImBinding {
   boundAt: Date
 }
 
+@Schema({ _id: false })
+class ExternalIdentity {
+  @Prop({ type: String, required: true })
+  providerId: string
+
+  @Prop({ type: String, required: true })
+  providerType: string
+
+  @Prop({ type: String, required: true })
+  subject: string
+
+  @Prop({ type: String, default: '' })
+  email: string
+
+  @Prop({ type: Date, default: Date.now })
+  linkedAt: Date
+
+  @Prop({ type: Date, default: Date.now })
+  lastLoginAt: Date
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'mediaclaw_users' })
 export class MediaClawUser extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -149,6 +170,9 @@ export class MediaClawUser extends WithTimestampSchema {
   @Prop({ type: [ImBinding], default: [] })
   imBindings: ImBinding[]
 
+  @Prop({ type: [ExternalIdentity], default: [] })
+  externalIdentities: ExternalIdentity[]
+
   @Prop({ type: String, default: '' })
   supabaseUserId: string
 
@@ -172,3 +196,4 @@ MediaClawUserSchema.index({ wechatOpenId: 1 }, { unique: true, sparse: true })
 MediaClawUserSchema.index({ wechatUnionId: 1 }, { unique: true, sparse: true })
 MediaClawUserSchema.index({ 'orgMemberships.orgId': 1 })
 MediaClawUserSchema.index({ 'imBindings.platform': 1, 'imBindings.platformUserId': 1 })
+MediaClawUserSchema.index({ 'externalIdentities.providerId': 1, 'externalIdentities.subject': 1 })

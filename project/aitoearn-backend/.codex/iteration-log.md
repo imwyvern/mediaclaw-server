@@ -69,3 +69,12 @@
   - 修复后 `pnpm nx lint aitoearn-server` 通过，无新增 warning
   - 修复后 `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/analytics/trend-prediction.service.behavior.spec.ts` 通过
 - 下一步计划：进入企业 SSO，实现企业级 SSO 配置、登录入口和 callback 闭环，优先打通 OIDC + 企业平台 preset，再补 SAML 支持。
+
+## 2026-04-10 11:48:08 PDT
+- 当前改动：补完企业 SSO 闭环，新增 `enterprise_sso_providers` 配置模型、OIDC/SAML provider DTO 与服务，实现 SSO provider 的创建/列举/删除、登录入口、OIDC callback、SAML assertion 登录，以及外部身份与企业成员关系绑定。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 首轮失败，定位为 `enterprise-sso.service.ts` 使用了 DOM 全局类型且定义了未使用常量
+  - 显式引入 `@xmldom/xmldom` 的 `Document/Element/Node` 类型并删除死常量后，`pnpm nx build aitoearn-server` 通过
+  - 修复后 `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/auth/enterprise-sso.service.behavior.spec.ts` 通过，`4` 个测试全部通过
+- 下一步计划：进入 ClawHost PostgreSQL 元数据层，实现 `apps/bots/bot_channels/bot_devices` 的同步与测试，再做本批次全量收口。

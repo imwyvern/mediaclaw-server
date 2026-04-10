@@ -1,4 +1,4 @@
-import { Body, Get, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { UserRole } from '@yikart/mongodb'
 import { Type } from 'class-transformer'
@@ -13,6 +13,13 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
 import { McAuthService } from './auth.service'
 import { EnterpriseAuthService } from './enterprise-auth.service'
+import {
+  CreateEnterpriseSsoProviderDto,
+  EnterpriseSsoCallbackQueryDto,
+  EnterpriseSsoLoginUrlQueryDto,
+  EnterpriseSsoSamlAssertionDto,
+} from './enterprise-sso.dto'
+import { EnterpriseSsoService } from './enterprise-sso.service'
 
 class SendSmsDto {
   @IsString()
@@ -193,6 +200,7 @@ export class McAuthController {
   constructor(
     private readonly authService: McAuthService,
     private readonly enterpriseAuthService: EnterpriseAuthService,
+    private readonly enterpriseSsoService: EnterpriseSsoService,
   ) {}
 
   @Public()
@@ -296,5 +304,61 @@ export class McAuthController {
   @Get('my-orgs')
   async listUserOrgs(@GetToken() user: { id: string }) {
     return this.enterpriseAuthService.listUserOrgs(user.id)
+  }
+
+  @Roles(UserRole.ENTERPRISE_ADMIN)
+  @UseGuards(PermissionGuard)
+  @Post('enterprise/sso/providers')
+  async createSsoProvider(
+    @GetToken() user: { orgId?: string, id: string },
+    @Body() body: CreateEnterpriseSsoProviderDto,
+  ) {
+    return this.enterpriseSsoService.createProvider(
+      user.orgId || '',
+      user.id,
+      body,
+    )
+  }
+
+  @Roles(UserRole.ENTERPRISE_ADMIN)
+  @UseGuards(PermissionGuard)
+  @Get('enterprise/sso/providers')
+  async listSsoProviders(@GetToken() user: { orgId?: string }) {
+    return this.enterpriseSsoService.listProviders(user.orgId || '')
+  }
+
+  @Roles(UserRole.ENTERPRISE_ADMIN)
+  @UseGuards(PermissionGuard)
+  @Delete('enterprise/sso/providers/:providerId')
+  async deleteSsoProvider(
+    @GetToken() user: { orgId?: string },
+    @Param('providerId') providerId: string,
+  ) {
+    return this.enterpriseSsoService.deleteProvider(user.orgId || '', providerId)
+  }
+
+  @Public()
+  @Get('enterprise/sso/providers/:providerId/login-url')
+  async getSsoLoginUrl(
+    @Param('providerId') providerId: string,
+    @Query() query: EnterpriseSsoLoginUrlQueryDto,
+  ) {
+    return this.enterpriseSsoService.getLoginUrl(providerId, query)
+  }
+
+  @Public()
+  @Get('enterprise/sso/callback')
+  async handleSsoCallback(@Query() query: EnterpriseSsoCallbackQueryDto) {
+    return this.enterpriseSsoService.handleOidcCallback(query.code, query.state)
+  }
+
+  @Public()
+  @Post('enterprise/sso/saml/assertion')
+  async handleSamlAssertion(@Body() body: EnterpriseSsoSamlAssertionDto) {
+    return this.enterpriseSsoService.handleSamlAssertion(
+      body.samlResponse,
+      body.relayState,
+      body.providerId,
+    )
   }
 }

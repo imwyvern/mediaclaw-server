@@ -44,6 +44,10 @@ import {
   EnterpriseInviteSchema,
 } from "./enterprise-invite.schema";
 import {
+  EnterpriseSsoProvider,
+  EnterpriseSsoProviderSchema,
+} from "./enterprise-sso-provider.schema";
+import {
   DiscoveryNotification,
   DiscoveryNotificationSchema,
 } from "./discovery-notification.schema";
@@ -165,6 +169,7 @@ export * from "./discovery-notification.schema";
 export * from "./distribution-rule.schema";
 export * from "./employee-assignment.schema";
 export * from "./enterprise-invite.schema";
+export * from "./enterprise-sso-provider.schema";
 export * from "./engagement.task.schema";
 export * from "./interaction-record.schema";
 export * from "./iteration-log.schema";
@@ -212,6 +217,7 @@ export const schemas = [
   { name: CreditsRecord.name, schema: CreditsRecordSchema },
   { name: DeliveryRecord.name, schema: DeliveryRecordSchema },
   { name: EnterpriseInvite.name, schema: EnterpriseInviteSchema },
+  { name: EnterpriseSsoProvider.name, schema: EnterpriseSsoProviderSchema },
   { name: PointsRecord.name, schema: PointsRecordSchema },
   { name: PlatformAccount.name, schema: PlatformAccountSchema },
   { name: AiLog.name, schema: AiLogSchema },

@@ -4,6 +4,8 @@ import { MongooseModule } from '@nestjs/mongoose'
 import {
   EnterpriseInvite,
   EnterpriseInviteSchema,
+  EnterpriseSsoProvider,
+  EnterpriseSsoProviderSchema,
   MediaClawUser,
   MediaClawUserSchema,
   Organization,
@@ -18,6 +20,7 @@ import { getRequiredEnv } from '../mediaclaw-env.util'
 import { McAuthController } from './auth.controller'
 import { McAuthService } from './auth.service'
 import { EnterpriseAuthService } from './enterprise-auth.service'
+import { EnterpriseSsoService } from './enterprise-sso.service'
 
 @Module({
   imports: [
@@ -28,6 +31,7 @@ import { EnterpriseAuthService } from './enterprise-auth.service'
       { name: Organization.name, schema: OrganizationSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
       { name: EnterpriseInvite.name, schema: EnterpriseInviteSchema },
+      { name: EnterpriseSsoProvider.name, schema: EnterpriseSsoProviderSchema },
     ]),
     JwtModule.register({
       secret: getRequiredEnv('JWT_SECRET'),
@@ -35,7 +39,7 @@ import { EnterpriseAuthService } from './enterprise-auth.service'
     }),
   ],
   controllers: [McAuthController],
-  providers: [McAuthService, EnterpriseAuthService],
-  exports: [McAuthService, EnterpriseAuthService],
+  providers: [McAuthService, EnterpriseAuthService, EnterpriseSsoService],
+  exports: [McAuthService, EnterpriseAuthService, EnterpriseSsoService],
 })
 export class McAuthModule {}

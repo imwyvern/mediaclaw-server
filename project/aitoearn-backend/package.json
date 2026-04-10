@@ -12,6 +12,7 @@
     "mediaclaw:discovery:bootstrap": "pnpm nx build aitoearn-server && node dist/apps/aitoearn-server/bootstrap/mediaclaw-discovery-bootstrap.js"
   },
   "dependencies": {
+    "@xmldom/xmldom": "^0.9.9",
     "@zilliz/milvus2-sdk-node": "^2.6.13",
     "adm-zip": "^0.5.17",
     "apify-client": "^2.22.2",
@@ -19,8 +20,10 @@
     "commander": "^14.0.0",
     "exceljs": "^4.4.0",
     "helmet": "^8.1.0",
+    "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
     "tslib": "^2.3.0",
+    "xml-crypto": "^6.1.2",
     "zod": "^4.3.5"
   },
   "devDependencies": {
