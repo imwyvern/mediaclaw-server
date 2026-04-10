@@ -17,6 +17,7 @@ import {
   VideoTask,
   VideoTaskStatus,
 } from '@yikart/mongodb'
+import { Workbook } from 'exceljs'
 import { Model, PipelineStage, Types } from 'mongoose'
 import { MEDIACLAW_SUCCESS_STATUSES } from '../video-task-status.utils'
 
@@ -31,7 +32,9 @@ interface ReportFilters {
   endDate?: string
 }
 
-type ReportAssetFormat = 'pdf' | 'markdown'
+export const REPORT_ASSET_FORMATS = ['pdf', 'markdown', 'csv', 'json', 'excel'] as const
+
+export type ReportAssetFormat = (typeof REPORT_ASSET_FORMATS)[number]
 
 interface GenerateReportOptions {
   formats?: string[]
@@ -49,6 +52,26 @@ interface ReportAssetBundle {
   generatedAt: string
   files: Partial<Record<ReportAssetFormat, ReportAssetDescriptor>>
   content: Partial<Record<ReportAssetFormat, string>>
+}
+
+interface ReportRow {
+  section: string
+  label: string
+  value: string | number
+}
+
+interface ReportTopBrandMetric {
+  brandName: string
+  totalVideos: number
+  completedVideos: number
+}
+
+interface ReportTopContentMetric {
+  taskId: string
+  views: number
+  engagementRate: number
+  publishedAt: string
+  outputVideoUrl: string
 }
 
 @Injectable()
@@ -236,7 +259,7 @@ export class ReportService {
   ) {
     try {
       const metrics = await this.buildMetrics(orgId, type, period)
-      const generatedAssets = this.renderReportAssets(reportId, type, period, metrics, formats)
+      const generatedAssets = await this.renderReportAssets(reportId, type, period, metrics, formats)
       const updated = await this.reportModel.findByIdAndUpdate(
         new Types.ObjectId(reportId),
         {
@@ -610,13 +633,13 @@ export class ReportService {
     )
   }
 
-  private renderReportAssets(
+  private async renderReportAssets(
     reportId: string,
     type: ReportType,
     period: { start: Date, end: Date },
-    metrics: Record<string, any>,
+    metrics: Record<string, unknown>,
     formats: ReportAssetFormat[],
-  ): ReportAssetBundle {
+  ): Promise<ReportAssetBundle> {
     const generatedAt = new Date().toISOString()
     const files = this.buildAssetDescriptors(reportId, formats)
     const content: Partial<Record<ReportAssetFormat, string>> = {}
@@ -638,6 +661,36 @@ export class ReportService {
         ...files.pdf!,
         encoding: 'base64',
         size: Buffer.from(pdfBase64, 'base64').length,
+      }
+    }
+
+    if (formats.includes('csv')) {
+      const csv = this.renderCsv(type, period, metrics)
+      content.csv = csv
+      files.csv = {
+        ...files.csv!,
+        encoding: 'utf8',
+        size: Buffer.byteLength(csv, 'utf8'),
+      }
+    }
+
+    if (formats.includes('json')) {
+      const json = this.renderJson(type, period, metrics)
+      content.json = json
+      files.json = {
+        ...files.json!,
+        encoding: 'utf8',
+        size: Buffer.byteLength(json, 'utf8'),
+      }
+    }
+
+    if (formats.includes('excel')) {
+      const excelBase64 = await this.renderExcelDocument(type, period, metrics)
+      content.excel = excelBase64
+      files.excel = {
+        ...files.excel!,
+        encoding: 'base64',
+        size: Buffer.from(excelBase64, 'base64').length,
       }
     }
 
@@ -742,6 +795,186 @@ export class ReportService {
     return Buffer.from(pdf, 'utf8').toString('base64')
   }
 
+  private renderCsv(
+    type: ReportType,
+    period: { start: Date, end: Date },
+    metrics: Record<string, unknown>,
+  ) {
+    const rows = this.buildReportRows(type, period, metrics)
+    return [
+      ['section', 'label', 'value'].join(','),
+      ...rows.map(row => [row.section, row.label, row.value].map(value => this.escapeCsvValue(value)).join(',')),
+    ].join('\n')
+  }
+
+  private renderJson(
+    type: ReportType,
+    period: { start: Date, end: Date },
+    metrics: Record<string, unknown>,
+  ) {
+    return JSON.stringify({
+      type,
+      period: {
+        start: period.start.toISOString(),
+        end: period.end.toISOString(),
+      },
+      metrics,
+    }, null, 2)
+  }
+
+  private async renderExcelDocument(
+    type: ReportType,
+    period: { start: Date, end: Date },
+    metrics: Record<string, unknown>,
+  ) {
+    const workbook = new Workbook()
+    workbook.creator = 'MediaClaw'
+    workbook.created = new Date()
+
+    const summarySheet = workbook.addWorksheet('Summary')
+    summarySheet.columns = [
+      { header: 'Section', key: 'section', width: 18 },
+      { header: 'Label', key: 'label', width: 28 },
+      { header: 'Value', key: 'value', width: 42 },
+    ]
+    summarySheet.addRows(this.buildReportRows(type, period, metrics))
+
+    const topBrands = this.extractTopBrandMetrics(metrics['topBrands'])
+    const brandSheet = workbook.addWorksheet('TopBrands')
+    brandSheet.columns = [
+      { header: 'Brand', key: 'brandName', width: 28 },
+      { header: 'TotalVideos', key: 'totalVideos', width: 16 },
+      { header: 'CompletedVideos', key: 'completedVideos', width: 18 },
+    ]
+    if (topBrands.length > 0) {
+      brandSheet.addRows(topBrands)
+    }
+
+    const topContent = this.extractTopContentMetrics(metrics['topContent'])
+    const contentSheet = workbook.addWorksheet('TopContent')
+    contentSheet.columns = [
+      { header: 'TaskId', key: 'taskId', width: 28 },
+      { header: 'Views', key: 'views', width: 14 },
+      { header: 'EngagementRate', key: 'engagementRate', width: 18 },
+      { header: 'PublishedAt', key: 'publishedAt', width: 28 },
+      { header: 'OutputVideoUrl', key: 'outputVideoUrl', width: 64 },
+    ]
+    if (topContent.length > 0) {
+      contentSheet.addRows(topContent)
+    }
+
+    const recommendations = this.extractRecommendations(metrics['recommendations'])
+    const recommendationSheet = workbook.addWorksheet('Recommendations')
+    recommendationSheet.columns = [
+      { header: 'Index', key: 'index', width: 10 },
+      { header: 'Recommendation', key: 'value', width: 96 },
+    ]
+    recommendationSheet.addRows(
+      recommendations.map((value: string, index: number) => ({
+        index: index + 1,
+        value,
+      })),
+    )
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    return Buffer.from(buffer).toString('base64')
+  }
+
+  private buildReportRows(
+    type: ReportType,
+    period: { start: Date, end: Date },
+    metrics: Record<string, unknown>,
+  ): ReportRow[] {
+    const performance = this.asRecord(metrics['performance'])
+    const topBrands = this.extractTopBrandMetrics(metrics['topBrands'])
+    const topContent = this.extractTopContentMetrics(metrics['topContent'])
+    const recommendations = this.extractRecommendations(metrics['recommendations'])
+
+    return [
+      { section: 'report', label: 'type', value: type },
+      { section: 'report', label: 'period_start', value: period.start.toISOString() },
+      { section: 'report', label: 'period_end', value: period.end.toISOString() },
+      { section: 'summary', label: 'total_videos', value: metrics['totalVideos'] || 0 },
+      { section: 'summary', label: 'completed_videos', value: metrics['completedVideos'] || 0 },
+      { section: 'summary', label: 'failed_videos', value: metrics['failedVideos'] || 0 },
+      { section: 'summary', label: 'success_rate', value: `${metrics['successRate'] || 0}%` },
+      { section: 'summary', label: 'avg_cost', value: metrics['avgCost'] || 0 },
+      { section: 'campaign', label: 'total_campaigns', value: metrics['totalCampaigns'] || 0 },
+      { section: 'campaign', label: 'active_campaigns', value: metrics['activeCampaigns'] || 0 },
+      { section: 'performance', label: 'total_views', value: performance['totalViews'] || 0 },
+      { section: 'performance', label: 'total_likes', value: performance['totalLikes'] || 0 },
+      { section: 'performance', label: 'total_comments', value: performance['totalComments'] || 0 },
+      { section: 'performance', label: 'total_shares', value: performance['totalShares'] || 0 },
+      { section: 'performance', label: 'total_saves', value: performance['totalSaves'] || 0 },
+      { section: 'performance', label: 'total_followers', value: performance['totalFollowers'] || 0 },
+      { section: 'performance', label: 'avg_engagement_rate', value: `${performance['avgEngagementRate'] || 0}%` },
+      ...topBrands.map((item, index) => ({
+        section: 'top_brand',
+        label: `rank_${index + 1}`,
+        value: `${item.brandName} | ${item.totalVideos} videos | ${item.completedVideos} completed`,
+      })),
+      ...topContent.map((item, index) => ({
+        section: 'top_content',
+        label: `rank_${index + 1}`,
+        value: `${item.taskId} | ${item.views} views | ${item.engagementRate}% ER`,
+      })),
+      ...recommendations.map((item: string, index: number) => ({
+        section: 'recommendation',
+        label: `item_${index + 1}`,
+        value: item,
+      })),
+    ]
+  }
+
+  private extractTopBrandMetrics(value: unknown): ReportTopBrandMetric[] {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return value.map((item) => {
+      const record = this.asRecord(item)
+      return {
+        brandName: this.toStringValue(record['brandName'], 'Unknown Brand'),
+        totalVideos: this.toNumberValue(record['totalVideos']),
+        completedVideos: this.toNumberValue(record['completedVideos']),
+      }
+    })
+  }
+
+  private extractTopContentMetrics(value: unknown): ReportTopContentMetric[] {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return value.map((item) => {
+      const record = this.asRecord(item)
+      return {
+        taskId: this.toStringValue(record['taskId']),
+        views: this.toNumberValue(record['views']),
+        engagementRate: this.toNumberValue(record['engagementRate']),
+        publishedAt: this.toStringValue(record['publishedAt']),
+        outputVideoUrl: this.toStringValue(record['outputVideoUrl']),
+      }
+    })
+  }
+
+  private extractRecommendations(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return value.map(item => this.toStringValue(item)).filter(Boolean)
+  }
+
+  private escapeCsvValue(value: unknown) {
+    const normalized = String(value ?? '')
+    if (!/[",\n]/.test(normalized)) {
+      return normalized
+    }
+
+    return `"${normalized.replace(/"/g, '""')}"`
+  }
+
   private escapePdfText(value: string) {
     return value
       .replace(/\\/g, '\\\\')
@@ -778,6 +1011,33 @@ export class ReportService {
       }
     }
 
+    if (formats.includes('csv')) {
+      files.csv = {
+        url: this.buildFileUrl(reportId, 'csv'),
+        contentType: 'text/csv; charset=utf-8',
+        encoding: 'utf8',
+        size: 0,
+      }
+    }
+
+    if (formats.includes('json')) {
+      files.json = {
+        url: this.buildFileUrl(reportId, 'json'),
+        contentType: 'application/json; charset=utf-8',
+        encoding: 'utf8',
+        size: 0,
+      }
+    }
+
+    if (formats.includes('excel')) {
+      files.excel = {
+        url: this.buildFileUrl(reportId, 'excel'),
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        encoding: 'base64',
+        size: 0,
+      }
+    }
+
     return files
   }
 
@@ -792,7 +1052,7 @@ export class ReportService {
     }
   }
 
-  private normalizeFormats(input?: string[]) {
+  private normalizeFormats(input?: string[]): ReportAssetFormat[] {
     const requested = Array.isArray(input) && input.length > 0
       ? input
       : ['pdf', 'markdown']
@@ -800,11 +1060,11 @@ export class ReportService {
     const normalized = [...new Set(
       requested
         .map(item => item.trim().toLowerCase())
-        .filter(item => item === 'pdf' || item === 'markdown'),
+        .filter((item): item is ReportAssetFormat => REPORT_ASSET_FORMATS.includes(item as ReportAssetFormat)),
     )] as ReportAssetFormat[]
 
     if (normalized.length === 0) {
-      throw new BadRequestException('formats must include pdf or markdown')
+      throw new BadRequestException(`formats must include one of ${REPORT_ASSET_FORMATS.join(', ')}`)
     }
 
     return normalized
@@ -812,14 +1072,14 @@ export class ReportService {
 
   private normalizeSingleFormat(format: string): ReportAssetFormat {
     const normalized = format.trim().toLowerCase()
-    if (normalized === 'pdf' || normalized === 'markdown') {
-      return normalized
+    if (REPORT_ASSET_FORMATS.includes(normalized as ReportAssetFormat)) {
+      return normalized as ReportAssetFormat
     }
 
-    throw new BadRequestException('format must be pdf or markdown')
+    throw new BadRequestException(`format must be one of ${REPORT_ASSET_FORMATS.join(', ')}`)
   }
 
-  private extractRequestedFormats(metrics: Record<string, any>) {
+  private extractRequestedFormats(metrics: Record<string, unknown>) {
     const rawFormats = Array.isArray(metrics['requestedFormats'])
       ? metrics['requestedFormats']
       : undefined
@@ -856,6 +1116,27 @@ export class ReportService {
     }
 
     return Number(((value / total) * 100).toFixed(2))
+  }
+
+  private toNumberValue(value: unknown) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value
+    }
+
+    const numericValue = Number(value)
+    return Number.isFinite(numericValue) ? numericValue : 0
+  }
+
+  private toStringValue(value: unknown, fallback = '') {
+    if (typeof value === 'string') {
+      return value
+    }
+
+    if (value === null || value === undefined) {
+      return fallback
+    }
+
+    return String(value)
   }
 
   private toResponse(report: {

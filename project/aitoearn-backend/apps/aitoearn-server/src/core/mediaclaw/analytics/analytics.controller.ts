@@ -339,8 +339,8 @@ export class AnalyticsController {
 
   private normalizeLegacyReportFormat(format?: string) {
     const normalized = (format || '').trim().toLowerCase()
-    if (normalized === 'pdf') {
-      return 'pdf'
+    if (normalized === 'pdf' || normalized === 'csv' || normalized === 'json' || normalized === 'excel') {
+      return normalized
     }
 
     return 'markdown'

@@ -79,6 +79,7 @@ import { DedupModule } from './dedup/dedup.module'
 import { DiscoveryModule } from './discovery/discovery.module'
 import { DistributionModule } from './distribution/distribution.module'
 import { EmployeeDispatchModule } from './employee-dispatch/employee-dispatch.module'
+import { ExportModule } from './export/export.module'
 import { HealthModule } from './health/health.module'
 import { MarketplaceModule } from './marketplace/marketplace.module'
 import { ModelResolverModule } from './model-resolver/model-resolver.module'
@@ -159,6 +160,7 @@ const workerModuleImports
     CopyModule,
     DistributionModule,
     EmployeeDispatchModule,
+    ExportModule,
     MediaClawApiKeyModule,
     SettingsModule,
     SkillModule,

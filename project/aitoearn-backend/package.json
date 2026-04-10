@@ -5,6 +5,7 @@
   "license": "MIT",
   "scripts": {
     "prepare": "command -v git >/dev/null 2>&1 && npx simple-git-hooks || echo 'Git not available, skipping git hooks setup'",
+    "build": "nx build aitoearn-server",
     "lint": "nx run-many --target=lint --nxBail --outputStyle=static --parallel=\"75%\"",
     "ai:serve": "nx serve aitoearn-ai",
     "server:serve": "nx serve aitoearn-server",
@@ -12,8 +13,10 @@
   },
   "dependencies": {
     "@zilliz/milvus2-sdk-node": "^2.6.13",
+    "adm-zip": "^0.5.17",
     "apify-client": "^2.22.2",
     "commander": "^14.0.0",
+    "exceljs": "^4.4.0",
     "helmet": "^8.1.0",
     "reflect-metadata": "^0.2.2",
     "tslib": "^2.3.0",

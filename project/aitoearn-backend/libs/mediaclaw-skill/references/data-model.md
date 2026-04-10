@@ -102,6 +102,12 @@
 - `POST /api/v1/apikey/validate`
 - `DELETE /api/v1/apikey/:id`
 
+### Export
+
+- `POST /api/v1/export/report`
+- `format`: `csv` / `json` / `pdf` / `excel` / `zip`
+- `zip` 模式使用 `reports[]` 打包多份报表，并附带 `manifest.json`
+
 ## Enum Contract
 
 ### `VideoTaskStatus`
