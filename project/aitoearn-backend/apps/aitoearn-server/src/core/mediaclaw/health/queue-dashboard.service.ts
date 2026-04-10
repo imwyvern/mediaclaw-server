@@ -16,7 +16,7 @@ type QueueDashboardRequest = Request & {
 @Injectable()
 export class QueueDashboardService implements OnApplicationBootstrap {
   private readonly logger = new Logger(QueueDashboardService.name)
-  private readonly basePath = '/api/v1/admin/queues'
+  private readonly basePaths = ['/admin/queues', '/api/v1/admin/queues']
   private mounted = false
 
   constructor(
@@ -32,7 +32,7 @@ export class QueueDashboardService implements OnApplicationBootstrap {
     }
 
     const serverAdapter = new ExpressAdapter()
-    serverAdapter.setBasePath(this.basePath)
+    serverAdapter.setBasePath(this.basePaths[0])
 
     createBullBoard({
       queues: [new BullMQAdapter(this.videoWorkerQueue)],
@@ -40,22 +40,24 @@ export class QueueDashboardService implements OnApplicationBootstrap {
     })
 
     const app = this.httpAdapterHost.httpAdapter.getInstance()
-    app.use(
-      this.basePath,
-      (request: Request, response: Response, next: NextFunction) => {
-        try {
-          ;(request as QueueDashboardRequest).user = this.queueDashboardAuthService.authorize(request)
-          next()
-        }
-        catch (error) {
-          this.handleAuthorizationError(error, response)
-        }
-      },
-      serverAdapter.getRouter(),
-    )
+    for (const basePath of this.basePaths) {
+      app.use(
+        basePath,
+        (request: Request, response: Response, next: NextFunction) => {
+          try {
+            ;(request as QueueDashboardRequest).user = this.queueDashboardAuthService.authorize(request)
+            next()
+          }
+          catch (error) {
+            this.handleAuthorizationError(error, response)
+          }
+        },
+        serverAdapter.getRouter(),
+      )
+    }
 
     this.mounted = true
-    this.logger.log(`Bull Board mounted at ${this.basePath}`)
+    this.logger.log(`Bull Board mounted at ${this.basePaths.join(', ')}`)
   }
 
   private handleAuthorizationError(error: unknown, response: Response) {

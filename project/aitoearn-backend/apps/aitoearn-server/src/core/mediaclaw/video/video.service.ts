@@ -23,6 +23,7 @@ import { Model, Types } from 'mongoose'
 import { BillingService } from '../billing/billing.service'
 import { DedupService } from '../dedup/dedup.service'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
+import { MonitoringMetricsService } from '../health/monitoring-metrics.service'
 import { NotificationService } from '../notification/notification.service'
 import { PromptOptimizerService } from '../prompt-optimizer/prompt-optimizer.service'
 import { UsageService } from '../usage/usage.service'
@@ -89,6 +90,8 @@ export class VideoService {
     private readonly promptOptimizerService?: PromptOptimizerService,
     @Optional()
     private readonly dedupService?: DedupService,
+    @Optional()
+    private readonly monitoringMetricsService?: MonitoringMetricsService,
     @InjectQueue(VIDEO_WORKER_QUEUE)
     @Optional()
     private readonly videoWorkerQueue?: Queue<VideoWorkerJobData>,
@@ -687,6 +690,10 @@ export class VideoService {
       await this.syncBatchStats(updated.batchId.toString())
     }
 
+    if (updated && status === VideoTaskStatus.COMPLETED) {
+      this.monitoringMetricsService?.recordVideoProductionCompleted()
+    }
+
     if (updated) {
       await this.handlePromptOptimizerStatusHook(updated, status, data).catch(
         (error) => {
@@ -718,6 +725,12 @@ export class VideoService {
             `Task failure notification skipped for ${updated?._id?.toString?.() || taskId}: ${error instanceof Error ? error.message : String(error)}`,
           )
         })
+    }
+
+    if (updated && status === VideoTaskStatus.FAILED) {
+      this.monitoringMetricsService?.recordVideoProductionFailed(
+        data?.step || this.mapStatusToStep(status),
+      )
     }
 
     return updated

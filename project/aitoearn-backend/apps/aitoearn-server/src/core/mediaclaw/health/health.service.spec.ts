@@ -4,10 +4,12 @@ import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthController } from './health.controller'
 import { HealthModule } from './health.module'
 import { HealthService } from './health.service'
+import { MonitoringAlertService } from './monitoring-alert.service'
+import { MonitoringMetricsService } from './monitoring-metrics.service'
 import { QueueDashboardAuthService } from './queue-dashboard-auth.service'
 import { QueueDashboardService } from './queue-dashboard.service'
 
-const { dashboardAuthServiceMock, dashboardServiceMock, healthCheckServiceMock, videoWorkerQueueMock } = vi.hoisted(() => ({
+const { dashboardAuthServiceMock, dashboardServiceMock, healthCheckServiceMock, monitoringAlertServiceMock, monitoringMetricsServiceMock, videoWorkerQueueMock } = vi.hoisted(() => ({
   dashboardAuthServiceMock: {
     authorize: vi.fn(),
   },
@@ -19,6 +21,16 @@ const { dashboardAuthServiceMock, dashboardServiceMock, healthCheckServiceMock, 
     getStorageUsage: vi.fn(),
     getSystemHealth: vi.fn(),
     getWorkerStatus: vi.fn(),
+  },
+  monitoringAlertServiceMock: {
+    checkThresholds: vi.fn(),
+  },
+  monitoringMetricsServiceMock: {
+    captureQueueMetrics: vi.fn(),
+    getOperationalSnapshot: vi.fn(),
+    onApplicationBootstrap: vi.fn(),
+    recordVideoProductionCompleted: vi.fn(),
+    recordVideoProductionFailed: vi.fn(),
   },
   videoWorkerQueueMock: {
     add: vi.fn().mockResolvedValue(undefined),
@@ -67,6 +79,14 @@ describeModuleSpec<HealthService>({
     {
       provide: QueueDashboardService,
       useValue: dashboardServiceMock,
+    },
+    {
+      provide: MonitoringMetricsService,
+      useValue: monitoringMetricsServiceMock,
+    },
+    {
+      provide: MonitoringAlertService,
+      useValue: monitoringAlertServiceMock,
     },
     {
       provide: 'BullQueue_mediaclaw_pipeline',

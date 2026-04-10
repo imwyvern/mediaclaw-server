@@ -36,9 +36,9 @@ export class QueueDashboardAuthService {
     if (
       typeof payload !== 'object'
       || !payload
-      || !userRoleSatisfies(payload.role, UserRole.SUPER_ADMIN)
+      || !userRoleSatisfies(payload.role, UserRole.ENTERPRISE_ADMIN)
     ) {
-      throw new ForbiddenException('Super admin role required')
+      throw new ForbiddenException('Enterprise admin role required')
     }
 
     return payload

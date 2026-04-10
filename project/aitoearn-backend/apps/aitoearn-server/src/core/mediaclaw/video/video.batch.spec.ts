@@ -77,6 +77,9 @@ describe('videoService batch status', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
+      undefined,
     )
   })
 

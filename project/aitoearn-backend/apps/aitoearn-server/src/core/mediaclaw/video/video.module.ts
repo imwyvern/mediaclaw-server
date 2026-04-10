@@ -13,6 +13,7 @@ import {
 import { BillingModule } from '../billing/billing.module'
 import { DedupModule } from '../dedup/dedup.module'
 import { EmployeeDispatchModule } from '../employee-dispatch/employee-dispatch.module'
+import { HealthModule } from '../health/health.module'
 import { NotificationModule } from '../notification/notification.module'
 import { PromptOptimizerModule } from '../prompt-optimizer/prompt-optimizer.module'
 import { UsageModule } from '../usage/usage.module'
@@ -31,6 +32,7 @@ import { VideoService } from './video.service'
     BillingModule,
     UsageModule,
     EmployeeDispatchModule,
+    HealthModule,
     NotificationModule,
     PromptOptimizerModule,
     DedupModule,
