@@ -112,7 +112,7 @@ export class ClawHostRuntimeService {
       Cmd: [
         'node',
         '-e',
-        `const fs=require('fs');fs.mkdirSync('/opt/mediaclaw/skills',{recursive:true});fs.writeFileSync('/opt/mediaclaw/skills/mediaclaw-client.version',${JSON.stringify(version)});console.log('ok')`,
+        `const fs=require('fs');fs.mkdirSync('/opt/mediaclaw/skills',{recursive:true});fs.writeFileSync('/opt/mediaclaw/skills/mediaclaw-client.version',${JSON.stringify(version)});process.stdout.write('ok\\n')`,
       ],
     })
 
