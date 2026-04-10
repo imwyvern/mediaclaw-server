@@ -244,6 +244,7 @@ describe('MediaClaw Auth E2E', () => {
     const videoPackModel = {
       create: vi.fn().mockResolvedValue(undefined),
     }
+    const organizationModel = {}
     const jwtService = {
       sign: vi.fn().mockImplementation((payload: { id: string }, options?: { expiresIn?: string }) =>
         `${payload.id}:${options?.expiresIn || 'na'}`),
@@ -256,6 +257,7 @@ describe('MediaClaw Auth E2E', () => {
     const service = new McAuthService(
       userModel as any,
       videoPackModel as any,
+      organizationModel as any,
       jwtService as any,
     )
 
@@ -373,6 +375,7 @@ describe('MediaClaw Auth E2E', () => {
     const videoPackModel = {
       create: vi.fn(),
     }
+    const organizationModel = {}
     const jwtService = {
       verify: vi.fn().mockReturnValue({
         id: activeUser._id.toString(),
@@ -384,6 +387,7 @@ describe('MediaClaw Auth E2E', () => {
     const service = new McAuthService(
       userModel as any,
       videoPackModel as any,
+      organizationModel as any,
       jwtService as any,
     )
 

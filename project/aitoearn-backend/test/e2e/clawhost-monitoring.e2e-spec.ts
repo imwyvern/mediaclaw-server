@@ -40,6 +40,10 @@ describe('MediaClaw ClawHost + Monitoring E2E', () => {
   }
 
   const healthService = {
+    getPublicStatus: vi.fn().mockReturnValue({
+      status: 'ok',
+      service: 'mediaclaw-api',
+    }),
     heartbeat: createResponseMock('heartbeat'),
   }
 
