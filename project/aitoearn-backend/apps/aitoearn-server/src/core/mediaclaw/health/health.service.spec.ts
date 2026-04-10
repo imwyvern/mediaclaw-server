@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { ClawHostService } from '../clawhost/clawhost.service'
 import { describeModuleSpec } from '../testing/module-spec.factory'
 import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthController } from './health.controller'
@@ -9,7 +10,10 @@ import { MonitoringMetricsService } from './monitoring-metrics.service'
 import { QueueDashboardAuthService } from './queue-dashboard-auth.service'
 import { QueueDashboardService } from './queue-dashboard.service'
 
-const { dashboardAuthServiceMock, dashboardServiceMock, healthCheckServiceMock, monitoringAlertServiceMock, monitoringMetricsServiceMock, videoWorkerQueueMock } = vi.hoisted(() => ({
+const { clawHostServiceMock, dashboardAuthServiceMock, dashboardServiceMock, healthCheckServiceMock, monitoringAlertServiceMock, monitoringMetricsServiceMock, videoWorkerQueueMock } = vi.hoisted(() => ({
+  clawHostServiceMock: {
+    recordHeartbeat: vi.fn().mockResolvedValue(undefined),
+  },
   dashboardAuthServiceMock: {
     authorize: vi.fn(),
   },
@@ -61,6 +65,18 @@ vi.mock('../worker/video-worker-queue.module', async () => {
   return { VideoWorkerQueueModule: MockVideoWorkerQueueModule }
 })
 
+vi.mock('../clawhost/clawhost.module', async () => {
+  const { Module } = await import('@nestjs/common')
+
+  class MockClawHostModule {}
+  Module({
+    providers: [{ provide: ClawHostService, useValue: clawHostServiceMock }],
+    exports: [ClawHostService],
+  })(MockClawHostModule)
+
+  return { ClawHostModule: MockClawHostModule }
+})
+
 describeModuleSpec<HealthService>({
   suiteName: 'HealthModule',
   module: HealthModule,
@@ -87,6 +103,10 @@ describeModuleSpec<HealthService>({
     {
       provide: MonitoringAlertService,
       useValue: monitoringAlertServiceMock,
+    },
+    {
+      provide: ClawHostService,
+      useValue: clawHostServiceMock,
     },
     {
       provide: 'BullQueue_mediaclaw_pipeline',
