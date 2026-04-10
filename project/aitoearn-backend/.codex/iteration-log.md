@@ -165,3 +165,30 @@
   - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
   - 功能自测结论：企业订阅可返回当前 SLA 档位、生成赔付建议并落库存档；个人体验版走 `best_effort` 档位，不触发赔付；历史查询与定时快照链路已接通
 - 下一步计划：Batch 1 三个原子改动均已达到停止条件，提交 SLA 这一刀并整理本批次提交结果；继续保留无关残留 `tts.service.ts` 与 `.tmp-vitest/` 不做处理。
+
+## 2026-04-10 13:21:58 PDT
+- 当前改动：执行 Batch 2 retry 复核。逐项核对 `公开数据删除/合规下线通道`、`趋势预测引擎`、`企业 SSO`、`ClawHost PostgreSQL 模型` 四个原 `❌` 项，确认当前分支均已存在真实 controller/service/schema/test 落地，这次无需新增功能代码，只做全量回归验证。
+- 验证结果：
+  - 代码复核结论：
+    - `compliance.controller.ts + compliance.service.ts + compliance-deletion-request.schema.ts` 已提供公开删除申请、公开状态查询、审核与执行闭环
+    - `analytics.controller.ts + trend-prediction.service.ts` 已提供 `/api/v1/analytics/predictions` 与未来 7 天方向/发布时间预测
+    - `auth.controller.ts + enterprise-sso.service.ts + enterprise-sso-provider.schema.ts` 已提供 OIDC/SAML 企业 SSO 配置、登录入口和 callback/assertion
+    - `clawhost-postgres.service.ts` 已提供 `apps/bots/bot_channels/bot_devices` PostgreSQL 同步模型
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
+  - 功能自测结论：Batch 2 原审计中的 4 个 `❌` 项在当前代码已闭环实现，本次 retry 未发现新的 backend 缺口或新增 failure
+- 下一步计划：Batch 2 retry 已满足停止条件；如需继续，应转入 `PRD-GAP-ANALYSIS-v2.md` 中剩余 `🔶` 项，或回写审计文档以消除陈旧结论。
+
+## 2026-04-10 13:24:23 PDT
+- 当前改动：执行 Batch 3 retry 复核。逐项核对 `ClawHost Docker/K8s runtime 抽象`、`OpenTelemetry tracing + Mongo 慢查询`、`OSS 生命周期与存储健康治理` 三项架构升级，确认当前分支均已存在真实 service/driver/schema/test 落地，这次无需新增功能代码，只做全量回归验证。
+- 验证结果：
+  - 代码复核结论：
+    - `clawhost-runtime.service.ts + clawhost-docker-runtime.driver.ts + clawhost-k8s-runtime.driver.ts + clawhost-postgres.service.ts + clawhost-instance.schema.ts` 已提供 `docker/k8s` 双 runtime、实例级 `runtimeKind`、K8s namespace/pod 元数据与 PostgreSQL 同步模型
+    - `monitoring-tracing.service.ts + mongo-slow-query-observer.service.ts + monitoring-metrics.service.ts` 已提供 OpenTelemetry tracing、`traceparent/x-trace-id` 回传、Mongo 慢查询监测与指标接入
+    - `storage-lifecycle.service.ts` 已提供 OSS 生命周期规则同步、偏移告警与存储健康状态校验
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
+  - 功能自测结论：Batch 3 原审计中的架构升级项在当前代码已闭环实现，本次 retry 未发现新的 backend 架构缺口或新增 failure
+- 下一步计划：Batch 3 retry 已满足停止条件；如需继续，应转入剩余前端/产品化 gap，或回写审计文档以消除陈旧结论。
