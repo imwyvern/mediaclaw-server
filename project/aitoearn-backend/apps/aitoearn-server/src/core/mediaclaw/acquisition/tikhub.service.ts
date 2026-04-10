@@ -909,7 +909,16 @@ export class TikHubService implements ContentProvider {
   }
 
   private unwrapData(payload: Record<string, unknown>): Record<string, unknown> {
-    return this.pickFirstRecord(payload['data'], payload) || {}
+    let current = this.pickFirstRecord(payload['data'], payload) || {}
+
+    while (true) {
+      const next = this.asRecord(current['data'])
+      if (!next) {
+        return current
+      }
+
+      current = next
+    }
   }
 
   private pickRecordList(...candidates: unknown[]): Record<string, unknown>[] {
