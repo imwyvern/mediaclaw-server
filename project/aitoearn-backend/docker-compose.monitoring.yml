@@ -55,7 +55,9 @@ services:
       - 127.0.0.1:${GRAFANA_PORT:-3000}:3000
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/monitoring/grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./docker/monitoring/grafana/provisioning/dashboards/provider.yml:/etc/grafana/provisioning/dashboards/provider.yml:ro
+      - ./docker/monitoring/grafana/provisioning/dashboards/mediaclaw-overview.json:/etc/grafana/provisioning/dashboards/mediaclaw-overview.json:ro
     depends_on:
       - prometheus
     mem_limit: 256m
