@@ -35,14 +35,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run lint
-        run: npx nx lint aitoearn-server --skip-nx-cache
+      - name: Run server lint
+        run: pnpm nx lint aitoearn-server --skip-nx-cache
 
-      - name: Run build
-        run: npx nx build aitoearn-server --skip-nx-cache
+      - name: Run ai lint
+        run: pnpm nx lint aitoearn-ai --skip-nx-cache
 
-      - name: Run tests
-        run: npx nx test aitoearn-server --skip-nx-cache
+      - name: Run server build
+        run: pnpm nx build aitoearn-server --skip-nx-cache
+
+      - name: Run ai build
+        run: pnpm nx build aitoearn-ai --skip-nx-cache
+
+      - name: Run server tests
+        run: pnpm nx test aitoearn-server --skip-nx-cache -- --run
+
+      - name: Run ai tests
+        run: pnpm nx test aitoearn-ai --skip-nx-cache -- --run
 
   docker:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
