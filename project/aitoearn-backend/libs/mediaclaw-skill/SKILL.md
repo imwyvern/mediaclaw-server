@@ -22,9 +22,10 @@ Use this skill when the user needs to operate MediaClaw from a local agent or Op
 
 ## Entry Point
 
-- Primary entry: `node --experimental-strip-types ./scripts/mediaclaw-client.ts`
+- Primary entry: `./scripts/mediaclaw-client`
 - Transport helper: `./scripts/mc-api.sh`
-- Inspect capability matrix: `node --experimental-strip-types ./scripts/mediaclaw-client.ts help`
+- Source entry: `./scripts/mediaclaw-client.ts`
+- Inspect capability matrix: `./scripts/mediaclaw-client help`
 
 ## Capability Map
 
@@ -58,8 +59,8 @@ Use this skill when the user needs to operate MediaClaw from a local agent or Op
 
 ## Workflow
 
-1. New agent session: run `node --experimental-strip-types ./scripts/mediaclaw-client.ts register "$MEDIACLAW_AGENT_ID"` once.
-2. Sync capability matrix with `node --experimental-strip-types ./scripts/mediaclaw-client.ts discover --agent "$MEDIACLAW_AGENT_ID"` and keep liveness via `heartbeat`.
+1. New agent session: run `./scripts/mediaclaw-client register "$MEDIACLAW_AGENT_ID"` once.
+2. Sync capability matrix with `./scripts/mediaclaw-client discover --agent "$MEDIACLAW_AGENT_ID"` and keep liveness via `heartbeat`.
 3. Review incoming work with `pending` or `deliveries`, then use `preview` before `download`.
 4. Use `approve` or `review` according to the current approval level.
 5. Use `caption-update` / `edit-copy` for copy revision and `mark-published` / `published` after external posting completes.
@@ -74,8 +75,8 @@ Use this skill when the user needs to operate MediaClaw from a local agent or Op
 ```json
 {
   "name": "mediaclaw-client",
-  "command": "node",
-  "args": ["--experimental-strip-types", "./scripts/mediaclaw-client.ts"],
+  "command": "./scripts/mediaclaw-client",
+  "args": [],
   "endpoint": {
     "baseUrl": "${MEDIACLAW_BASE_URL:-https://api.mediaclaw.com}"
   },
@@ -97,4 +98,4 @@ The standalone example is also available at `references/openclaw.example.json`.
 
 ## Command Entry
 
-Use `node --experimental-strip-types ./scripts/mediaclaw-client.ts help` to inspect the full command matrix.
+Use `./scripts/mediaclaw-client help` to inspect the full command matrix.

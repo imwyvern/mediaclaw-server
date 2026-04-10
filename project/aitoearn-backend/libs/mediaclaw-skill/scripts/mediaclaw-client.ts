@@ -1,5 +1,3 @@
-#!/usr/bin/env -S node --experimental-strip-types
-
 const { spawnSync } = require('node:child_process')
 const path = require('node:path')
 
@@ -66,7 +64,8 @@ function printHelp(layerId?: string) {
 
   console.log('MediaClaw Client')
   console.log('')
-  console.log('主入口: node --experimental-strip-types ./scripts/mediaclaw-client.ts <command>')
+  console.log('主入口: ./scripts/mediaclaw-client <command>')
+  console.log('源码入口: ./scripts/mediaclaw-client.ts')
   console.log('底层传输: ./scripts/mc-api.sh <command>')
   console.log('')
   console.log('常用命令:')
