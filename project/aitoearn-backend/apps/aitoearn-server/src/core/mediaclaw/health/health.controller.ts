@@ -1,4 +1,4 @@
-import { Body, Get, Post } from '@nestjs/common'
+import { Body, Get, Post, Query } from '@nestjs/common'
 import { HealthCheck } from '@nestjs/terminus'
 import { GetToken, Public } from '@yikart/aitoearn-auth'
 import { UserRole } from '@yikart/mongodb'
@@ -12,6 +12,7 @@ import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { Roles } from '../permission.guard'
 import { MediaClawHealthCheckService } from './health-check.service'
 import { HealthService } from './health.service'
+import { SlaService } from './sla.service'
 
 class HeartbeatDto {
   @IsOptional()
@@ -28,11 +29,28 @@ class HeartbeatDto {
   capabilities?: string[]
 }
 
+class EvaluateSlaDto {
+  @IsOptional()
+  @IsString()
+  windowStart?: string
+
+  @IsOptional()
+  @IsString()
+  windowEnd?: string
+}
+
+class SlaHistoryQueryDto {
+  @IsOptional()
+  @IsString()
+  limit?: string
+}
+
 @MediaClawApiController('api/v1')
 export class HealthController {
   constructor(
     private readonly healthService: HealthService,
     private readonly mediaClawHealthCheckService: MediaClawHealthCheckService,
+    private readonly slaService: SlaService,
   ) {}
 
   @Public()
@@ -81,5 +99,35 @@ export class HealthController {
   @Get('health/metrics')
   async getApiMetrics() {
     return this.mediaClawHealthCheckService.getApiMetrics()
+  }
+
+  @Get('health/sla')
+  async getCurrentSla(@GetToken() user: MediaClawAuthUser) {
+    return this.slaService.getCurrentSla({
+      orgId: user.orgId,
+      userId: user.id,
+    })
+  }
+
+  @Post('health/sla/evaluate')
+  async evaluateSla(
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: EvaluateSlaDto,
+  ) {
+    return this.slaService.evaluateCurrentSla({
+      orgId: user.orgId,
+      userId: user.id,
+    }, body)
+  }
+
+  @Get('health/sla/history')
+  async getSlaHistory(
+    @GetToken() user: MediaClawAuthUser,
+    @Query() query: SlaHistoryQueryDto,
+  ) {
+    return this.slaService.listHistory({
+      orgId: user.orgId,
+      userId: user.id,
+    }, query.limit)
   }
 }

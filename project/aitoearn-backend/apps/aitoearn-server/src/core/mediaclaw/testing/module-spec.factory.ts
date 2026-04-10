@@ -222,6 +222,7 @@ const testingHarness = vi.hoisted(() => {
     ProductionBatchStatus: createEnum(['PENDING', 'PROCESSING', 'PAUSED', 'PARTIAL', 'COMPLETED', 'FAILED', 'CANCELLED']),
     ReportStatus: createEnum(['PENDING', 'READY', 'FAILED']),
     ReportType: createEnum(['WEEKLY', 'MONTHLY', 'CAMPAIGN', 'CUSTOM']),
+    SlaScopeType: createEnum(['ORG', 'USER']),
     SubscriptionPlan: createEnum(['TEAM', 'PRO', 'FLAGSHIP']),
     SubscriptionStatus: createEnum(['ACTIVE', 'PAST_DUE', 'CANCELLED', 'EXPIRED']),
     UsageHistoryType: createEnum([
@@ -331,6 +332,7 @@ vi.mock('@yikart/mongodb', () => {
     'PlatformAccount',
     'PublishRecord',
     'Report',
+    'SlaReport',
     'Subscription',
     'UsageHistory',
     'VideoAnalytics',
@@ -374,6 +376,7 @@ vi.mock('@yikart/mongodb', () => {
     'PlatformAccountSchema',
     'PublishRecordSchema',
     'ReportSchema',
+    'SlaReportSchema',
     'SubscriptionSchema',
     'UsageHistorySchema',
     'VideoAnalyticsSchema',

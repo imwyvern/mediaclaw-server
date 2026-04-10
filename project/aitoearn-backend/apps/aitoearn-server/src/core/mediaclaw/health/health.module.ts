@@ -6,6 +6,10 @@ import {
   AuditLogSchema,
   BrandAssetVersion,
   BrandAssetVersionSchema,
+  SlaReport,
+  SlaReportSchema,
+  Subscription,
+  SubscriptionSchema,
 } from '@yikart/mongodb'
 import { ClawHostModule } from '../clawhost/clawhost.module'
 import { MediaclawConfigModule } from '../mediaclaw-config.module'
@@ -22,6 +26,7 @@ import { OssLifecycleClientFactory } from './oss-lifecycle-client.factory'
 import { PublicHealthController } from './public-health.controller'
 import { QueueDashboardAuthService } from './queue-dashboard-auth.service'
 import { QueueDashboardService } from './queue-dashboard.service'
+import { SlaService } from './sla.service'
 import { StorageLifecycleService } from './storage-lifecycle.service'
 
 @Module({
@@ -33,6 +38,8 @@ import { StorageLifecycleService } from './storage-lifecycle.service'
     MongooseModule.forFeature([
       { name: AuditLog.name, schema: AuditLogSchema },
       { name: BrandAssetVersion.name, schema: BrandAssetVersionSchema },
+      { name: Subscription.name, schema: SubscriptionSchema },
+      { name: SlaReport.name, schema: SlaReportSchema },
     ]),
   ],
   controllers: [HealthController, MonitoringMetricsController, PublicHealthController],
@@ -47,7 +54,8 @@ import { StorageLifecycleService } from './storage-lifecycle.service'
     StorageLifecycleService,
     QueueDashboardAuthService,
     QueueDashboardService,
+    SlaService,
   ],
-  exports: [MonitoringMetricsService],
+  exports: [MonitoringMetricsService, SlaService],
 })
 export class HealthModule {}

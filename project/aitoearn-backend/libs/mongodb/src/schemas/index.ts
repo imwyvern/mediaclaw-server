@@ -125,6 +125,7 @@ import {
   QrCodeArtImageSchema,
 } from "./qr-code-art-image.schema";
 import { Report, ReportSchema } from "./report.schema";
+import { SlaReport, SlaReportSchema } from "./sla-report.schema";
 import {
   ReplyCommentRecord,
   ReplyCommentRecordSchema,
@@ -200,6 +201,7 @@ export * from "./qr-code-art-image.schema";
 export * from "./refund-request.schema";
 export * from "./report.schema";
 export * from "./reply-comment-record.schema";
+export * from "./sla-report.schema";
 export * from "./subscription.schema";
 export * from "./timestamp.schema";
 export * from "./usage-history.schema";
@@ -272,6 +274,7 @@ export const schemas = [
   { name: Webhook.name, schema: WebhookSchema },
   { name: QrCodeArtImage.name, schema: QrCodeArtImageSchema },
   { name: Report.name, schema: ReportSchema },
+  { name: SlaReport.name, schema: SlaReportSchema },
   { name: EngagementTask.name, schema: EngagementTaskSchema },
   { name: EngagementSubTask.name, schema: EngagementSubTaskSchema },
   { name: InteractionRecord.name, schema: InteractionRecordSchema },

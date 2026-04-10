@@ -155,3 +155,13 @@
   - `pnpm nx test aitoearn-server -- --run` 通过，`122` 个测试文件、`384` 个测试全部通过
   - 功能自测结论：实例可配置共享群入口，个人用户可读取目录并激活体验，会话绑定会持久化到用户侧并回写实例最近激活时间
 - 下一步计划：进入 SLA 服务化接口，实现 SLA 分档、周期快照、赔付评估与对外查询 API，并在完成后再做一次全量 build/lint/test 收口。
+
+## 2026-04-10 13:12:53 PDT
+- 当前改动：补完 SLA 服务化接口。新增 `SlaReport` schema 与 `SlaService`，实现套餐分档策略、周期快照、赔付评估、历史查询和定时采集；同时把 `/api/v1/health/sla`、`/api/v1/health/sla/evaluate`、`/api/v1/health/sla/history` 接到 `HealthController`，并补齐 `HealthModule` 注入与测试工厂 mock。
+- 验证结果：
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/health/sla.service.behavior.spec.ts src/core/mediaclaw/health/health.service.spec.ts src/core/mediaclaw/health/health.service.behavior.spec.ts` 通过，`3` 个测试文件、`8` 个测试全部通过
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
+  - 功能自测结论：企业订阅可返回当前 SLA 档位、生成赔付建议并落库存档；个人体验版走 `best_effort` 档位，不触发赔付；历史查询与定时快照链路已接通
+- 下一步计划：Batch 1 三个原子改动均已达到停止条件，提交 SLA 这一刀并整理本批次提交结果；继续保留无关残留 `tts.service.ts` 与 `.tmp-vitest/` 不做处理。
