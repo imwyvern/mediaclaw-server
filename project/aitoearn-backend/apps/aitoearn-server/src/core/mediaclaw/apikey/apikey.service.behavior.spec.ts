@@ -42,4 +42,50 @@ describe('mediaClawApiKeyService behavior', () => {
     ])
     expect(result[0]).not.toHaveProperty('key')
   })
+
+  it('validateOwnedKey 应兼容 customer scoped key 格式', async () => {
+    const rawKey = 'mc_beautybrand_abc123def456'
+    const record = {
+      _id: { toString: () => 'api-key-2' },
+      userId: 'user-1',
+      orgId: { toString: () => 'org-1' },
+      permissions: ['read'],
+      role: 'employee',
+      isActive: true,
+      expiresAt: null,
+      lastUsedAt: null,
+      prefix: 'mc_beautybrand_abc123de',
+      name: 'Scoped Key',
+      createdAt: new Date('2026-04-09T00:00:00.000Z'),
+    }
+    const findOne = vi.fn()
+      .mockReturnValueOnce({
+        exec: vi.fn().mockResolvedValue(record),
+      })
+      .mockReturnValueOnce({
+        exec: vi.fn().mockResolvedValue(record),
+      })
+    const apiKeyModel = {
+      findOne,
+      findByIdAndUpdate: vi.fn().mockReturnValue({
+        exec: vi.fn().mockResolvedValue(record),
+      }),
+    }
+
+    const service = new MediaClawApiKeyService(apiKeyModel as any, {} as any)
+    const result = await service.validateOwnedKey('user-1', { key: rawKey })
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        valid: true,
+        message: 'API key is active',
+      }),
+    )
+    expect(findOne).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        userId: 'user-1',
+      }),
+    )
+  })
 })

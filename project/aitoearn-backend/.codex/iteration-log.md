@@ -23,3 +23,11 @@
   - `pnpm nx lint aitoearn-server` 通过
   - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/content-mgmt/content-mgmt.export.behavior.spec.ts src/core/mediaclaw/content-mgmt/content-mgmt.service.spec.ts src/core/mediaclaw/content-mgmt/content-mgmt.workflow.spec.ts` 通过
 - 下一步计划：补 OpenClaw API Key 合约兼容层，先做 customer-scoped key 格式兼容，不主动破坏现有 `mc_live_` 存量 key。
+
+## 2026-04-10 10:45:25 PDT
+- 当前改动：补 OpenClaw API Key 合约兼容层，允许 `mc_<scope>_<secret>` customer-scoped key 与现有 `mc_live_ / mc_test_` 共存，并把 usage 归因统一收敛到稳定 prefix，同时补齐测试公共 mock。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/apikey/apikey.service.behavior.spec.ts src/core/mediaclaw/apikey/apikey.service.spec.ts src/core/mediaclaw/usage/usage-tracking.interceptor.spec.ts` 通过
+- 下一步计划：继续补报表统一导出与退款闭环，把剩余后端 🔶 项按原子改动逐个收口。

@@ -410,8 +410,31 @@ vi.mock('@yikart/mongodb', () => {
     return testingHarness.mongoEnumMocks['UserRole']['EMPLOYEE']
   }
 
+  const MEDIA_CLAW_API_KEY_ENVIRONMENTS = ['live', 'test'] as const
+
+  const isMediaClawApiKey = (value?: string | null): value is string =>
+    typeof value === 'string' && /^mc_[a-z][a-z0-9-]{1,31}_[a-z0-9]+$/i.test(value.trim())
+
+  const extractMediaClawApiKeyPrefix = (rawKey?: string | null) =>
+    rawKey?.trim().match(/^(mc_[a-z][a-z0-9-]{1,31}_[a-z0-9]{8})/i)?.[1]
+
+  const maskMediaClawApiKeyPrefix = (prefix?: string | null) => {
+    if (!prefix) {
+      return 'mc_live_****************************'
+    }
+
+    const trimmed = prefix.trim()
+    const suffix = trimmed.slice(-4) || '****'
+    const scopePrefix = trimmed.match(/^(mc_[a-z][a-z0-9-]{1,31}_)/i)?.[1] || 'mc_live_'
+    return `${scopePrefix}************************${suffix}`
+  }
+
   const mockModule: Record<string, any> = {
     ...testingHarness.mongoEnumMocks,
+    MEDIA_CLAW_API_KEY_ENVIRONMENTS,
+    extractMediaClawApiKeyPrefix,
+    isMediaClawApiKey,
+    maskMediaClawApiKeyPrefix,
     normalizeUserRole,
     userRoleSatisfies: (role: string | null | undefined, requiredRole: string) => {
       const ranks: Record<string, number> = {

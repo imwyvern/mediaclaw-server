@@ -2,8 +2,10 @@ export const MEDIA_CLAW_API_KEY_ENVIRONMENTS = ['live', 'test'] as const
 
 export type MediaClawApiKeyEnvironment = (typeof MEDIA_CLAW_API_KEY_ENVIRONMENTS)[number]
 
-const MEDIA_CLAW_API_KEY_REGEX = /^mc_(live|test)_[a-z0-9]+$/i
-const MEDIA_CLAW_API_KEY_PREFIX_REGEX = /^(mc_(?:live|test)_[a-z0-9]{8})/i
+const MEDIA_CLAW_API_KEY_SCOPE_REGEX = '[a-z][a-z0-9-]{1,31}'
+const MEDIA_CLAW_API_KEY_REGEX = new RegExp(`^mc_(${MEDIA_CLAW_API_KEY_SCOPE_REGEX})_[a-z0-9]+$`, 'i')
+const MEDIA_CLAW_API_KEY_PREFIX_REGEX = new RegExp(`^(mc_${MEDIA_CLAW_API_KEY_SCOPE_REGEX}_[a-z0-9]{8})`, 'i')
+const MEDIA_CLAW_API_KEY_PREFIX_ONLY_REGEX = new RegExp(`^(mc_${MEDIA_CLAW_API_KEY_SCOPE_REGEX}_)`, 'i')
 
 export function normalizeMediaClawApiKeyEnvironment(
   value?: string | null,
@@ -45,7 +47,7 @@ export function maskMediaClawApiKeyPrefix(prefix?: string | null) {
 
   const trimmed = prefix.trim()
   const suffix = trimmed.slice(-4) || '****'
-  const prefixMatch = trimmed.match(/^(mc_(?:live|test)_)/i)
+  const prefixMatch = trimmed.match(MEDIA_CLAW_API_KEY_PREFIX_ONLY_REGEX)
   const environmentPrefix = prefixMatch?.[1] || 'mc_live_'
 
   return `${environmentPrefix}************************${suffix}`
