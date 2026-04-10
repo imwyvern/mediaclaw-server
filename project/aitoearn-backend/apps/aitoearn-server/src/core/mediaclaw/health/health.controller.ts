@@ -72,6 +72,12 @@ export class HealthController {
     return this.mediaClawHealthCheckService.getStorageUsage()
   }
 
+  @Roles(UserRole.SUPER_ADMIN)
+  @Get('health/storage/policy')
+  async getStorageLifecyclePolicy() {
+    return this.mediaClawHealthCheckService.getStorageLifecyclePolicy()
+  }
+
   @Get('health/metrics')
   async getApiMetrics() {
     return this.mediaClawHealthCheckService.getApiMetrics()

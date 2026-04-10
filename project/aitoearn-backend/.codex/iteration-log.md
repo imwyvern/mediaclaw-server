@@ -114,3 +114,13 @@
   - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/health/monitoring-metrics.service.behavior.spec.ts src/core/mediaclaw/health/monitoring-tracing.service.behavior.spec.ts src/core/mediaclaw/health/monitoring-alert.service.behavior.spec.ts` 首轮失败，定位为同一 spec 解析错误
   - 修复后定向测试通过，`3` 个测试文件、`3` 个测试全部通过
 - 下一步计划：进入 Batch 3 最后一个原子改动，补备份/存储策略的 OSS 生命周期同步与校验，再做全量 build/lint/test 收口。
+
+## 2026-04-10 12:30:28 PDT
+- 当前改动：补完数据备份与存储策略的 OSS 生命周期同步与校验。新增 `StorageLifecycleService` 和 OSS client factory，支持按 bucket 聚合下发生命周期规则、校验 backup/video 规则是否漂移，并把状态接入 `health/storage`；同时把 `backup.sh` 的 Mongo 日备默认保留天数从 7 调整为 30，对齐 PRD。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 首轮失败，定位为 `parseBucketUrl` 使用了会触发超线性回溯告警的正则
+  - 改为 `URL` 解析 bucket URL，并把规则比较从 `JSON.stringify` 全对象比较改成字段级比较后，`pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/health/storage-lifecycle.service.behavior.spec.ts src/core/mediaclaw/health/health.service.spec.ts` 首轮失败，定位为视频规则校验误用对象序列化，属性顺序差异导致 false negative
+  - 修复后定向测试通过，`2` 个测试文件、`6` 个测试全部通过
+- 下一步计划：Batch 3 的原子改动已补齐，接下来执行全量 build/lint/test 收口，确认没有引入新的 failure，再整理本批次提交结果。

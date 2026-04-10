@@ -18,9 +18,11 @@ import { MonitoringAlertService } from './monitoring-alert.service'
 import { MonitoringMetricsController } from './monitoring-metrics.controller'
 import { MonitoringMetricsService } from './monitoring-metrics.service'
 import { MonitoringTracingService } from './monitoring-tracing.service'
+import { OssLifecycleClientFactory } from './oss-lifecycle-client.factory'
 import { PublicHealthController } from './public-health.controller'
 import { QueueDashboardAuthService } from './queue-dashboard-auth.service'
 import { QueueDashboardService } from './queue-dashboard.service'
+import { StorageLifecycleService } from './storage-lifecycle.service'
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import { QueueDashboardService } from './queue-dashboard.service'
     MonitoringTracingService,
     MongoSlowQueryObserverService,
     MonitoringAlertService,
+    OssLifecycleClientFactory,
+    StorageLifecycleService,
     QueueDashboardAuthService,
     QueueDashboardService,
   ],

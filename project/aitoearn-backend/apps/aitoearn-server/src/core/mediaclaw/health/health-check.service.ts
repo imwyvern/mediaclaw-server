@@ -14,6 +14,7 @@ import { Queue } from 'bullmq'
 import { Connection, Model } from 'mongoose'
 import { VIDEO_WORKER_QUEUE, VideoWorkerJobData } from '../worker/worker.constants'
 import { HealthService } from './health.service'
+import { StorageLifecycleService } from './storage-lifecycle.service'
 
 interface DashboardServiceStatus {
   id: string
@@ -40,6 +41,7 @@ export class MediaClawHealthCheckService {
     private readonly brandAssetVersionModel: Model<BrandAssetVersion>,
     @InjectQueue(VIDEO_WORKER_QUEUE)
     private readonly videoWorkerQueue: Queue<VideoWorkerJobData>,
+    private readonly storageLifecycleService: StorageLifecycleService,
   ) {}
 
   async getSystemHealth(): Promise<HealthCheckResult> {
@@ -218,8 +220,13 @@ export class MediaClawHealthCheckService {
       totalFiles: summary?.totalFiles || 0,
       totalSize: summary?.totalSize || 0,
       activeFiles: summary?.activeFiles || 0,
+      lifecyclePolicy: this.storageLifecycleService.getStatus(),
       byType,
     }
+  }
+
+  getStorageLifecyclePolicy() {
+    return this.storageLifecycleService.getStatus()
   }
 
   async getApiMetrics() {
