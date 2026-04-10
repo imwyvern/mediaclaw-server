@@ -561,7 +561,7 @@ export class ContentMgmtService {
     }
 
     const results = await Promise.allSettled(
-      contentIds.map(async (contentId) => ({
+      contentIds.map(async contentId => ({
         id: contentId,
         downloadUrl: await this.getDownloadUrl(orgId, contentId),
       })),

@@ -276,7 +276,7 @@ export class McAuthService {
     }
 
     const isPhone = /^1\d{10}$/.test(account)
-    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account)
+    const isEmail = /^[^\s@]+@[^\s@.](?:[^\s@]*[^\s@.])?\.[^\s@]+$/.test(account)
     if (!isPhone && !isEmail) {
       throw new BadRequestException('account must be a valid phone number or email')
     }

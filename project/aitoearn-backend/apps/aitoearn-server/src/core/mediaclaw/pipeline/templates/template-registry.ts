@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
+import { B7AiLiveTemplate } from './b7-ai-live'
+import { B9ProductShowcaseTemplate } from './b9-product-showcase'
+import { B10ExplainerTemplate } from './b10-explainer'
 import {
   BasePipelineTemplate,
   TemplateResult,
   TemplateRunParams,
 } from './base-template'
-import { B10ExplainerTemplate } from './b10-explainer'
-import { B7AiLiveTemplate } from './b7-ai-live'
-import { B9ProductShowcaseTemplate } from './b9-product-showcase'
 
 @Injectable()
 export class TemplateRegistry {

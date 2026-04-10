@@ -612,7 +612,7 @@ export class DistributionService {
       : {}
 
     const tasks = await this.videoTaskModel.find({
-      orgId: normalizedOrgId,
+      'orgId': normalizedOrgId,
       'metadata.distribution.lastStatusAt': { $gte: since.toISOString() },
       ...statusFilter,
     }).lean().exec() as Array<Record<string, any>>
@@ -964,13 +964,13 @@ export class DistributionService {
         contentId: task['_id']?.toString?.() || '',
         expiredAt,
         reason: 'publish_not_confirmed_within_48h',
-        }).catch((error) => {
-          this.logger.warn({
-            message: 'Distribution expiry webhook failed',
-            taskId: task['_id']?.toString?.() || '',
-            error: error instanceof Error ? error.message : String(error),
-          })
+      }).catch((error) => {
+        this.logger.warn({
+          message: 'Distribution expiry webhook failed',
+          taskId: task['_id']?.toString?.() || '',
+          error: error instanceof Error ? error.message : String(error),
         })
+      })
 
       const followUp = await this.reassignOrAlert(
         orgId,
