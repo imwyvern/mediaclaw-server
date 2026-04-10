@@ -48,8 +48,8 @@ services:
     env_file:
       - .env.production
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-mediaclaw2026}
     restart: unless-stopped
     ports:
       - 127.0.0.1:${GRAFANA_PORT:-3000}:3000
@@ -68,7 +68,7 @@ services:
       - /bin/sh
       - -lc
       - |
-        if [ -n "${WECOM_WEBHOOK_URL:-}" ]; then
+        if [ -n "$${WECOM_WEBHOOK_URL:-}" ]; then
           cat > /tmp/alertmanager.yml <<EOF
         global:
           resolve_timeout: 5m
@@ -83,7 +83,7 @@ services:
         receivers:
           - name: wecom-webhook
             webhook_configs:
-              - url: ${WECOM_WEBHOOK_URL}
+              - url: $${WECOM_WEBHOOK_URL}
                 send_resolved: true
         EOF
         else
