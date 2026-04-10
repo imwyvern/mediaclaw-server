@@ -4,11 +4,13 @@ import {
   PaymentProductType,
   SubscriptionPlan,
 } from '@yikart/mongodb'
-import { Type } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import {
+  Allow,
   IsEnum,
   IsInt,
   IsMongoId,
+  IsObject,
   IsOptional,
   IsString,
   Max,
@@ -59,4 +61,17 @@ export class CreatePaymentOrderDto {
   @IsInt()
   @Min(1)
   monthlyFeeCents?: number
+}
+
+export class XorPayCallbackDto {
+  @Transform(({ obj }) => {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj
+    }
+
+    return { ...(obj as Record<string, unknown>) }
+  }, { toClassOnly: true })
+  @Allow()
+  @IsObject()
+  payload: Record<string, unknown>
 }

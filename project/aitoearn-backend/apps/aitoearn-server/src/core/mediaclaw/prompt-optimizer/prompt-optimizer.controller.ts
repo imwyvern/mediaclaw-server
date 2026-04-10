@@ -1,23 +1,7 @@
 import { Body, Get, Param, Post } from '@nestjs/common'
-import { Allow, IsOptional, IsString } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { AnalyzeFailureDto } from './prompt-optimizer.dto'
 import { PromptOptimizerService } from './prompt-optimizer.service'
-
-class AnalyzeFailureDto {
-  @IsString()
-  videoTaskId: string
-
-  @IsString()
-  stage: string
-
-  @IsOptional()
-  @IsString()
-  prompt?: string
-
-  @IsOptional()
-  @Allow()
-  error?: unknown
-}
 
 @MediaClawApiController('api/v1/optimizer')
 export class PromptOptimizerController {

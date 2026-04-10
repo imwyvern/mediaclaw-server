@@ -25,7 +25,10 @@ import {
 } from '@yikart/mongodb'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PaymentCreateThrottleGuard } from './payment-create-throttle.guard'
-import { CreatePaymentOrderDto } from './payment.dto'
+import {
+  CreatePaymentOrderDto,
+  XorPayCallbackDto,
+} from './payment.dto'
 import { XorPayService } from './xorpay.service'
 
 interface AuthenticatedPaymentUser {
@@ -82,12 +85,19 @@ export class XorPayController {
   @Post(['callback', 'notify'])
   @Public()
   @ApiOperation({ summary: '接收 XorPay 支付回调' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      additionalProperties: true,
+    },
+  })
   @ApiCreatedResponse({ description: '回调验签并更新订单支付状态' })
   async callback(
-    @Body() body: Record<string, any>,
+    @Body() body: XorPayCallbackDto,
     @Headers() headers: Record<string, string | string[] | undefined>,
   ) {
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    const payload = body.payload
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       throw new BadRequestException('callback body must be an object')
     }
 
@@ -97,7 +107,7 @@ export class XorPayController {
       headers['xorpay-signature'],
     )
 
-    return this.xorPayService.handleCallback(body, signature)
+    return this.xorPayService.handleCallback(payload, signature)
   }
 
   @Get('status/:orderId')
