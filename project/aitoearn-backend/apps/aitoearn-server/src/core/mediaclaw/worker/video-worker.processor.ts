@@ -125,7 +125,15 @@ export class VideoWorkerProcessor extends WorkerHost {
           completedTask = await this.videoService.updateStatus(taskId, VideoTaskStatus.COMPLETED, {
             step,
             outputVideoUrl: context.outputVideoUrl,
-            quality: report.metrics,
+            quality: {
+              ...report.metrics,
+              passed: report.passed,
+              score: report.score,
+              qualityScore: report.score,
+              checks: report.checks,
+              errors: report.errors,
+              warnings: report.warnings,
+            },
             copy: task.copy,
             deepSynthesis: context.deepSynthesisMarker?.manifest,
           })
@@ -274,6 +282,9 @@ export class VideoWorkerProcessor extends WorkerHost {
           finalVideoPath: context.finalVideoPath || '',
           qualityPassed: context.qualityReport?.passed ?? false,
           qualityErrors: context.qualityReport?.errors || [],
+          qualityWarnings: context.qualityReport?.warnings || [],
+          qualityScore: context.qualityReport?.score || null,
+          qualityChecks: context.qualityReport?.checks || [],
         }
       default:
         return {}

@@ -82,12 +82,54 @@ export interface PipelineQualityMetrics {
   duration: number
   fileSize: number
   hasSubtitles: boolean
+  shortEdge: number
+  aspectRatio: string
+}
+
+export interface PipelineQualityDimensionScores {
+  resolution: number
+  fileSize: number
+  subtitles: number
+  duration: number
+  clarity: number
+  composition: number
+  viralityHook: number
+}
+
+export interface PipelineQualityScore {
+  total: number
+  production: number
+  virality: number
+  dimensions: PipelineQualityDimensionScores
+}
+
+export type PipelineQualityCheckKey
+  = | 'resolution'
+    | 'fileSize'
+    | 'subtitles'
+    | 'duration'
+    | 'clarity'
+    | 'composition'
+    | 'viralityHook'
+
+export type PipelineQualityCheckSeverity = 'pass' | 'warning' | 'veto'
+
+export interface PipelineQualityCheck {
+  key: PipelineQualityCheckKey
+  label: string
+  score: number
+  passed: boolean
+  severity: PipelineQualityCheckSeverity
+  message: string
 }
 
 export interface PipelineQualityReport {
   passed: boolean
   metrics: PipelineQualityMetrics
+  score: PipelineQualityScore
+  checks: PipelineQualityCheck[]
   errors: string[]
+  warnings: string[]
 }
 
 export interface PipelineDeepSynthesisManifest {
