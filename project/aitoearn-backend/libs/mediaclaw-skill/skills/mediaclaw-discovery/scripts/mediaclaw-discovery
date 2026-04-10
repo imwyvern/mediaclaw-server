@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# MediaClaw Discovery Skill - OpenClaw entry point
+# Reads user message from stdin, calls MediaClaw API, returns formatted response.
+
+set -euo pipefail
+
+MEDIACLAW_API_URL="${MEDIACLAW_API_URL:-https://mediaclawbot.com}"
+MEDIACLAW_API_URL="${MEDIACLAW_API_URL%/}"
+MEDIACLAW_API_KEY="${MEDIACLAW_API_KEY:?Missing MEDIACLAW_API_KEY}"
+MEDIACLAW_INDUSTRY="${MEDIACLAW_INDUSTRY:-}"
+MEDIACLAW_BRAND="${MEDIACLAW_BRAND:-}"
+MEDIACLAW_BRAND_ID="${MEDIACLAW_BRAND_ID:-}"
+
+INPUT="$(cat)"
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "缺少依赖命令: $1" >&2
+    exit 1
+  }
+}
+
+require_command curl
+
+api_get() {
+  local path="$1"
+  curl -fsS "${MEDIACLAW_API_URL}${path}" \
+    -H "Authorization: Bearer ${MEDIACLAW_API_KEY}" \
+    -H "Accept: application/json"
+}
+
+api_post() {
+  local path="$1"
+  local body="$2"
+  curl -fsS "${MEDIACLAW_API_URL}${path}" \
+    -X POST \
+    -H "Authorization: Bearer ${MEDIACLAW_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -d "${body}"
+}
+
+extract_url() {
+  printf '%s\n' "$INPUT" | grep -oE 'https?://[^ ]+' | head -1 || true
+}
+
+detect_industry() {
+  if [[ -n "${MEDIACLAW_INDUSTRY}" ]]; then
+    printf '%s\n' "${MEDIACLAW_INDUSTRY}"
+    return 0
+  fi
+
+  local known_industries=(
+    "美妆"
+    "食品饮料"
+    "3C数码"
+    "服装"
+  )
+
+  for industry in "${known_industries[@]}"; do
+    if printf '%s\n' "$INPUT" | grep -q "${industry}"; then
+      printf '%s\n' "${industry}"
+      return 0
+    fi
+  done
+
+  printf '%s\n' ""
+}
+
+pretty_json() {
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "$1" | jq .
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+render_pool() {
+  local response="$1"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "$response"
+    return 0
+  fi
+
+  local summary
+  summary="$(printf '%s\n' "$response" | jq -r '
+    .items // []
+    | if length == 0 then
+        "暂时没有可展示的爆款数据。"
+      else
+        to_entries
+        | map(
+            "🔥 \(.key + 1). \(.value.title // "未命名内容") [" + (.value.platform // "unknown") + "]\n" +
+            "   Viral Score: \((.value.viralScore // 0) | tostring)\n" +
+            "   播放: \((.value.views // 0) | tostring) | 点赞: \((.value.likes // 0) | tostring) | 评论: \((.value.comments // 0) | tostring) | 分享: \((.value.shares // 0) | tostring)\n" +
+            "   链接: \(.value.contentUrl // .value.videoUrl // "-")"
+          )
+        | join("\n")
+      end
+  ')"
+
+  printf '%s\n' "$summary"
+}
+
+render_trending() {
+  local response="$1"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "$response"
+    return 0
+  fi
+
+  printf '%s\n' "$response" | jq -r '
+    if type == "array" then . else (.items // .data // []) end
+    | if length == 0 then
+        "暂时没有可展示的趋势数据。"
+      else
+        to_entries
+        | map(
+            "📈 \(.key + 1). \(.value.title // .value.topic // "未命名趋势")\n" +
+            "   平台: \(.value.platform // "-") | Viral Score: \((.value.viralScore // 0) | tostring)\n" +
+            "   指标: 播放 \((.value.views // 0) | tostring), 点赞 \((.value.likes // 0) | tostring), 评论 \((.value.comments // 0) | tostring)"
+          )
+        | join("\n")
+      end
+  '
+}
+
+render_recipe() {
+  local response="$1"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "$response"
+    return 0
+  fi
+
+  printf '%s\n' "$response" | jq -r '
+    .recipe as $recipe
+    | [
+        "🧬 Video Recipe",
+        "链接: " + (.videoUrl // "-"),
+        "核心角度: " + ($recipe.coreAngle // "-"),
+        "开场钩子: " + ($recipe.openingHook // "-"),
+        "结构: " + (($recipe.structure.beats // []) | join(" / ")),
+        "画面: " + (($recipe.visuals.motifs // []) | join(" / ")),
+        "文案: " + (($recipe.copy.hooks // []) | join(" / ")),
+        "音频: " + (($recipe.audio.cues // []) | join(" / ")),
+        "数据: viral score " + (($recipe.data.viralScore // 0) | tostring),
+        "Checklist: " + (($recipe.productionChecklist // []) | join("；"))
+      ] | join("\n")
+  '
+}
+
+render_brief() {
+  local response="$1"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "$response"
+    return 0
+  fi
+
+  printf '%s\n' "$response" | jq -r '
+    [
+      "💡 Remix Brief",
+      "标题: " + (.briefTitle // "-"),
+      "核心角度: " + (.coreAngle // "-"),
+      "受众: " + (.targetAudience // "-"),
+      "开场钩子: " + (.openingHook // "-"),
+      "场景计划: " + ((.scenePlan // []) | join("；")),
+      "文案方向: " + ((.copyIdeas // []) | join("；")),
+      "品牌安全: " + ((.brandSafetyNotes // []) | join("；")),
+      "制作建议: " + ((.productionNotes // []) | join("；"))
+    ] | join("\n")
+  '
+}
+
+INDUSTRY="$(detect_industry)"
+URL="$(extract_url)"
+
+if printf '%s\n' "$INPUT" | grep -qiE '爆款|热门|推荐|trending|viral|hot'; then
+  PARAMS="limit=5"
+  if [[ -n "${INDUSTRY}" ]]; then
+    PARAMS="${PARAMS}&industry=${INDUSTRY}"
+  fi
+
+  RESPONSE="$(api_get "/api/v1/discovery/pool?${PARAMS}")"
+  render_pool "$RESPONSE"
+  exit 0
+fi
+
+if printf '%s\n' "$INPUT" | grep -qiE '竞品|监控|对手|competitor|monitor'; then
+  RESPONSE="$(api_get "/api/v1/competitors/hot?limit=5")"
+  render_trending "$RESPONSE"
+  exit 0
+fi
+
+if printf '%s\n' "$INPUT" | grep -qiE '趋势|trend|行业|话题'; then
+  if [[ -z "${INDUSTRY}" ]]; then
+    echo "请先在配置里设置 MEDIACLAW_INDUSTRY，或在问题里明确行业名称。"
+    exit 0
+  fi
+
+  RESPONSE="$(api_get "/api/v1/competitors/trending?industry=${INDUSTRY}")"
+  render_trending "$RESPONSE"
+  exit 0
+fi
+
+if printf '%s\n' "$INPUT" | grep -qiE '拆解|分析|为什么火|analyze|remix'; then
+  if [[ -z "${URL}" ]]; then
+    echo "请提供视频链接，我来帮你拆解爆款密码。"
+    exit 0
+  fi
+
+  RESPONSE="$(api_post "/api/v1/discovery/remix-analyze" "{\"videoUrl\":\"${URL}\"}")"
+  render_recipe "$RESPONSE"
+  exit 0
+fi
+
+if printf '%s\n' "$INPUT" | grep -qiE '混剪|灵感|brief|创意'; then
+  if [[ -z "${URL}" ]]; then
+    echo "请提供参考视频链接，我来生成混剪方案。"
+    exit 0
+  fi
+
+  ANALYSIS="$(api_post "/api/v1/discovery/remix-analyze" "{\"videoUrl\":\"${URL}\"}")"
+
+  if [[ -n "${MEDIACLAW_BRAND_ID}" ]] && command -v jq >/dev/null 2>&1; then
+    CONTENT_ID="$(printf '%s\n' "$ANALYSIS" | jq -r '.contentId // empty')"
+    if [[ -n "${CONTENT_ID}" ]]; then
+      BRIEF="$(api_post "/api/v1/discovery/generate-remix-brief" "{\"contentId\":\"${CONTENT_ID}\",\"brandId\":\"${MEDIACLAW_BRAND_ID}\"}")"
+      render_brief "$BRIEF"
+      exit 0
+    fi
+  fi
+
+  render_recipe "$ANALYSIS"
+  if [[ -n "${MEDIACLAW_BRAND}" ]]; then
+    printf '\n品牌提示: 当前仅返回 %s 的 recipe 分析。若配置 MEDIACLAW_BRAND_ID，可继续获取品牌化 remix brief。\n' "${MEDIACLAW_BRAND}"
+  else
+    printf '\n提示: 若配置 MEDIACLAW_BRAND_ID，可直接生成品牌化 remix brief。\n'
+  fi
+  exit 0
+fi
+
+cat <<'EOF'
+👋 我是 MediaClaw 爆款发现助手，我能帮你：
+
+🔥 找爆款: "最近我们行业有什么爆款视频？"
+🔍 看竞品: "帮我监控竞品的热点内容"
+📊 查趋势: "食品饮料行业最近什么话题火？"
+🧬 拆爆款: "分析这个视频为什么火" + 链接
+💡 出方案: "基于这个爆款给我混剪灵感" + 链接
+
+试试看吧！
+EOF
