@@ -38,6 +38,12 @@ interface PaginationInput {
   limit?: number
 }
 
+interface BatchUpdateInput {
+  ids: string[]
+  caption?: string
+  status?: string
+}
+
 interface CopyUpdateInput {
   title?: string
   subtitle?: string
@@ -549,6 +555,68 @@ export class ContentMgmtService {
     }
   }
 
+  async batchDownload(orgId: string, contentIds: string[]) {
+    if (!Array.isArray(contentIds) || contentIds.length === 0) {
+      throw new BadRequestException('ids is required')
+    }
+
+    const results = await Promise.allSettled(
+      contentIds.map(async (contentId) => ({
+        id: contentId,
+        downloadUrl: await this.getDownloadUrl(orgId, contentId),
+      })),
+    )
+
+    const items = results.map((result, index) =>
+      result.status === 'fulfilled'
+        ? result.value
+        : {
+            id: contentIds[index],
+            error: result.reason instanceof Error ? result.reason.message : 'download_failed',
+          },
+    )
+
+    return {
+      items,
+      total: items.length,
+      successCount: items.filter(item => 'downloadUrl' in item).length,
+    }
+  }
+
+  async batchUpdate(orgId: string, input: BatchUpdateInput) {
+    const ids = Array.from(new Set(input.ids || []))
+    if (ids.length === 0) {
+      throw new BadRequestException('ids is required')
+    }
+
+    if (typeof input.caption === 'string') {
+      return this.batchEditCopy(orgId, ids, {
+        subtitle: input.caption,
+      })
+    }
+
+    if (input.status?.trim().toLowerCase() === 'published') {
+      const items = await Promise.all(
+        ids.map(contentId =>
+          this.markPublished(
+            orgId,
+            contentId,
+            'manual',
+            `https://mediaclaw.local/content/${contentId}`,
+          ),
+        ),
+      )
+
+      return {
+        matchedCount: ids.length,
+        modifiedCount: items.length,
+        items,
+      }
+    }
+
+    throw new BadRequestException('caption 或 status=published 至少提供一个')
+  }
+
   async exportContent(orgId: string, format: string, filters: ContentFilters) {
     const normalizedFormat = format.toLowerCase()
     const query = this.buildQuery(orgId, filters)
@@ -589,6 +657,15 @@ export class ContentMgmtService {
     }
 
     return this.toContentResponse(task)
+  }
+
+  async legacyEditCopy(orgId: string, contentId: string, caption?: string) {
+    return this.editCopy(
+      orgId,
+      contentId,
+      undefined,
+      caption,
+    )
   }
 
   async getDownloadUrl(orgId: string, contentId: string) {

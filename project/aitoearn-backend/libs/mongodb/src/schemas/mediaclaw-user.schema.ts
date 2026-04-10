@@ -152,6 +152,12 @@ export class MediaClawUser extends WithTimestampSchema {
   @Prop({ type: String, default: '' })
   supabaseUserId: string
 
+  @Prop({ type: String, default: '' })
+  passwordHash: string
+
+  @Prop({ type: String, default: '' })
+  passwordSalt: string
+
   @Prop({ type: Boolean, default: true })
   isActive: boolean
 

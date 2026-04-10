@@ -36,6 +36,41 @@ class RefreshTokenDto {
   refreshToken: string
 }
 
+class CompatLoginDto {
+  @IsOptional()
+  @IsString()
+  type?: string
+
+  @IsOptional()
+  @IsString()
+  phone?: string
+
+  @IsOptional()
+  @IsString()
+  code?: string
+
+  @IsOptional()
+  @IsString()
+  email?: string
+
+  @IsOptional()
+  @IsString()
+  password?: string
+}
+
+class CompatRegisterDto {
+  @IsString()
+  account: string
+
+  @IsOptional()
+  @IsString()
+  password?: string
+
+  @IsOptional()
+  @IsString()
+  company?: string
+}
+
 class RegisterEnterpriseDto {
   @IsString()
   orgName: string
@@ -161,6 +196,18 @@ export class McAuthController {
     @Query('code') codeFromQuery?: string,
   ) {
     return this.authService.wechatCallback(body.code || codeFromQuery || '')
+  }
+
+  @Public()
+  @Post('login')
+  async compatLogin(@Body() body: CompatLoginDto) {
+    return this.authService.compatLogin(body)
+  }
+
+  @Public()
+  @Post('register')
+  async compatRegister(@Body() body: CompatRegisterDto) {
+    return this.authService.compatRegister(body)
   }
 
   @Public()

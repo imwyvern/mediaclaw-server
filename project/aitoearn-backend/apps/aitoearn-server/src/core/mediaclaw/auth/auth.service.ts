@@ -1,5 +1,11 @@
-import { randomInt } from 'node:crypto'
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common'
+import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto'
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Optional,
+  UnauthorizedException,
+} from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { InjectModel } from '@nestjs/mongoose'
 import { AliSmsService } from '@yikart/ali-sms'
@@ -7,6 +13,9 @@ import {
   McUserType,
   MediaClawUser,
   normalizeUserRole,
+  Organization,
+  OrgStatus,
+  OrgType,
   UserRole,
   VideoPack,
 } from '@yikart/mongodb'
@@ -47,6 +56,20 @@ interface WechatUserInfoResponse {
 
 type SmsMode = 'console' | 'live' | 'test'
 
+interface CompatLoginInput {
+  type?: string
+  phone?: string
+  code?: string
+  email?: string
+  password?: string
+}
+
+interface CompatRegisterInput {
+  account: string
+  password?: string
+  company?: string
+}
+
 @Injectable()
 export class McAuthService {
   private readonly logger = new Logger(McAuthService.name)
@@ -56,6 +79,7 @@ export class McAuthService {
   constructor(
     @InjectModel(MediaClawUser.name) private readonly userModel: Model<MediaClawUser>,
     @InjectModel(VideoPack.name) private readonly videoPackModel: Model<VideoPack>,
+    @InjectModel(Organization.name) private readonly organizationModel: Model<Organization>,
     private readonly jwtService: JwtService,
     @Optional() private readonly aliSmsService?: AliSmsService,
   ) {}
@@ -200,12 +224,133 @@ export class McAuthService {
     }
   }
 
+  async compatLogin(input: CompatLoginInput) {
+    const type = input.type?.trim().toLowerCase()
+    const phone = input.phone?.trim()
+    const code = input.code?.trim()
+    const email = input.email?.trim().toLowerCase()
+    const password = input.password || ''
+
+    if ((type === 'phone' || (!type && phone)) && phone && code) {
+      const authResult = await this.verifySmsCode(phone, code)
+      return {
+        ...authResult,
+        token: authResult.accessToken,
+      }
+    }
+
+    if ((type === 'email' || (!type && email)) && email && password) {
+      const user = await this.userModel.findOne({ email }).exec()
+      if (!user || !user.isActive) {
+        throw new UnauthorizedException('账号或密码错误')
+      }
+
+      if (!user.passwordHash || !user.passwordSalt) {
+        throw new UnauthorizedException('该账号尚未设置密码登录')
+      }
+
+      if (!this.verifyPassword(password, user.passwordSalt, user.passwordHash)) {
+        throw new UnauthorizedException('账号或密码错误')
+      }
+
+      const updatedUser = await this.userModel.findByIdAndUpdate(user._id, {
+        $set: { lastLoginAt: new Date() },
+      }, { new: true }).exec()
+
+      const authResult = this.buildAuthResult(updatedUser || user, false)
+      return {
+        ...authResult,
+        token: authResult.accessToken,
+      }
+    }
+
+    throw new BadRequestException('phone/code 或 email/password 必填')
+  }
+
+  async compatRegister(input: CompatRegisterInput) {
+    const account = input.account?.trim()
+    const company = input.company?.trim() || ''
+    const password = input.password || ''
+    if (!account) {
+      throw new BadRequestException('account is required')
+    }
+
+    const isPhone = /^1\d{10}$/.test(account)
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account)
+    if (!isPhone && !isEmail) {
+      throw new BadRequestException('account must be a valid phone number or email')
+    }
+
+    if (isEmail && !password.trim()) {
+      throw new BadRequestException('password is required for email registration')
+    }
+
+    const existing = await this.userModel.findOne(
+      isPhone ? { phone: account } : { email: account.toLowerCase() },
+    ).exec()
+    if (existing) {
+      throw new BadRequestException('账号已存在')
+    }
+
+    const organization = await this.organizationModel.create({
+      name: company || (isEmail ? account.split('@')[0] : `用户${account.slice(-4)}`),
+      type: company ? OrgType.TEAM : OrgType.INDIVIDUAL,
+      status: OrgStatus.TRIAL,
+      contactName: company || '',
+      contactPhone: isPhone ? account : '',
+      contactEmail: isEmail ? account.toLowerCase() : '',
+      enterpriseProfile: {
+        companyName: company,
+      },
+      settings: {
+        source: 'compat-register',
+      },
+    })
+
+    const normalizedEmail = isEmail
+      ? account.toLowerCase()
+      : `user-${account}@compat.mediaclaw.local`
+    const credentials = password.trim()
+      ? this.hashPassword(password)
+      : { salt: '', hash: '' }
+
+    const lastLoginAt = new Date()
+    const user = await this.userModel.create({
+      phone: isPhone ? account : undefined,
+      email: normalizedEmail,
+      name: company || (isEmail ? account.split('@')[0] : `用户${account.slice(-4)}`),
+      orgId: organization._id,
+      role: UserRole.ENTERPRISE_ADMIN,
+      userType: company ? McUserType.ENTERPRISE : McUserType.INDIVIDUAL,
+      orgMemberships: [
+        {
+          orgId: organization._id,
+          role: UserRole.ENTERPRISE_ADMIN,
+          joinedAt: lastLoginAt,
+        },
+      ],
+      passwordHash: credentials.hash,
+      passwordSalt: credentials.salt,
+      isActive: true,
+      lastLoginAt,
+    })
+
+    await this.createTrialPack(user._id.toString())
+    const authResult = this.buildAuthResult(user, true)
+
+    return {
+      ...authResult,
+      token: authResult.accessToken,
+    }
+  }
+
   private issueTokens(user: MediaClawUser) {
     const payload = {
       id: user._id.toString(),
       orgId: user.orgId?.toString() || null,
       role: normalizeUserRole(user.role),
       phone: user.phone,
+      email: user.email,
       name: user.name,
     }
 
@@ -219,6 +364,7 @@ export class McAuthService {
     return {
       id: user._id,
       phone: user.phone,
+      email: user.email,
       name: user.name,
       role: normalizeUserRole(user.role),
       orgId: user.orgId,
@@ -458,6 +604,20 @@ export class McAuthService {
 
   private generateOtpCode() {
     return randomInt(100000, 1000000).toString()
+  }
+
+  private hashPassword(password: string) {
+    const salt = randomBytes(16).toString('hex')
+    const hash = scryptSync(password, salt, 64).toString('hex')
+    return { salt, hash }
+  }
+
+  private verifyPassword(password: string, salt: string, expectedHash: string) {
+    const calculatedHash = scryptSync(password, salt, 64).toString('hex')
+    return timingSafeEqual(
+      Buffer.from(calculatedHash, 'hex'),
+      Buffer.from(expectedHash, 'hex'),
+    )
   }
 
   private getTestOtpCode() {

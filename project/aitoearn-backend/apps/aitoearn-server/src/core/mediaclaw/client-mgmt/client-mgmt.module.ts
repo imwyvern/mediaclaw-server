@@ -15,13 +15,16 @@ import {
   VideoTaskSchema,
 } from '@yikart/mongodb'
 import { McAuthModule } from '../auth/auth.module'
+import { HealthModule } from '../health/health.module'
 import { OrgModule } from '../org/org.module'
+import { AdminDashboardController } from './admin-dashboard.controller'
 import { ClientMgmtController } from './client-mgmt.controller'
 import { ClientMgmtService } from './client-mgmt.service'
 
 @Module({
   imports: [
     McAuthModule,
+    HealthModule,
     OrgModule,
     MongooseModule.forFeature([
       { name: Organization.name, schema: OrganizationSchema },
@@ -32,7 +35,7 @@ import { ClientMgmtService } from './client-mgmt.service'
       { name: Invoice.name, schema: InvoiceSchema },
     ]),
   ],
-  controllers: [ClientMgmtController],
+  controllers: [ClientMgmtController, AdminDashboardController],
   providers: [ClientMgmtService],
   exports: [ClientMgmtService],
 })

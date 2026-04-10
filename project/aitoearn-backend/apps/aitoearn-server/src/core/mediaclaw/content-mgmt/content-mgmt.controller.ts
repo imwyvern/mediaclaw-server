@@ -58,6 +58,32 @@ class BatchEditCopyDto {
   updates: CopyUpdateDto
 }
 
+class LegacyCopyUpdateDto {
+  @IsOptional()
+  @IsString()
+  caption?: string
+}
+
+class BatchDownloadCompatDto {
+  @IsArray()
+  @IsString({ each: true })
+  ids: string[]
+}
+
+class BatchUpdateCompatDto {
+  @IsArray()
+  @IsString({ each: true })
+  ids: string[]
+
+  @IsOptional()
+  @IsString()
+  caption?: string
+
+  @IsOptional()
+  @IsString()
+  status?: string
+}
+
 class ContentExportFiltersDto {
   @IsOptional()
   @IsString()
@@ -204,6 +230,15 @@ export class ContentMgmtController {
     return this.contentMgmtService.getContent(user.orgId || user.id || '', id)
   }
 
+  @Patch(':id')
+  async legacyEditContent(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+    @Body() body: LegacyCopyUpdateDto,
+  ) {
+    return this.contentMgmtService.legacyEditCopy(user.orgId || user.id || '', id, body.caption)
+  }
+
   @Patch(':id/copy')
   async editCopy(
     @GetToken() user: { orgId?: string, id?: string },
@@ -219,6 +254,22 @@ export class ContentMgmtController {
       body.blueWords,
       body.commentGuides,
     )
+  }
+
+  @Post('batch-download')
+  async batchDownloadCompat(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: BatchDownloadCompatDto,
+  ) {
+    return this.contentMgmtService.batchDownload(user.orgId || user.id || '', body.ids)
+  }
+
+  @Patch('batch-update')
+  async batchUpdateCompat(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: BatchUpdateCompatDto,
+  ) {
+    return this.contentMgmtService.batchUpdate(user.orgId || user.id || '', body)
   }
 
   @Post(':id/approve')

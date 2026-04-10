@@ -67,6 +67,34 @@ class GenerateAnalyticsReportDto {
   endDate?: string
 }
 
+class LegacyAnalyticsExportDto {
+  @IsOptional()
+  @IsString()
+  template?: string
+
+  @IsOptional()
+  @IsString()
+  dateRange?: string
+
+  @IsOptional()
+  @IsString()
+  format?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  platforms?: string[]
+
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  isScheduled?: boolean
+
+  @IsOptional()
+  @IsString()
+  scheduleEmail?: string
+}
+
 @MediaClawApiController('api/v1/analytics')
 export class AnalyticsController {
   constructor(
@@ -206,6 +234,59 @@ export class AnalyticsController {
     )
   }
 
+  @Get('exports')
+  async listLegacyExports(
+    @GetToken() user: { orgId?: string, id?: string },
+  ) {
+    const reports = await this.reportService.listReports(user.orgId || user.id || '')
+    return {
+      items: reports.map(report => ({
+        id: report.id,
+        name: report.type,
+        type: report.type,
+        format: Array.isArray(report.requestedFormats) ? report.requestedFormats[0] : 'pdf',
+        dateRange: report.period?.start && report.period?.end
+          ? `${report.period.start} ~ ${report.period.end}`
+          : '',
+        status: report.status,
+        createdAt: report.createdAt,
+        url: report.fileUrl,
+      })),
+      total: reports.length,
+      page: 1,
+      limit: reports.length || 20,
+    }
+  }
+
+  @Post('export')
+  async createLegacyExport(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: LegacyAnalyticsExportDto,
+  ) {
+    if (body.isScheduled) {
+      return this.reportService.scheduleAutoReport(user.orgId || user.id || '', {
+        type: this.mapLegacyTemplateToReportType(body.template),
+        recipients: body.scheduleEmail ? [body.scheduleEmail] : [],
+        formats: [this.normalizeLegacyReportFormat(body.format)],
+        filters: {
+          dateRange: body.dateRange || '30d',
+          platforms: body.platforms || [],
+        },
+        isActive: true,
+      })
+    }
+
+    return this.reportService.generateReport(
+      user.orgId || user.id || '',
+      this.mapLegacyTemplateToReportType(body.template),
+      this.resolveLegacyReportPeriod(body.dateRange),
+      {
+        formats: [this.normalizeLegacyReportFormat(body.format)],
+        waitForCompletion: false,
+      },
+    )
+  }
+
   @Get('seo')
   async getSeo(
     @GetToken() user: { orgId?: string, id?: string },
@@ -241,5 +322,53 @@ export class AnalyticsController {
         waitForCompletion: body.waitForCompletion,
       },
     )
+  }
+
+  private mapLegacyTemplateToReportType(template?: string) {
+    switch ((template || '').trim().toLowerCase()) {
+      case 'monthly':
+        return ReportType.MONTHLY
+      case 'campaign':
+        return ReportType.CAMPAIGN
+      case 'brand':
+        return ReportType.BRAND
+      default:
+        return ReportType.WEEKLY
+    }
+  }
+
+  private normalizeLegacyReportFormat(format?: string) {
+    const normalized = (format || '').trim().toLowerCase()
+    if (normalized === 'pdf') {
+      return 'pdf'
+    }
+
+    return 'markdown'
+  }
+
+  private resolveLegacyReportPeriod(dateRange?: string) {
+    const normalized = (dateRange || '').trim().toLowerCase()
+    const end = new Date()
+    const start = new Date(end)
+    switch (normalized) {
+      case '7d':
+        start.setDate(end.getDate() - 7)
+        break
+      case '90d':
+        start.setDate(end.getDate() - 90)
+        break
+      case 'all':
+        start.setFullYear(end.getFullYear() - 1)
+        break
+      case '30d':
+      default:
+        start.setDate(end.getDate() - 30)
+        break
+    }
+
+    return {
+      start: start.toISOString(),
+      end: end.toISOString(),
+    }
   }
 }

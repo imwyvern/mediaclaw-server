@@ -83,6 +83,7 @@ export class CompetitorController {
   @ApiQuery({ name: 'platform', required: false, description: '平台过滤' })
   @ApiQuery({ name: 'period', required: false, description: '时间窗口，例如 7d' })
   @ApiOkResponse({ description: '返回行业热点榜单' })
+  @Public()
   async getIndustryHot(
     @Query('industry') industry: string,
     @Query('platform') platform?: string,

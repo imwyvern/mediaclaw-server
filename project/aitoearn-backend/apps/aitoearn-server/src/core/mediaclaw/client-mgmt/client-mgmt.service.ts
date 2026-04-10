@@ -181,6 +181,15 @@ export class ClientMgmtService {
     }
   }
 
+  async countVideosCreatedToday() {
+    const startOfDay = new Date()
+    startOfDay.setHours(0, 0, 0, 0)
+
+    return this.videoTaskModel.countDocuments({
+      createdAt: { $gte: startOfDay },
+    })
+  }
+
   async getOrgDetail(orgId: string) {
     const normalizedOrgId = this.toObjectId(orgId, 'orgId')
     const org = await this.organizationModel.findById(normalizedOrgId).lean().exec()

@@ -74,6 +74,11 @@ export class DistributionController {
     return this.distributionService.listRules(user.orgId || user.id || '')
   }
 
+  @Get('rules')
+  async listRulesCompat(@GetToken() user: MediaClawAuthUser) {
+    return this.distributionService.listRules(user.orgId || user.id || '')
+  }
+
   @Patch(':id')
   async updateRule(
     @GetToken() user: MediaClawAuthUser,

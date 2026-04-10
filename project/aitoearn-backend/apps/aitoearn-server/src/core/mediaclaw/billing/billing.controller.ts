@@ -24,6 +24,15 @@ export class BillingController {
     return this.billingService.getUsageSummary(user.id, user.orgId || null, start, end)
   }
 
+  @Get('usage')
+  async getUsageSummaryCompat(
+    @GetToken() user: { id: string, orgId?: string | null },
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
+    return this.billingService.getUsageSummary(user.id, user.orgId || null, start, end)
+  }
+
   @Get('balance')
   async getBalance(@GetToken() user: MediaClawAuthUser) {
     return this.billingService.getBalance(user.id)
