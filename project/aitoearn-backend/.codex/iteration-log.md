@@ -31,3 +31,11 @@
   - `pnpm nx lint aitoearn-server` 通过
   - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/apikey/apikey.service.behavior.spec.ts src/core/mediaclaw/apikey/apikey.service.spec.ts src/core/mediaclaw/usage/usage-tracking.interceptor.spec.ts` 通过
 - 下一步计划：继续补报表统一导出与退款闭环，把剩余后端 🔶 项按原子改动逐个收口。
+
+## 2026-04-10 10:50:54 PDT
+- 当前改动：补统一导出闭环的验证与依赖治理，为 `report/export` 增加 `csv/json/excel/zip` 行为测试，同时把内容 ZIP 打包链路改成标准 `archiver` import 并补类型声明，消除导出相关 lint 阻塞。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/report/report.service.behavior.spec.ts src/core/mediaclaw/report/report.service.spec.ts src/core/mediaclaw/export/export.service.behavior.spec.ts src/core/mediaclaw/content-mgmt/content-mgmt.export.behavior.spec.ts` 通过
+- 下一步计划：继续补支付退款闭环，把退款申请、审核执行、权益回收和通知链路收口到可演示状态。

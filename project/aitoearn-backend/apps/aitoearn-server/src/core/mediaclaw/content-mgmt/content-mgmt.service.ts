@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream'
 import {
   BadRequestException,
   ForbiddenException,
@@ -20,19 +21,12 @@ import {
   VideoTaskStatus,
 } from '@yikart/mongodb'
 import AdmZip from 'adm-zip'
-import { PassThrough } from 'node:stream'
+import archiver from 'archiver'
 import { Model, Types } from 'mongoose'
 import { EmployeeDispatchService } from '../employee-dispatch/employee-dispatch.service'
 import { NotificationService } from '../notification/notification.service'
 import { createStatusTransitionIterationEntry, mapVideoTaskStatusToProductionStage } from '../video-task-lifecycle.util'
 import { WebhookService } from '../webhook/webhook.service'
-
-const createArchive = require('archiver') as (format: 'zip', options?: Record<string, unknown>) => {
-  append: (data: Buffer | string, options: { name: string }) => void
-  finalize: () => void
-  on: (event: string, listener: (...args: any[]) => void) => void
-  pipe: (target: PassThrough) => void
-}
 
 interface ContentFilters {
   status?: VideoTaskStatus
@@ -1057,14 +1051,14 @@ export class ContentMgmtService {
   }
 
   private async buildZipBuffer(files: Array<{ name: string, data: Buffer | string }>) {
-    const archive = createArchive('zip', {
+    const archive = archiver('zip', {
       zlib: { level: 9 },
     })
     const output = new PassThrough()
     const chunks: Buffer[] = []
 
     const completion = new Promise<Buffer>((resolve, reject) => {
-      output.on('data', chunk => {
+      output.on('data', (chunk) => {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
       })
       output.on('end', () => resolve(Buffer.concat(chunks)))

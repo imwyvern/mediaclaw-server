@@ -1,3 +1,4 @@
+import { Workbook } from 'exceljs'
 import { Types } from 'mongoose'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ReportService } from './report.service'
@@ -171,5 +172,68 @@ describe('reportService behavior', () => {
 
     expect(result.status).toBe('generating')
     expect(completeSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('应生成 csv、json 和 excel 产物', async () => {
+    vi.spyOn(service as any, 'buildMetrics').mockResolvedValue({
+      totalVideos: 7,
+      completedVideos: 6,
+      failedVideos: 1,
+      successRate: 85.71,
+      avgCost: 12.3,
+      totalCampaigns: 2,
+      activeCampaigns: 1,
+      performance: {
+        totalViews: 4567,
+        totalLikes: 321,
+        totalComments: 45,
+        totalShares: 12,
+        totalSaves: 8,
+        totalFollowers: 99,
+        avgEngagementRate: 5.4,
+      },
+      topBrands: [{ brandName: '品牌 B', totalVideos: 4, completedVideos: 3 }],
+      topContent: [{ taskId: 'task_2', views: 2300, engagementRate: 6.2, publishedAt: '2026-04-06T00:00:00.000Z', outputVideoUrl: 'https://cdn.example.com/task-2.mp4' }],
+      recommendations: ['继续放大高互动脚本模版。'],
+    })
+
+    const result = await service.generateReport(
+      new Types.ObjectId().toString(),
+      'weekly' as any,
+      {
+        start: '2026-04-01T00:00:00.000Z',
+        end: '2026-04-08T00:00:00.000Z',
+      },
+      {
+        formats: ['csv', 'json', 'excel'],
+        waitForCompletion: true,
+      },
+    )
+
+    expect(result.requestedFormats).toEqual(['csv', 'json', 'excel'])
+    expect(result.assets.csv?.url).toContain('/files/csv')
+    expect(result.assets.json?.url).toContain('/files/json')
+    expect(result.assets.excel?.url).toContain('/files/excel')
+
+    const csvFile = await service.getReportFile(result.orgId, result.id, 'csv')
+    expect(csvFile.contentType).toBe('text/csv; charset=utf-8')
+    expect(csvFile.encoding).toBe('utf8')
+    expect(csvFile.content).toContain('section,label,value')
+    expect(csvFile.content).toContain('summary,total_videos,7')
+
+    const jsonFile = await service.getReportFile(result.orgId, result.id, 'json')
+    expect(jsonFile.contentType).toBe('application/json; charset=utf-8')
+    const parsedJson = JSON.parse(jsonFile.content || '{}')
+    expect(parsedJson.metrics.totalVideos).toBe(7)
+    expect(parsedJson.metrics.performance.totalViews).toBe(4567)
+
+    const excelFile = await service.getReportFile(result.orgId, result.id, 'excel')
+    expect(excelFile.contentType).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    expect(excelFile.encoding).toBe('base64')
+    const workbook = new Workbook()
+    await workbook.xlsx.load(Buffer.from(excelFile.content || '', 'base64'))
+    expect(workbook.worksheets.map(item => item.name)).toEqual(['Summary', 'TopBrands', 'TopContent', 'Recommendations'])
+    expect(workbook.getWorksheet('Summary')?.getCell('A1').value).toBe('Section')
+    expect(workbook.getWorksheet('TopBrands')?.getCell('A2').value).toBe('品牌 B')
   })
 })
