@@ -107,6 +107,7 @@ describe('clawHostService behavior', () => {
   let apiKeyService: Record<string, any>
   let clawHostRuntimeService: Record<string, any>
   let clawHostAlertService: Record<string, any>
+  let clawHostPostgresService: Record<string, any>
 
   beforeEach(() => {
     clawHostInstanceModel = {
@@ -139,6 +140,9 @@ describe('clawHostService behavior', () => {
     clawHostAlertService = {
       notifyUnhealthyInstance: vi.fn().mockResolvedValue(undefined),
     }
+    clawHostPostgresService = {
+      syncInstance: vi.fn().mockResolvedValue({ enabled: true, synced: true }),
+    }
 
     service = new ClawHostService(
       clawHostInstanceModel as any,
@@ -146,6 +150,7 @@ describe('clawHostService behavior', () => {
       apiKeyService as any,
       clawHostRuntimeService as any,
       clawHostAlertService as any,
+      clawHostPostgresService as any,
     )
   })
 
@@ -233,5 +238,37 @@ describe('clawHostService behavior', () => {
     expect(redisService.del).toHaveBeenCalledWith(`mediaclaw:clawhost:alert:${instance.instanceId}`)
     expect(clawHostAlertService.notifyUnhealthyInstance).not.toHaveBeenCalled()
     expect(result.unhealthyCount).toBe(0)
+  })
+
+  it('应在创建实例后同步 PostgreSQL 元数据', async () => {
+    const created = createManagedInstance()
+    clawHostInstanceModel.find.mockReturnValue(createExecQuery([]))
+    clawHostRuntimeService.createManagedContainer.mockResolvedValue({
+      containerId: created.containerId,
+      containerName: created.containerName,
+      image: created.runtimeImage,
+      hostPort: created.hostPort,
+      healthUrl: created.healthUrl,
+      accessUrl: created.accessUrl,
+    })
+    clawHostInstanceModel.create.mockResolvedValue({
+      toObject: () => created,
+    })
+
+    const result = await service.createInstance('org-1', undefined, '直营客服', {
+      plan: 'starter',
+      deploymentMode: MANAGED as any,
+    })
+
+    expect(result.instanceId).toBe(created.instanceId)
+    expect(clawHostPostgresService.syncInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceId: created.instanceId,
+        orgId: created.orgId,
+        clientName: created.clientName,
+        status: RUNNING,
+      }),
+      { ownerUserId: '' },
+    )
   })
 })

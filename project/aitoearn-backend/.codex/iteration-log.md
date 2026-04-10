@@ -78,3 +78,13 @@
   - 修复后 `pnpm nx lint aitoearn-server` 通过，无新增 warning
   - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/auth/enterprise-sso.service.behavior.spec.ts` 通过，`4` 个测试全部通过
 - 下一步计划：进入 ClawHost PostgreSQL 元数据层，实现 `apps/bots/bot_channels/bot_devices` 的同步与测试，再做本批次全量收口。
+
+## 2026-04-10 11:55:26 PDT
+- 当前改动：补完 ClawHost PostgreSQL 元数据层，新增 `ClawHostPostgresService`，支持通过 `pg` 自动建表并同步 `apps / bots / bot_channels / bot_devices`，再把同步挂到 `create/connect/heartbeat/start/stop/restart/upgrade/health-check` 等关键状态变更点，并补行为测试。
+- 验证结果：
+  - `pnpm nx build aitoearn-server` 首轮失败，定位为 `pg` 缺少类型声明
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/clawhost/clawhost-postgres.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.spec.ts` 首轮失败，定位为新增创建实例用例缺少 `find().select().lean()` mock，且断言未对齐 `ownerUserId` 默认参数
+  - 添加 `@types/pg`、补齐 query mock 并修正断言后，`pnpm nx build aitoearn-server` 通过
+  - 修复后 `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - 修复后 `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/clawhost/clawhost-postgres.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.spec.ts` 通过，`3` 个测试文件、`11` 个测试全部通过
+- 下一步计划：执行本批次全量 build/lint/test 收口，确认没有引入新的 failure，然后整理提交结果。

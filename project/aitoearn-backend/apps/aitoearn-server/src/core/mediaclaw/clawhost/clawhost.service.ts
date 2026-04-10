@@ -20,6 +20,7 @@ import { RedisService } from '@yikart/redis'
 import { Model } from 'mongoose'
 import { MediaClawApiKeyService } from '../apikey/apikey.service'
 import { ClawHostAlertService } from './clawhost-alert.service'
+import { ClawHostPostgresService } from './clawhost-postgres.service'
 import { ClawHostRuntimeService } from './clawhost-runtime.service'
 
 interface ListInstancesFilters {
@@ -113,6 +114,7 @@ export class ClawHostService {
     private readonly apiKeyService: MediaClawApiKeyService,
     private readonly clawHostRuntimeService: ClawHostRuntimeService,
     private readonly clawHostAlertService: ClawHostAlertService,
+    private readonly clawHostPostgresService: ClawHostPostgresService,
   ) {}
 
   async createInstance(
@@ -190,6 +192,10 @@ export class ClawHostService {
       latestInstance = await this.getInstanceOrThrow(normalizedOrgId, instanceId)
     }
 
+    await this.syncPostgresMetadata(latestInstance, {
+      ownerUserId: options.issuedByUserId?.trim() || '',
+    })
+
     return {
       ...this.toResponse(latestInstance),
       connectionCode: connectionCode
@@ -265,6 +271,8 @@ export class ClawHostService {
       lastAgentId: '',
       heartbeatCapabilities: [],
     })
+
+    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
 
     return {
       ...this.toResponse(instance.toObject() as ClawHostInstance),
@@ -378,6 +386,15 @@ export class ClawHostService {
     ).exec()
 
     await this.redisService.del(this.buildConnectionCodeCacheKey(code))
+    await this.syncPostgresMetadata(
+      await this.getInstanceOrThrow(payload.orgId, payload.instanceId),
+      {
+        ownerUserId: payload.requestedByUserId,
+        apiToken: apiKey.key,
+        deviceId: input.agentId?.trim() || requestedInstanceId,
+        deviceApproved: true,
+      },
+    )
 
     return {
       status: 'connected',
@@ -416,6 +433,10 @@ export class ClawHostService {
     instance.set('heartbeatCapabilities', capabilities)
     instance.set('healthStatus', this.buildHealthyStatus(now, 1))
     await instance.save()
+    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance, {
+      deviceId: agentId || instance.instanceId,
+      deviceApproved: true,
+    })
 
     return {
       instanceId: instance.instanceId,
@@ -445,6 +466,8 @@ export class ClawHostService {
     if (!started) {
       throw new NotFoundException('ClawHost instance not found')
     }
+
+    await this.syncPostgresMetadata(started as ClawHostInstance)
 
     return {
       ...this.toResponse(started),
@@ -477,6 +500,8 @@ export class ClawHostService {
     if (!stopped) {
       throw new NotFoundException('ClawHost instance not found')
     }
+
+    await this.syncPostgresMetadata(stopped as ClawHostInstance)
 
     return this.toResponse(stopped)
   }
@@ -515,6 +540,8 @@ export class ClawHostService {
       throw new NotFoundException('ClawHost instance not found')
     }
 
+    await this.syncPostgresMetadata(restarted as ClawHostInstance)
+
     return {
       ...this.toResponse(restarted),
       operation: 'restarting',
@@ -538,6 +565,12 @@ export class ClawHostService {
           },
         },
       ).exec()
+      await this.syncPostgresMetadata({
+        ...instance,
+        status: derived.status,
+        healthStatus: derived.healthStatus,
+        lastHealthMessage: derived.healthMessage || '',
+      } as ClawHostInstance)
     }
 
     return {
@@ -590,6 +623,7 @@ export class ClawHostService {
     instance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 1))
     instance.set('lastHealthMessage', '')
     await instance.save()
+    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
 
     return {
       instanceId: instance.instanceId,
@@ -616,6 +650,7 @@ export class ClawHostService {
     const nextSkills = this.upsertSkill(instance.skills || [], skillId, version, installedAt)
     instance.set('skills', nextSkills)
     await instance.save()
+    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
 
     return {
       instanceId: instance.instanceId,
@@ -644,6 +679,7 @@ export class ClawHostService {
 
     instance.set('skills', nextSkills)
     await instance.save()
+    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
 
     return {
       instanceId: instance.instanceId,
@@ -685,6 +721,7 @@ export class ClawHostService {
       instance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 50))
       instance.set('lastHealthMessage', '')
       await instance.save()
+      await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
 
       upgradedItems.push({
         instanceId: instance.instanceId,
@@ -774,6 +811,12 @@ export class ClawHostService {
             },
           },
         ).exec()
+        await this.syncPostgresMetadata({
+          ...instance,
+          status: derived.status,
+          healthStatus: derived.healthStatus,
+          lastHealthMessage: derived.healthMessage || '',
+        } as ClawHostInstance)
       }
 
       if (!derived.healthStatus.isHealthy) {
@@ -1151,6 +1194,78 @@ export class ClawHostService {
 
   private buildAlertCacheKey(instanceId: string) {
     return `mediaclaw:clawhost:alert:${instanceId}`
+  }
+
+  private async syncPostgresMetadata(
+    instance: Pick<
+      ClawHostInstance,
+      | 'instanceId'
+      | 'orgId'
+      | 'clientName'
+      | 'plan'
+      | 'status'
+      | 'deploymentMode'
+      | 'config'
+      | 'skills'
+      | 'healthStatus'
+      | 'requestedImChannel'
+      | 'accessUrl'
+      | 'healthUrl'
+      | 'hostPort'
+      | 'runtimeImage'
+      | 'containerId'
+      | 'containerName'
+      | 'lastHealthMessage'
+      | 'boundApiKeyPrefix'
+      | 'boundAt'
+      | 'lastHeartbeatAt'
+      | 'lastClientVersion'
+      | 'heartbeatCapabilities'
+      | 'connectionCodePreview'
+    >,
+    options: {
+      ownerUserId?: string
+      apiToken?: string
+      deviceId?: string
+      deviceApproved?: boolean
+    } = {},
+  ) {
+    try {
+      await this.clawHostPostgresService.syncInstance({
+        instanceId: instance.instanceId,
+        orgId: instance.orgId,
+        clientName: instance.clientName,
+        plan: instance.plan,
+        status: instance.status,
+        deploymentMode: instance.deploymentMode,
+        config: instance.config,
+        skills: instance.skills,
+        healthStatus: instance.healthStatus,
+        requestedImChannel: instance.requestedImChannel,
+        accessUrl: instance.accessUrl,
+        healthUrl: instance.healthUrl,
+        hostPort: instance.hostPort,
+        runtimeImage: instance.runtimeImage,
+        containerId: instance.containerId,
+        containerName: instance.containerName,
+        lastHealthMessage: instance.lastHealthMessage,
+        boundApiKeyPrefix: instance.boundApiKeyPrefix,
+        boundAt: instance.boundAt,
+        lastHeartbeatAt: instance.lastHeartbeatAt,
+        lastClientVersion: instance.lastClientVersion,
+        heartbeatCapabilities: instance.heartbeatCapabilities,
+        connectionCodePreview: instance.connectionCodePreview,
+      }, options)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown_error'
+      this.logger.warn({
+        message: 'ClawHost PostgreSQL metadata sync failed',
+        instanceId: instance.instanceId,
+        orgId: instance.orgId,
+        error: message,
+      })
+    }
   }
 
   private upsertSkill(
