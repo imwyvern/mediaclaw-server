@@ -43,6 +43,40 @@ vi.mock('@yikart/mongodb', () => {
     viewer: 100,
   }
 
+  const normalizeMediaClawApiKeyEnvironment = (value?: string | null) =>
+    value?.trim().toLowerCase() === 'test' ? 'test' : 'live'
+
+  const buildMediaClawApiKey = (secret: string, environment: 'live' | 'test') =>
+    `mc_${environment}_${secret}`
+
+  const buildMediaClawApiKeyPrefix = (secret: string, environment: 'live' | 'test') =>
+    `mc_${environment}_${secret.slice(0, 8)}`
+
+  const extractMediaClawApiKeyPrefix = (rawKey?: string | null) => {
+    if (!rawKey) {
+      return undefined
+    }
+
+    const match = rawKey.trim().match(/^(mc_[a-z][a-z0-9-]{1,31}_[a-z0-9]{8})/i)
+    return match?.[1]
+  }
+
+  const isMediaClawApiKey = (value?: string | null) =>
+    typeof value === 'string' && /^mc_[a-z][a-z0-9-]{1,31}_[a-z0-9]+$/i.test(value.trim())
+
+  const maskMediaClawApiKeyPrefix = (prefix?: string | null) => {
+    if (!prefix) {
+      return 'mc_live_****************************'
+    }
+
+    const trimmed = prefix.trim()
+    const suffix = trimmed.slice(-4) || '****'
+    const prefixMatch = trimmed.match(/^(mc_[a-z][a-z0-9-]{1,31}_)/i)
+    const environmentPrefix = prefixMatch?.[1] || 'mc_live_'
+
+    return `${environmentPrefix}************************${suffix}`
+  }
+
   return {
     ApiKey,
     BillingMode: {
@@ -158,6 +192,20 @@ vi.mock('@yikart/mongodb', () => {
       NEW_CONTENT: 'new_content',
     },
     normalizeUserRole,
+    buildMediaClawApiKey,
+    buildMediaClawApiKeyPrefix,
+    extractMediaClawApiKeyPrefix,
+    isMediaClawApiKey,
+    maskMediaClawApiKeyPrefix,
+    normalizeMediaClawApiKeyEnvironment,
+    OrgApiKeyProvider: {
+      KLING: 'kling',
+      GEMINI: 'gemini',
+      DEEPSEEK: 'deepseek',
+      OPENAI: 'openai',
+      TIKHUB: 'tikhub',
+      VCE: 'vce',
+    },
     userRoleSatisfies: (role: string | null | undefined, requiredRole: string | null | undefined) =>
       (roleRanks[normalizeUserRole(role)] || roleRanks['viewer']) >= (roleRanks[normalizeUserRole(requiredRole)] || roleRanks['viewer']),
   }
@@ -320,7 +368,7 @@ describe('MediaClaw Security Audit', () => {
       findByIdAndUpdate: vi.fn().mockReturnValue(createExecQuery(undefined)),
     }
     const apiKeyService = new MediaClawApiKeyService(apiKeyModel as any)
-    const apiKeyUser = await apiKeyService.validate('mc_live_boundary_key_123456')
+    const apiKeyUser = await apiKeyService.validate('mc_live_boundarykey123456')
 
     const guard = new PermissionGuard({
       getAllAndOverride: vi.fn()
