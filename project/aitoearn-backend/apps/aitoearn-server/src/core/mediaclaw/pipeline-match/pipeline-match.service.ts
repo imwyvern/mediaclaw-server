@@ -78,11 +78,11 @@ interface ReferenceAnalysis {
   note: string
 }
 
-type TemplateRecord = Record<string, any> & {
+type TemplateRecord = Record<string, unknown> & {
   _id: { toString: () => string }
 }
 
-type ViralContentRecord = Record<string, any> & {
+type ViralContentRecord = Record<string, unknown> & {
   _id: { toString: () => string }
 }
 
@@ -235,7 +235,7 @@ export class PipelineMatchService implements OnModuleInit {
     return this.buildReferenceAnalysisFromContent(normalizedUrl, matchedContent)
   }
 
-  suggestNewPipeline(request: MatchPipelineRequest, matchResults: Array<Record<string, any>>) {
+  suggestNewPipeline(request: MatchPipelineRequest, matchResults: Array<Record<string, unknown>>) {
     const topResult = matchResults[0] || null
     const requiredChanges = topResult && Array.isArray(topResult['adjustments']) && topResult['adjustments'].length > 0
       ? topResult['adjustments']
@@ -320,7 +320,7 @@ export class PipelineMatchService implements OnModuleInit {
       steps: [],
     })
 
-    return this.toTemplateResponse(created.toObject())
+    return this.toTemplateResponse(created.toObject() as unknown as TemplateRecord)
   }
 
   async updateTemplate(id: string, input: UpdateTemplateInput) {
@@ -463,7 +463,7 @@ export class PipelineMatchService implements OnModuleInit {
     }
   }
 
-  private calculateCategoryMatch(request: Record<string, any>, template: TemplateRecord) {
+  private calculateCategoryMatch(request: Record<string, unknown>, template: TemplateRecord) {
     const requestedCategory = this.normalizeOptionalString(request['category'])
     const templateCategories = this.normalizeStringList(template['categories'])
 
@@ -496,7 +496,7 @@ export class PipelineMatchService implements OnModuleInit {
     }
   }
 
-  private calculateStyleMatch(request: Record<string, any>, template: TemplateRecord) {
+  private calculateStyleMatch(request: Record<string, unknown>, template: TemplateRecord) {
     const requestedStyle = this.normalizeOptionalString(request['style'])
     const templateStyles = this.normalizeStringList(template['styles'])
 
@@ -529,7 +529,7 @@ export class PipelineMatchService implements OnModuleInit {
     }
   }
 
-  private calculateBudgetFit(request: Record<string, any>, template: TemplateRecord) {
+  private calculateBudgetFit(request: Record<string, unknown>, template: TemplateRecord) {
     const budget = Number(request['budget'] || 0)
     const templateCost = Number(template['costPerVideo'] || 0)
 
@@ -557,7 +557,7 @@ export class PipelineMatchService implements OnModuleInit {
     }
   }
 
-  private calculateDurationFit(request: Record<string, any>, template: TemplateRecord) {
+  private calculateDurationFit(request: Record<string, unknown>, template: TemplateRecord) {
     const duration = Number(request['duration'] || 0)
     const range = Array.isArray(template['durationRange']) ? template['durationRange'] : []
 
@@ -589,7 +589,7 @@ export class PipelineMatchService implements OnModuleInit {
     }
   }
 
-  private buildAdjustments(request: Record<string, any>, template: TemplateRecord) {
+  private buildAdjustments(request: Record<string, unknown>, template: TemplateRecord) {
     const adjustments: string[] = []
     const categories = this.normalizeStringList(template['categories'])
     const styles = this.normalizeStringList(template['styles'])
