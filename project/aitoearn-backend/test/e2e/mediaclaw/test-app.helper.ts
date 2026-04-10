@@ -1,4 +1,5 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common'
+import { INestApplication } from '@nestjs/common'
+import { ZodValidationPipe } from '@yikart/common'
 import { Test } from '@nestjs/testing'
 import { UserRole } from '@yikart/mongodb'
 import request from 'supertest'
@@ -39,7 +40,7 @@ export async function createMediaClawTestApp(options: CreateMediaClawTestAppOpti
   }).compile()
 
   const app = moduleRef.createNestApplication()
-  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }))
+  app.useGlobalPipes(new ZodValidationPipe())
   app.use((req: any, _res: any, next: () => void) => {
     req.user = { ...user }
     next()

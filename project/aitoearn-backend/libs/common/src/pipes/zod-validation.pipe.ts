@@ -9,9 +9,6 @@ export class ZodValidationPipe extends ValidationPipe implements PipeTransform {
     super({
       transform: true,
       whitelist: true,
-      transformOptions: {
-        excludeExtraneousValues: true,
-      },
     })
   }
 
