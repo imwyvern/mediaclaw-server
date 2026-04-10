@@ -88,3 +88,10 @@
   - 修复后 `pnpm nx lint aitoearn-server` 通过，无新增 warning
   - 修复后 `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/clawhost/clawhost-postgres.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.spec.ts` 通过，`3` 个测试文件、`11` 个测试全部通过
 - 下一步计划：执行本批次全量 build/lint/test 收口，确认没有引入新的 failure，然后整理提交结果。
+
+## 2026-04-10 11:57:32 PDT
+- 当前改动：在 Batch 2 全量回归中补公共测试工厂的企业 SSO mock，对 `module-spec.factory.ts` 增加 `EnterpriseSsoProvider`、`EnterpriseSsoProviderSchema`、`EnterpriseSsoProtocol`、`EnterpriseSsoProviderType`，修复 `auth/org` 模块 spec 在加载 `McAuthModule` 时的装配失败。
+- 验证结果：
+  - `pnpm nx test aitoearn-server -- --run` 首轮失败，定位为 `@yikart/mongodb` 公共 mock 缺少企业 SSO 导出，导致 `auth.service.spec.ts` 和 `org.service.spec.ts` 报错
+  - 修复后 `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/auth/auth.service.spec.ts src/core/mediaclaw/org/org.service.spec.ts` 通过，`2` 个测试文件、`8` 个测试全部通过
+- 下一步计划：重跑 `aitoearn-server` 全量 build/lint/test，确认 Batch 2 达到停止条件并整理提交。
