@@ -132,6 +132,64 @@ describe('discoveryService', () => {
     ])
   })
 
+  it('should include metrics in recommendation pool items', async () => {
+    const candidateId = new Types.ObjectId()
+    viralContentModel.find.mockReturnValue(
+      createQueryResult([
+        {
+          _id: candidateId,
+          platform: 'xhs',
+          industry: 'beauty',
+          videoId: 'xhs-1',
+          title: '爆款内容',
+          author: 'creator-a',
+          viralScore: 91.2,
+          views: 12345,
+          likes: 678,
+          comments: 90,
+          shares: 45,
+          keywords: ['beauty'],
+          contentUrl: 'https://example.com/1',
+          thumbnailUrl: 'https://example.com/t1.jpg',
+          discoveredAt: new Date('2026-04-01T20:00:00.000Z'),
+          publishedAt: new Date('2026-03-31T20:00:00.000Z'),
+          remixStatus: ViralContentRemixStatus.PENDING,
+          remixTaskId: null,
+        },
+      ]),
+    )
+
+    const result = await service.getRecommendationPool(undefined, 5, 'beauty')
+
+    expect(result).toEqual({
+      orgId: null,
+      total: 1,
+      source: 'p90',
+      items: [
+        {
+          contentId: candidateId.toString(),
+          platform: 'xhs',
+          videoId: 'xhs-1',
+          title: '爆款内容',
+          author: 'creator-a',
+          viralScore: 91.2,
+          industry: 'beauty',
+          keywords: ['beauty'],
+          contentUrl: 'https://example.com/1',
+          thumbnailUrl: 'https://example.com/t1.jpg',
+          discoveredAt: new Date('2026-04-01T20:00:00.000Z'),
+          publishedAt: new Date('2026-03-31T20:00:00.000Z'),
+          metrics: {
+            views: 12345,
+            likes: 678,
+            comments: 90,
+            shares: 45,
+          },
+        },
+      ],
+    })
+  })
+
   it('should ingest search results with publishedAt and refresh platform-industry pending candidates', async () => {
     const firstId = new Types.ObjectId()
     const secondId = new Types.ObjectId()

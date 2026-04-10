@@ -136,6 +136,12 @@ export class DiscoveryService {
         thumbnailUrl: item.thumbnailUrl,
         discoveredAt: item.discoveredAt,
         publishedAt: item.publishedAt,
+        metrics: {
+          views: this.normalizeMetric(item.views),
+          likes: this.normalizeMetric(item.likes),
+          comments: this.normalizeMetric(item.comments),
+          shares: this.normalizeMetric(item.shares),
+        },
       }))
 
     return {
