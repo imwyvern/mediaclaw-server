@@ -6,11 +6,12 @@ import {
   VideoTask,
   VideoTaskSchema,
 } from '@yikart/mongodb'
+import { MediaclawConfigModule } from '../mediaclaw-config.module'
 import { ModelResolverModule } from '../model-resolver/model-resolver.module'
 import { SettingsModule } from '../settings/settings.module'
 import { VideoWorkerQueueModule } from '../worker/video-worker-queue.module'
 import { PromptOptimizerController } from './prompt-optimizer.controller'
-import { PromptOptimizerLoopService } from './prompt-optimizer.service'
+import { PromptOptimizerService } from './prompt-optimizer.service'
 
 @Module({
   imports: [
@@ -18,12 +19,13 @@ import { PromptOptimizerLoopService } from './prompt-optimizer.service'
       { name: IterationLog.name, schema: IterationLogSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
+    MediaclawConfigModule,
     ModelResolverModule,
     SettingsModule,
     VideoWorkerQueueModule,
   ],
   controllers: [PromptOptimizerController],
-  providers: [PromptOptimizerLoopService],
-  exports: [PromptOptimizerLoopService],
+  providers: [PromptOptimizerService],
+  exports: [PromptOptimizerService],
 })
 export class PromptOptimizerModule {}

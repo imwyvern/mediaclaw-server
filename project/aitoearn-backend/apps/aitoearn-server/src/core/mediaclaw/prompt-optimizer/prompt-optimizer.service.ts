@@ -14,6 +14,7 @@ import {
 import axios from 'axios'
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
+import { MediaclawConfigService } from '../mediaclaw-config.service'
 import { ModelResolverService } from '../model-resolver/model-resolver.service'
 import { ByokService } from '../settings/byok.service'
 import {
@@ -75,8 +76,8 @@ interface PromptOptimizationResponse {
 }
 
 @Injectable()
-export class PromptOptimizerLoopService {
-  private readonly logger = new Logger(PromptOptimizerLoopService.name)
+export class PromptOptimizerService {
+  private readonly logger = new Logger(PromptOptimizerService.name)
 
   constructor(
     @InjectModel(IterationLog.name)
@@ -90,6 +91,7 @@ export class PromptOptimizerLoopService {
     private readonly byokService?: ByokService,
     @Optional()
     private readonly modelResolverService?: ModelResolverService,
+    private readonly configService?: MediaclawConfigService,
   ) {}
 
   async analyzeFailure(
@@ -311,7 +313,7 @@ export class PromptOptimizerLoopService {
       metadata: input.metadata || {},
     })
 
-    return this.toIterationLogResponse(created.toObject())
+    return this.toIterationLogResponse(created.toObject() as unknown as Record<string, unknown>)
   }
 
   async getIterationHistory(videoTaskId: string) {
@@ -904,7 +906,7 @@ export class PromptOptimizerLoopService {
     ].includes((status || '') as VideoTaskStatus)
   }
 
-  private toIterationLogResponse(item: Record<string, any>) {
+  private toIterationLogResponse(item: Record<string, unknown>) {
     return {
       id: item['_id']?.toString?.() || null,
       videoTaskId: item['videoTaskId'],
@@ -945,7 +947,7 @@ export class PromptOptimizerLoopService {
       }
     }
 
-    const preferredProvider = process.env['MEDIACLAW_PROMPT_OPTIMIZER_PROVIDER']?.trim().toLowerCase()
+    const preferredProvider = this.configService?.getString(['MEDIACLAW_PROMPT_OPTIMIZER_PROVIDER'], '').toLowerCase()
     const deepseekKey = await this.resolveApiKey(
       orgId,
       OrgApiKeyProvider.DEEPSEEK,
@@ -966,42 +968,42 @@ export class PromptOptimizerLoopService {
       return {
         name: 'deepseek' as const,
         apiKey: deepseekKey,
-        model: process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || process.env['DEEPSEEK_MODEL']?.trim() || 'deepseek-chat',
+        model: this.configService?.getString(['MEDIACLAW_DEEPSEEK_MODEL', 'DEEPSEEK_MODEL'], 'deepseek-chat') || 'deepseek-chat',
       }
     }
     if (preferredProvider === 'gemini' && geminiKey) {
       return {
         name: 'gemini' as const,
         apiKey: geminiKey,
-        model: process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || process.env['GEMINI_MODEL']?.trim() || 'gemini-2.5-flash',
+        model: this.configService?.getString(['MEDIACLAW_GEMINI_MODEL', 'GEMINI_MODEL'], 'gemini-2.5-flash') || 'gemini-2.5-flash',
       }
     }
     if (preferredProvider === 'openai' && openAiKey) {
       return {
         name: 'openai' as const,
         apiKey: openAiKey,
-        model: process.env['MEDIACLAW_OPENAI_MODEL']?.trim() || process.env['OPENAI_MODEL']?.trim() || 'gpt-4o',
+        model: this.configService?.getString(['MEDIACLAW_OPENAI_MODEL', 'OPENAI_MODEL'], 'gpt-4o') || 'gpt-4o',
       }
     }
     if (deepseekKey) {
       return {
         name: 'deepseek' as const,
         apiKey: deepseekKey,
-        model: process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim() || process.env['DEEPSEEK_MODEL']?.trim() || 'deepseek-chat',
+        model: this.configService?.getString(['MEDIACLAW_DEEPSEEK_MODEL', 'DEEPSEEK_MODEL'], 'deepseek-chat') || 'deepseek-chat',
       }
     }
     if (geminiKey) {
       return {
         name: 'gemini' as const,
         apiKey: geminiKey,
-        model: process.env['MEDIACLAW_GEMINI_MODEL']?.trim() || process.env['GEMINI_MODEL']?.trim() || 'gemini-2.5-flash',
+        model: this.configService?.getString(['MEDIACLAW_GEMINI_MODEL', 'GEMINI_MODEL'], 'gemini-2.5-flash') || 'gemini-2.5-flash',
       }
     }
     if (openAiKey) {
       return {
         name: 'openai' as const,
         apiKey: openAiKey,
-        model: process.env['MEDIACLAW_OPENAI_MODEL']?.trim() || process.env['OPENAI_MODEL']?.trim() || 'gpt-4o',
+        model: this.configService?.getString(['MEDIACLAW_OPENAI_MODEL', 'OPENAI_MODEL'], 'gpt-4o') || 'gpt-4o',
       }
     }
 
@@ -1021,7 +1023,7 @@ export class PromptOptimizerLoopService {
     }
 
     for (const envName of fallbackEnvNames) {
-      const value = process.env[envName]?.trim()
+      const value = this.configService?.getString([envName], '')
       if (value) {
         return value
       }
@@ -1064,10 +1066,9 @@ export class PromptOptimizerLoopService {
   }
 
   private async requestDeepSeekOptimization(apiKey: string, prompt: string, modelOverride?: string) {
-    const baseUrl = process.env['MEDIACLAW_DEEPSEEK_BASE_URL']?.trim() || 'https://api.deepseek.com'
+    const baseUrl = this.configService?.getString(['MEDIACLAW_DEEPSEEK_BASE_URL'], 'https://api.deepseek.com') || 'https://api.deepseek.com'
     const model = modelOverride?.trim()
-      || process.env['MEDIACLAW_DEEPSEEK_MODEL']?.trim()
-      || process.env['DEEPSEEK_MODEL']?.trim()
+      || this.configService?.getString(['MEDIACLAW_DEEPSEEK_MODEL', 'DEEPSEEK_MODEL'], '')
       || 'deepseek-chat'
     const response = await axios.post(
       `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
@@ -1094,10 +1095,10 @@ export class PromptOptimizerLoopService {
   }
 
   private async requestGeminiOptimization(apiKey: string, prompt: string, modelOverride?: string) {
-    const baseUrl = process.env['MEDIACLAW_GEMINI_BASE_URL']?.trim() || 'https://generativelanguage.googleapis.com/v1beta'
+    const baseUrl = this.configService?.getString(['MEDIACLAW_GEMINI_BASE_URL'], 'https://generativelanguage.googleapis.com/v1beta')
+      || 'https://generativelanguage.googleapis.com/v1beta'
     const model = modelOverride?.trim()
-      || process.env['MEDIACLAW_GEMINI_MODEL']?.trim()
-      || process.env['GEMINI_MODEL']?.trim()
+      || this.configService?.getString(['MEDIACLAW_GEMINI_MODEL', 'GEMINI_MODEL'], '')
       || 'gemini-2.5-flash'
     const response = await axios.post(
       `${baseUrl.replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey}`,
@@ -1126,10 +1127,10 @@ export class PromptOptimizerLoopService {
   }
 
   private async requestOpenAiOptimization(apiKey: string, prompt: string, modelOverride?: string) {
-    const baseUrl = process.env['MEDIACLAW_OPENAI_BASE_URL']?.trim() || process.env['OPENAI_BASE_URL']?.trim() || 'https://api.openai.com/v1'
+    const baseUrl = this.configService?.getString(['MEDIACLAW_OPENAI_BASE_URL', 'OPENAI_BASE_URL'], 'https://api.openai.com/v1')
+      || 'https://api.openai.com/v1'
     const model = modelOverride?.trim()
-      || process.env['MEDIACLAW_OPENAI_MODEL']?.trim()
-      || process.env['OPENAI_MODEL']?.trim()
+      || this.configService?.getString(['MEDIACLAW_OPENAI_MODEL', 'OPENAI_MODEL'], '')
       || 'gpt-4o'
     const response = await axios.post(
       `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
@@ -1221,4 +1222,4 @@ export class PromptOptimizerLoopService {
   }
 }
 
-export { PromptOptimizerLoopService as PromptOptimizerService }
+export { PromptOptimizerService as PromptOptimizerLoopService }
