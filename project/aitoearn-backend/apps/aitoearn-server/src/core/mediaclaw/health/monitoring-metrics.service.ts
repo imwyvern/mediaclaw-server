@@ -201,6 +201,10 @@ export class MonitoringMetricsService implements OnApplicationBootstrap {
     }
   }
 
+  async renderPrometheusMetrics() {
+    return client.register.metrics()
+  }
+
   private recordHttpRequest(
     method: string,
     route: string,
