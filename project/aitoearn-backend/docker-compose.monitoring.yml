@@ -62,10 +62,45 @@ services:
 
   alertmanager:
     image: prom/alertmanager:latest
-    command:
-      - --config.file=/etc/alertmanager/alertmanager.yml
-      - --config.expand-env
-      - --storage.path=/alertmanager
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -n "${WECOM_WEBHOOK_URL:-}" ]; then
+          cat > /tmp/alertmanager.yml <<EOF
+        global:
+          resolve_timeout: 5m
+
+        route:
+          receiver: wecom-webhook
+          group_by: ['alertname', 'job']
+          group_wait: 10s
+          group_interval: 1m
+          repeat_interval: 2h
+
+        receivers:
+          - name: wecom-webhook
+            webhook_configs:
+              - url: ${WECOM_WEBHOOK_URL}
+                send_resolved: true
+        EOF
+        else
+          cat > /tmp/alertmanager.yml <<EOF
+        global:
+          resolve_timeout: 5m
+
+        route:
+          receiver: default-noop
+          group_by: ['alertname', 'job']
+          group_wait: 10s
+          group_interval: 1m
+          repeat_interval: 2h
+
+        receivers:
+          - name: default-noop
+        EOF
+        fi
+        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
     env_file:
       - .env.production
     restart: unless-stopped
