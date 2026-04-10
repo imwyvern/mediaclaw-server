@@ -96,11 +96,22 @@ export interface PipelineQualityDimensionScores {
   viralityHook: number
 }
 
+export interface PipelineQualityDimensionThresholds {
+  resolution: number
+  fileSize: number
+  subtitles: number
+  duration: number
+  clarity: number
+  composition: number
+  viralityHook: number
+}
+
 export interface PipelineQualityScore {
   total: number
   production: number
   virality: number
   dimensions: PipelineQualityDimensionScores
+  thresholds: PipelineQualityDimensionThresholds
 }
 
 export type PipelineQualityCheckKey
@@ -113,11 +124,15 @@ export type PipelineQualityCheckKey
     | 'viralityHook'
 
 export type PipelineQualityCheckSeverity = 'pass' | 'warning' | 'veto'
+export type PipelineQualityDimensionLevel = 'L1' | 'L2' | 'L3'
 
 export interface PipelineQualityCheck {
   key: PipelineQualityCheckKey
   label: string
+  level: PipelineQualityDimensionLevel
   score: number
+  threshold: number
+  warningThreshold: number
   passed: boolean
   severity: PipelineQualityCheckSeverity
   message: string
@@ -128,6 +143,7 @@ export interface PipelineQualityReport {
   metrics: PipelineQualityMetrics
   score: PipelineQualityScore
   checks: PipelineQualityCheck[]
+  vetoKeys: PipelineQualityCheckKey[]
   errors: string[]
   warnings: string[]
 }

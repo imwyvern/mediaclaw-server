@@ -21,8 +21,10 @@ describe('qualityCheckService', () => {
     expect(report.passed).toBe(true)
     expect(report.errors).toHaveLength(0)
     expect(report.warnings).toHaveLength(0)
+    expect(report.vetoKeys).toEqual([])
     expect(report.checks).toHaveLength(7)
     expect(report.score.total).toBeGreaterThan(80)
+    expect(report.score.thresholds.subtitles).toBe(75)
     expect(report.score.dimensions.viralityHook).toBeGreaterThan(80)
   })
 
@@ -68,5 +70,30 @@ describe('qualityCheckService', () => {
     expect(report.errors).toContain('短边 640px 低于 720p 发布基线')
     expect(report.errors).toContain('预期有字幕但最终成片缺失字幕')
     expect(report.score.production).toBeLessThan(70)
+  })
+
+  it('should veto the whole report when any L3 dimension drops below threshold', () => {
+    const service = new QualityCheckService()
+    const report = service.evaluateMetrics(
+      {
+        width: 1080,
+        height: 1080,
+        duration: 18,
+        fileSize: 2 * 1024 * 1024,
+        hasSubtitles: true,
+        shortEdge: 1080,
+        aspectRatio: '1080:1080',
+      },
+      18,
+      true,
+    )
+
+    expect(report.passed).toBe(false)
+    expect(report.vetoKeys).toContain('composition')
+    expect(report.checks.find(check => check.key === 'composition')).toMatchObject({
+      level: 'L3',
+      severity: 'veto',
+      threshold: 65,
+    })
   })
 })
