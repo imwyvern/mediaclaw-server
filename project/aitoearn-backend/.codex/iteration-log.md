@@ -209,3 +209,17 @@
   - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
   - 功能自测结论：Batch 1 相关后端 `🔶` 项在当前代码已持续闭环，本次 retry/retry 未发现新的 backend 缺口或新增 failure
 - 下一步计划：Batch 1 retry/retry 已满足停止条件；如需继续，应转入仍属于前端壳层或终局产品化目标的剩余 gap，并同步回写审计文档避免结论陈旧。
+
+## 2026-04-10 14:23:20 PDT
+- 当前改动：执行 Batch 2 retry/retry 复核。逐项核对 `公开数据删除/合规下线通道`、`趋势预测引擎`、`企业 SSO`、`ClawHost PostgreSQL 模型` 四个原 `❌` 项，确认当前分支仍保留真实 controller/service/schema/test 落地，这次无需新增功能代码，只做全量回归验证。
+- 验证结果：
+  - 代码复核结论：
+    - `compliance.controller.ts + compliance.service.ts + compliance-deletion-request.schema.ts` 已提供公开删除申请、公开状态查询、审核与执行闭环
+    - `analytics.controller.ts + trend-prediction.service.ts + trend-prediction.service.behavior.spec.ts` 已提供 `/api/v1/analytics/predictions` 与未来 7 天方向/发布时间预测
+    - `auth.controller.ts + enterprise-sso.service.ts + enterprise-sso-provider.schema.ts + enterprise-sso.service.behavior.spec.ts` 已提供 OIDC/SAML 企业 SSO 配置、登录入口和 callback/assertion
+    - `clawhost-postgres.service.ts + clawhost-postgres.service.behavior.spec.ts` 已提供 `apps/bots/bot_channels/bot_devices` PostgreSQL 同步模型
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
+  - 功能自测结论：Batch 2 原审计中的 4 个 `❌` 项在当前代码已持续闭环，本次 retry/retry 未发现新的 backend 缺口或新增 failure
+- 下一步计划：Batch 2 retry/retry 已满足停止条件；如需继续，应转入仍属于前端壳层或终局产品化目标的剩余 gap，并同步回写审计文档避免结论陈旧。
