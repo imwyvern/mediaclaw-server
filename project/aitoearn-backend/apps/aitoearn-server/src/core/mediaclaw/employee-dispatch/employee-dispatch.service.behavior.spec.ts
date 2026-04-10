@@ -73,6 +73,7 @@ describe('employeeDispatchService', () => {
   let platformAccountModel: Record<string, any>
   let videoTaskModel: Record<string, any>
   let imDeliveryService: Record<string, any>
+  let clawHostGatewayPushService: Record<string, any>
 
   beforeEach(() => {
     employeeAssignmentModel = {
@@ -100,6 +101,9 @@ describe('employeeDispatchService', () => {
       buildGenericWebhookPayload: vi.fn(),
       deliverViaWebhook: vi.fn(),
     }
+    clawHostGatewayPushService = {
+      pushRealtimeEvent: vi.fn().mockResolvedValue({ attempted: 1, delivered: 1 }),
+    }
 
     service = new EmployeeDispatchService(
       employeeAssignmentModel as any,
@@ -109,6 +113,7 @@ describe('employeeDispatchService', () => {
       { pushVideoCard: vi.fn() } as any,
       { pushVideoCard: vi.fn() } as any,
       imDeliveryService as any,
+      clawHostGatewayPushService as any,
     )
   })
 
@@ -235,6 +240,10 @@ describe('employeeDispatchService', () => {
         platformAccountName: '小红书账号B',
       }),
     )
+    expect(clawHostGatewayPushService.pushRealtimeEvent).toHaveBeenCalledWith(orgId, expect.objectContaining({
+      event: 'delivery.pending',
+      capability: 'delivery',
+    }))
   })
 
   it('应校验默认账号必须属于员工绑定账号集合', async () => {

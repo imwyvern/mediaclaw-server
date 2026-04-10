@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import {
@@ -16,6 +17,7 @@ import {
 } from '@yikart/mongodb'
 import { Model, Types } from 'mongoose'
 
+import { ClawHostGatewayPushService } from '../clawhost/clawhost-gateway-push.service'
 import { DistributionPublishStatus } from '../distribution/distribution.constants'
 import { FeishuPushService } from './feishu-push.service'
 import { ImDeliveryService } from './im-delivery.service'
@@ -90,6 +92,8 @@ export class EmployeeDispatchService {
     private readonly feishuPushService: FeishuPushService,
     private readonly wecomPushService: WecomPushService,
     private readonly imDeliveryService: ImDeliveryService,
+    @Optional()
+    private readonly clawHostGatewayPushService?: ClawHostGatewayPushService,
   ) {}
 
   async createAssignment(orgId: string, data: Record<string, unknown>) {
@@ -644,6 +648,7 @@ export class EmployeeDispatchService {
   }
 
   private async dispatchTaskWithAssignment(task: VideoTaskRecord, assignment: AssignmentRecord) {
+    const taskOrgId = this.resolveTaskOrgId(task)
     const deliveryChannel = this.resolveDeliveryChannel(assignment)
     const selectedPlatformAccount = this.asRecord(assignment['selectedPlatformAccount'])
     const selectedPlatformAccountId = this.normalizeOptionalString(selectedPlatformAccount?.['id'])
@@ -764,6 +769,23 @@ export class EmployeeDispatchService {
           },
         }).exec(),
       ])
+
+      await this.clawHostGatewayPushService?.pushRealtimeEvent(taskOrgId, {
+        event: 'delivery.pending',
+        capability: 'delivery',
+        input: {
+          deliveryRecordId: created._id.toString(),
+          videoTaskId: task['_id'].toString(),
+          assignmentId: assignment['_id'].toString(),
+          deliveryChannel,
+          manualPickupRequired,
+          publishStatus,
+          platform: selectedPlatform,
+          platformAccountId: selectedPlatformAccountId,
+          outputVideoUrl: this.normalizeOptionalString(task['outputVideoUrl']),
+          title: this.normalizeOptionalString(this.asRecord(task['copy'])?.['title']),
+        },
+      })
     }
     else {
       await this.videoTaskModel.findByIdAndUpdate(task['_id'], {

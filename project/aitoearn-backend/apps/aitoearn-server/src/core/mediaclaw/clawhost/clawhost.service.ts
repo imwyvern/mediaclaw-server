@@ -21,6 +21,7 @@ import { RedisService } from '@yikart/redis'
 import { Model } from 'mongoose'
 import { MediaClawApiKeyService } from '../apikey/apikey.service'
 import { ClawHostAlertService } from './clawhost-alert.service'
+import { ClawHostGatewayPushService } from './clawhost-gateway-push.service'
 import { ClawHostPostgresService } from './clawhost-postgres.service'
 import { ClawHostRuntimeService } from './clawhost-runtime.service'
 import { ManagedRuntimeTarget } from './clawhost-runtime.types'
@@ -117,6 +118,7 @@ export class ClawHostService {
     private readonly clawHostRuntimeService: ClawHostRuntimeService,
     private readonly clawHostAlertService: ClawHostAlertService,
     private readonly clawHostPostgresService: ClawHostPostgresService,
+    private readonly clawHostGatewayPushService: ClawHostGatewayPushService,
   ) {}
 
   async createInstance(
@@ -165,6 +167,7 @@ export class ClawHostService {
         installedAt: now,
       }],
       healthStatus: this.buildPendingHealthStatus(now),
+      gatewayConfig: this.buildGatewayConfig(),
       k8sNamespace: runtime?.namespace || namespace,
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
         ? runtime?.podName || podName
@@ -260,6 +263,7 @@ export class ClawHostService {
         installedAt: new Date(),
       }],
       healthStatus: this.buildPendingHealthStatus(new Date()),
+      gatewayConfig: this.buildGatewayConfig(),
       k8sNamespace: runtime?.namespace || namespace,
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
         ? runtime?.podName || podName
@@ -609,6 +613,75 @@ export class ClawHostService {
       status: derived.status,
       healthStatus: derived.healthStatus,
     })
+  }
+
+  async configureGateway(
+    orgId: string,
+    instanceId: string,
+    input: {
+      enabled?: boolean
+      url?: string
+      toolName?: string
+    },
+  ) {
+    const instance = await this.clawHostInstanceModel.findOne({
+      instanceId,
+      orgId: orgId.trim(),
+    }).exec()
+    if (!instance) {
+      throw new NotFoundException('ClawHost instance not found')
+    }
+
+    const currentGateway = this.buildGatewayConfig(instance.gatewayConfig)
+    const nextGateway = this.buildGatewayConfig({
+      enabled: input.enabled ?? currentGateway.enabled,
+      url: input.url ?? currentGateway.url,
+      toolName: input.toolName ?? currentGateway.toolName,
+      lastPushAt: currentGateway.lastPushAt,
+      lastPushStatus: currentGateway.lastPushStatus,
+      lastPushMessage: currentGateway.lastPushMessage,
+    })
+
+    if (nextGateway.enabled && !nextGateway.url) {
+      throw new BadRequestException('gateway url is required when gateway is enabled')
+    }
+
+    instance.set('gatewayConfig', nextGateway)
+    await instance.save()
+
+    const updatedAt = new Date().toISOString()
+    if (instance.orgId && instance.lastAgentId) {
+      this.clawHostGatewayPushService.queueConfigUpdate(instance.orgId, instance.lastAgentId, {
+        key: 'gatewayConfig',
+        value: {
+          enabled: nextGateway.enabled,
+          url: nextGateway.url,
+          toolName: nextGateway.toolName,
+        },
+        updatedAt,
+      })
+    }
+
+    if (nextGateway.enabled && nextGateway.url) {
+      await this.clawHostGatewayPushService.pushRealtimeEvent(instance.orgId, {
+        event: 'config.update',
+        capability: 'heartbeat',
+        input: {
+          instanceId: instance.instanceId,
+          updates: [{
+            key: 'gatewayConfig',
+            value: {
+              enabled: nextGateway.enabled,
+              url: nextGateway.url,
+              toolName: nextGateway.toolName,
+            },
+            updatedAt,
+          }],
+        },
+      })
+    }
+
+    return this.toResponse(instance.toObject() as ClawHostInstance)
   }
 
   async upgradeSkill(orgId: string, instanceId: string, version: string) {
@@ -1071,6 +1144,26 @@ export class ClawHostService {
     }
   }
 
+  private buildGatewayConfig(
+    source: Partial<{
+      enabled: boolean
+      url: string
+      toolName: string
+      lastPushAt: Date | null
+      lastPushStatus: string
+      lastPushMessage: string
+    }> = {},
+  ) {
+    return {
+      enabled: Boolean(source.enabled),
+      url: source.url?.trim() || '',
+      toolName: source.toolName?.trim() || 'mediaclaw.sync',
+      lastPushAt: source.lastPushAt || null,
+      lastPushStatus: source.lastPushStatus?.trim() || '',
+      lastPushMessage: source.lastPushMessage?.trim() || '',
+    }
+  }
+
   private normalizeCapabilities(capabilities?: string[]) {
     if (!Array.isArray(capabilities) || capabilities.length === 0) {
       return []
@@ -1400,6 +1493,7 @@ export class ClawHostService {
         requestedImChannel: instance.requestedImChannel || '',
         accessUrl: instance.accessUrl || '',
         healthUrl: instance.healthUrl || '',
+        gateway: this.buildGatewayConfig(instance.gatewayConfig),
         containerId: instance.containerId || '',
         containerName: instance.containerName || '',
         runtimeImage: instance.runtimeImage || '',

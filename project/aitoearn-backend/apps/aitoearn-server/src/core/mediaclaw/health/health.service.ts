@@ -1,6 +1,7 @@
 import { InjectQueue } from '@nestjs/bullmq'
-import { BadRequestException, Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable, Optional } from '@nestjs/common'
 import { Queue } from 'bullmq'
+import { ClawHostGatewayPushService } from '../clawhost/clawhost-gateway-push.service'
 import { ClawHostService } from '../clawhost/clawhost.service'
 import { VIDEO_WORKER_QUEUE, VIDEO_WORKER_STEPS, VideoWorkerJobData, VideoWorkerStep } from '../worker/worker.constants'
 
@@ -28,12 +29,6 @@ interface AgentHeartbeatState {
   authType: string | null
 }
 
-interface AgentConfigUpdate {
-  key: string
-  value: unknown
-  updatedAt: string
-}
-
 interface PendingQueueTask {
   jobId: string
   taskId: string
@@ -48,12 +43,13 @@ interface PendingQueueTask {
 @Injectable()
 export class HealthService {
   private readonly agentHeartbeatMap = new Map<string, AgentHeartbeatState>()
-  private readonly configUpdateMap = new Map<string, AgentConfigUpdate[]>()
 
   constructor(
     @InjectQueue(VIDEO_WORKER_QUEUE)
     private readonly videoWorkerQueue: Queue<VideoWorkerJobData>,
     private readonly clawHostService: ClawHostService,
+    @Optional()
+    private readonly clawHostGatewayPushService?: ClawHostGatewayPushService,
   ) {}
 
   getPublicStatus() {
@@ -101,7 +97,7 @@ export class HealthService {
       lastHeartbeatAt: acknowledgedAt,
       latestSkillVersion: 'latest',
       pendingTasks: await this.getPendingTasks(capabilities),
-      configUpdates: this.drainConfigUpdates(agentId),
+      configUpdates: this.clawHostGatewayPushService?.drainConfigUpdates(user?.orgId || user?.id, agentId) || [],
     }
   }
 
@@ -167,11 +163,5 @@ export class HealthService {
 
   private isSupportedStep(step: string): step is VideoWorkerStep {
     return (VIDEO_WORKER_STEPS as readonly string[]).includes(step)
-  }
-
-  private drainConfigUpdates(agentId: string): AgentConfigUpdate[] {
-    const updates = this.configUpdateMap.get(agentId) || []
-    this.configUpdateMap.delete(agentId)
-    return updates
   }
 }

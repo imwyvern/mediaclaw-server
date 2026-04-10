@@ -14,6 +14,7 @@ import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
 import {
   BatchUpgradeClawHostSkillDto,
+  ConfigureClawHostGatewayDto,
   CreateClawHostInstanceDto,
   GetClawHostLogsQueryDto,
   InstallClawHostSkillDto,
@@ -84,6 +85,15 @@ export class ClawHostController {
     @Param('id') instanceId: string,
   ) {
     return this.clawHostService.getInstance(user.orgId || user.id, instanceId)
+  }
+
+  @Post('instances/:id/gateway')
+  async configureGateway(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+    @Body() body: ConfigureClawHostGatewayDto,
+  ) {
+    return this.clawHostService.configureGateway(user.orgId || user.id, instanceId, body)
   }
 
   @Get('instances/:id/status')

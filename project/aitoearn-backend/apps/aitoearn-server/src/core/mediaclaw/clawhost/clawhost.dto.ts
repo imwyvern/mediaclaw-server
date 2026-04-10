@@ -2,6 +2,7 @@ import { ClawHostDeploymentMode, ClawHostInstanceStatus } from '@yikart/mongodb'
 import { Type } from 'class-transformer'
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -126,6 +127,22 @@ export class UpgradeClawHostSkillDto {
   @IsOptional()
   @IsString()
   version?: string
+}
+
+export class ConfigureClawHostGatewayDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  url?: string
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  toolName?: string
 }
 
 export class ListClawHostInstancesQueryDto {

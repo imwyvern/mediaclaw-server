@@ -11,6 +11,7 @@ import {
   VideoTaskSchema,
 } from '@yikart/mongodb'
 
+import { ClawHostModule } from '../clawhost/clawhost.module'
 import { EmployeeDispatchController } from './employee-dispatch.controller'
 import { EmployeeDispatchService } from './employee-dispatch.service'
 import { FeishuPushService } from './feishu-push.service'
@@ -25,6 +26,7 @@ import { WecomPushService } from './wecom-push.service'
       { name: PlatformAccount.name, schema: PlatformAccountSchema },
       { name: VideoTask.name, schema: VideoTaskSchema },
     ]),
+    ClawHostModule,
   ],
   controllers: [EmployeeDispatchController],
   providers: [EmployeeDispatchService, ImDeliveryService, FeishuPushService, WecomPushService],

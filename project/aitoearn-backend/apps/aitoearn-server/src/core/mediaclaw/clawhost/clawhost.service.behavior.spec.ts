@@ -85,6 +85,14 @@ function createManagedInstance(overrides: Record<string, unknown> = {}) {
     hostPort: 3900,
     healthUrl: 'http://127.0.0.1:3900/health',
     lastHealthMessage: '',
+    gatewayConfig: {
+      enabled: false,
+      url: '',
+      toolName: 'mediaclaw.sync',
+      lastPushAt: null,
+      lastPushStatus: '',
+      lastPushMessage: '',
+    },
     requestedImChannel: 'feishu',
     accessUrl: 'http://127.0.0.1:3900/',
     installCommand: 'openclaw skills install mediaclaw-client',
@@ -113,6 +121,7 @@ describe('clawHostService behavior', () => {
   let clawHostRuntimeService: Record<string, any>
   let clawHostAlertService: Record<string, any>
   let clawHostPostgresService: Record<string, any>
+  let clawHostGatewayPushService: Record<string, any>
 
   beforeEach(() => {
     clawHostInstanceModel = {
@@ -149,6 +158,10 @@ describe('clawHostService behavior', () => {
     clawHostPostgresService = {
       syncInstance: vi.fn().mockResolvedValue({ enabled: true, synced: true }),
     }
+    clawHostGatewayPushService = {
+      queueConfigUpdate: vi.fn(),
+      pushRealtimeEvent: vi.fn().mockResolvedValue({ attempted: 1, delivered: 1 }),
+    }
 
     service = new ClawHostService(
       clawHostInstanceModel as any,
@@ -157,6 +170,7 @@ describe('clawHostService behavior', () => {
       clawHostRuntimeService as any,
       clawHostAlertService as any,
       clawHostPostgresService as any,
+      clawHostGatewayPushService as any,
     )
   })
 
@@ -215,6 +229,46 @@ describe('clawHostService behavior', () => {
       }),
     )
     expect(result.unhealthyCount).toBe(1)
+  })
+
+  it('应保存 gateway 配置并给最近 agent 下发配置更新', async () => {
+    const save = vi.fn().mockResolvedValue(undefined)
+    const instance: Record<string, any> = {
+      ...createManagedInstance({
+        orgId: 'org-1',
+        lastAgentId: 'agent-1',
+      }),
+      save,
+      toObject() {
+        return this
+      },
+    }
+    instance.set = vi.fn((key: string, value: unknown) => {
+      instance[key] = value
+    })
+    clawHostInstanceModel.findOne.mockReturnValue(createExecQuery(instance))
+
+    const result = await service.configureGateway('org-1', instance.instanceId, {
+      enabled: true,
+      url: 'https://openclaw.example.com',
+      toolName: 'mediaclaw.sync',
+    })
+
+    expect(instance.set).toHaveBeenCalledWith('gatewayConfig', expect.objectContaining({
+      enabled: true,
+      url: 'https://openclaw.example.com',
+      toolName: 'mediaclaw.sync',
+    }))
+    expect(clawHostGatewayPushService.queueConfigUpdate).toHaveBeenCalledWith('org-1', 'agent-1', expect.objectContaining({
+      key: 'gatewayConfig',
+    }))
+    expect(clawHostGatewayPushService.pushRealtimeEvent).toHaveBeenCalledWith('org-1', expect.objectContaining({
+      event: 'config.update',
+    }))
+    expect(result.connectionInfo.gateway).toEqual(expect.objectContaining({
+      enabled: true,
+      url: 'https://openclaw.example.com',
+    }))
   })
 
   it('应在托管实例恢复健康时清理告警节流缓存', async () => {

@@ -6,6 +6,7 @@ import { MediaclawConfigModule } from '../mediaclaw-config.module'
 import { ClawHostAlertService } from './clawhost-alert.service'
 import { ClawHostBindingController } from './clawhost-binding.controller'
 import { ClawHostDockerRuntimeDriver } from './clawhost-docker-runtime.driver'
+import { ClawHostGatewayPushService } from './clawhost-gateway-push.service'
 import { ClawHostK8sRuntimeDriver } from './clawhost-k8s-runtime.driver'
 import { ClawHostPostgresService } from './clawhost-postgres.service'
 import { ClawHostRuntimeService } from './clawhost-runtime.service'
@@ -28,7 +29,8 @@ import { ClawHostService } from './clawhost.service'
     ClawHostRuntimeService,
     ClawHostAlertService,
     ClawHostPostgresService,
+    ClawHostGatewayPushService,
   ],
-  exports: [ClawHostService],
+  exports: [ClawHostService, ClawHostGatewayPushService],
 })
 export class ClawHostModule {}

@@ -59,6 +59,27 @@ export class ClawHostHealthStatus {
   latency: number
 }
 
+@Schema({ _id: false })
+export class ClawHostGatewayConfig {
+  @Prop({ type: Boolean, default: false })
+  enabled: boolean
+
+  @Prop({ type: String, default: '' })
+  url: string
+
+  @Prop({ type: String, default: 'mediaclaw.sync' })
+  toolName: string
+
+  @Prop({ type: Date, default: null })
+  lastPushAt: Date | null
+
+  @Prop({ type: String, default: '' })
+  lastPushStatus: string
+
+  @Prop({ type: String, default: '' })
+  lastPushMessage: string
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'clawhost_instances' })
 export class ClawHostInstance extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -132,6 +153,9 @@ export class ClawHostInstance extends WithTimestampSchema {
 
   @Prop({ type: String, default: '' })
   lastHealthMessage: string
+
+  @Prop({ type: ClawHostGatewayConfig, default: () => ({}) })
+  gatewayConfig: ClawHostGatewayConfig
 
   @Prop({ type: String, default: '' })
   requestedImChannel: string

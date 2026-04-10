@@ -133,3 +133,14 @@
   - `pnpm nx test aitoearn-server -- --run` 通过，`119` 个测试文件、`377` 个测试全部通过
   - 功能自测结论：Batch 3 新增的 `clawhost runtime abstraction`、`monitoring tracing + slow query metrics`、`storage lifecycle policy sync` 均已被定向与全量测试覆盖，满足停止条件
 - 下一步计划：Batch 3 已完成，整理提交结果并向用户汇报；保留无关残留 `tts.service.ts` 与 `.tmp-vitest/` 不做处理。
+
+## 2026-04-10 12:55:25 PDT
+- 当前改动：补完 Gateway 实时推送与 heartbeat 配置更新闭环。新增 `ClawHostGatewayPushService`，支持实例级 gateway 配置、按 capability 实时调用客户端 `/tools/invoke`、heartbeat 配置更新下发，以及在员工分发完成后向 Skill 侧推送 `delivery.pending` 实时事件。
+- 验证结果：
+  - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/clawhost/clawhost-gateway-push.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.behavior.spec.ts src/core/mediaclaw/health/health.service.behavior.spec.ts src/core/mediaclaw/employee-dispatch/employee-dispatch.service.behavior.spec.ts` 首轮失败，定位为 `axiosPost` mock 未使用 `vi.hoisted` 导致初始化顺序错误
+  - 修复 `axios` mock hoist 后，定向测试通过，`4` 个测试文件、`14` 个测试全部通过
+  - `pnpm nx build aitoearn-server` 通过
+  - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - `pnpm nx test aitoearn-server -- --run` 通过，`121` 个测试文件、`381` 个测试全部通过
+  - 功能自测结论：实例 gateway 配置可保存并回显，heartbeat 能收到真实 `configUpdates`，员工分发成功后会触发 gateway `delivery.pending` 推送
+- 下一步计划：提交本次 Gateway 原子改动，然后进入“个人共享群体验 API 入口”，补齐个人体验版共享实例的产品化配置与查询接口。
