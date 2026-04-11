@@ -515,3 +515,21 @@
     - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
   - 功能自测结论：Batch 3 相关架构升级项在当前代码已持续闭环，本次第九次 retry 没有发现新的 backend 架构缺口或新增 failure，停止条件满足
 - 下一步计划：提交本次 Batch 3 验证记录；如继续后续 gap 批次，应先梳理当前工作树里仍未归属的 `libs/mongodb/*` 与 `clawhost/migrations` 脏改动，避免把不同主题混入下一轮提交。
+
+## 2026-04-10 21:11:21 PDT
+- 当前改动：执行 Batch 1 retry/retry/retry/retry/retry/retry/retry/retry/retry 复核。逐项核对 `7 维 AI 质检`、`Gateway/heartbeat 实时推送`、`个人共享群体验入口`、`SLA 服务化`、`素材版本变更通知`、`Excel/ZIP 导出闭环`、`customer scoped API Key`、`退款与取消闭环` 八项后端 `🔶` 能力是否仍保持 service/controller/schema/test 闭环，并在当前工作树直接执行 `build/lint/test` 做停止条件验证。
+- 验证结果：
+  - 代码复核结论：
+    - `quality-check.service.ts + quality-check.service.spec.ts + pipeline.service.ts` 仍提供 7 维 AI 质检和评分闭环
+    - `clawhost-gateway-push.service.ts + employee-dispatch.service.ts + heartbeat/*` 仍提供 Gateway/heartbeat 实时推送链路
+    - `personal-shared-experience.service.ts + auth.controller.ts + clawhost-instance.schema.ts` 仍提供个人共享群体验入口与实例级配置
+    - `sla.service.ts + health.controller.ts + sla-report.schema.ts` 仍提供 SLA 分档、评估、历史与快照
+    - `asset.service.ts + brand-asset-version.schema.ts + notification.service.ts` 仍提供素材版本通知闭环
+    - `content-mgmt.service.ts + export.service.ts + report.service.ts` 仍提供 Excel/ZIP 导出与统一报表打包
+    - `apikey.service.ts + apikey.service.behavior.spec.ts + refund-request.service.ts` 仍提供 scoped API Key 与退款/取消闭环
+  - 当前工作树验证：
+    - `pnpm nx build aitoearn-server` 通过
+    - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+    - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
+  - 功能自测结论：Batch 1 相关后端 `🔶` 项在当前代码已持续闭环，本次第十次 retry 没有发现新的 backend 功能缺口或新增 failure，停止条件满足
+- 下一步计划：提交本次 Batch 1 验证记录；如继续后续 gap 批次，应继续保持只提交 iteration 记录，不把当前工作树中未归属的 `libs/mongodb/*`、`tts.service.ts`、`clawhost/migrations` 脏改动混入。
