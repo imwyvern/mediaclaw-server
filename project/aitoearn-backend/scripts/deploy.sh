@@ -11,6 +11,12 @@ SSH_MAX_ATTEMPTS="${DEPLOY_SSH_MAX_ATTEMPTS:-3}"
 SSH_RETRY_DELAY="${DEPLOY_SSH_RETRY_DELAY:-60}"
 LOCAL_NODE_OPTIONS="${DEPLOY_LOCAL_NODE_OPTIONS:---max-old-space-size=4096}"
 REMOTE_ARTIFACT_PATH="/tmp/$(basename "${ARTIFACT_PATH}")"
+ARTIFACT_CONTENTS=(
+  dist
+  package.json
+  pnpm-lock.yaml
+  pnpm-workspace.yaml
+)
 SSH_OPTS=(
   -o BatchMode=yes
   -o ConnectTimeout=15
@@ -100,13 +106,27 @@ build_local() {
 }
 
 package_artifact() {
-  log '打包 dist 产物'
+  local artifact_entry
+
+  log '打包 dist 产物与部署 manifest'
+  for artifact_entry in "${ARTIFACT_CONTENTS[@]}"; do
+    [[ -e "${ROOT_DIR}/${artifact_entry}" ]] || {
+      printf 'missing artifact input: %s\n' "${artifact_entry}" >&2
+      exit 1
+    }
+  done
+
   if tar --help 2>&1 | grep -q -- '--no-mac-metadata'; then
-    COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "${ARTIFACT_PATH}" -C "${ROOT_DIR}" dist
+    COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "${ARTIFACT_PATH}" -C "${ROOT_DIR}" "${ARTIFACT_CONTENTS[@]}"
     return
   fi
 
-  COPYFILE_DISABLE=1 tar czf "${ARTIFACT_PATH}" -C "${ROOT_DIR}" dist
+  COPYFILE_DISABLE=1 tar czf "${ARTIFACT_PATH}" -C "${ROOT_DIR}" "${ARTIFACT_CONTENTS[@]}"
+}
+
+upload_artifact() {
+  log '上传部署压缩包到远端'
+  run_scp "${ARTIFACT_PATH}" "${REMOTE_ARTIFACT_PATH}"
 }
 
 ensure_remote_runtime() {
@@ -116,20 +136,63 @@ set -Eeuo pipefail
 mkdir -p "${REMOTE_DIR}"
 cd "${REMOTE_DIR}"
 
-if [[ ! -d node_modules ]]; then
-  echo "missing ${REMOTE_DIR}/node_modules; remote install is forbidden for this deploy flow" >&2
+if [[ ! -f "${REMOTE_ARTIFACT_PATH}" ]]; then
+  echo "missing deploy artifact: ${REMOTE_ARTIFACT_PATH}" >&2
+  exit 1
+fi
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "pnpm is not installed on remote server" >&2
+  exit 1
+fi
+
+tar xzf "${REMOTE_ARTIFACT_PATH}" -C "${REMOTE_DIR}" package.json pnpm-lock.yaml pnpm-workspace.yaml
+
+INSTALL_LOG="${REMOTE_DIR}/deploy-pnpm-install.\$(date +%Y%m%d%H%M%S).log"
+if ! pnpm install --ignore-workspace --no-frozen-lockfile --prod=false 2>&1 | tee "\${INSTALL_LOG}"; then
+  echo "pnpm install failed, see \${INSTALL_LOG}" >&2
   exit 1
 fi
 
 node -e "require.resolve('tsconfig-paths/register')" >/dev/null
+node <<'NODE'
+const required = [
+  'helmet',
+  'pg',
+  'dockerode',
+  '@nestjs-modules/mailer',
+  '@nestjs/microservices',
+  'reflect-metadata',
+  '@opentelemetry/api',
+]
+
+const missing = required.filter((name) => {
+  try {
+    require.resolve(name)
+    return false
+  }
+  catch {
+    return true
+  }
+})
+
+if (missing.length > 0) {
+  console.error('missing runtime dependencies: ' + missing.join(', '))
+  process.exit(1)
+}
+NODE
+
+DANGLING_SYMLINKS="\$(find "${REMOTE_DIR}/node_modules" -maxdepth 2 -type l -xtype l -print)"
+if [[ -n "\${DANGLING_SYMLINKS}" ]]; then
+  echo "found dangling symlinks under ${REMOTE_DIR}/node_modules:" >&2
+  printf '%s\n' "\${DANGLING_SYMLINKS}" >&2
+  exit 1
+fi
 EOF
 )"
 }
 
 deploy_remote() {
-  log '上传 dist 压缩包到远端'
-  run_scp "${ARTIFACT_PATH}" "${REMOTE_ARTIFACT_PATH}"
-
   log '在远端解压并重启 PM2 服务'
   run_ssh "$(cat <<EOF
 set -Eeuo pipefail
@@ -385,6 +448,7 @@ main() {
 
   build_local
   package_artifact
+  upload_artifact
   ensure_remote_runtime
   deploy_remote
   configure_remote_nginx
