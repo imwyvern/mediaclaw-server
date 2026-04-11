@@ -170,8 +170,10 @@ describe('clawHostService behavior', () => {
       create: vi.fn(),
       find: vi.fn(),
       findOne: vi.fn(),
+      findOneAndUpdate: vi.fn(),
       findByIdAndUpdate: vi.fn(),
       updateOne: vi.fn(),
+      deleteOne: vi.fn(),
     }
     organizationModel = {
       findById: vi.fn().mockReturnValue(createExecQuery({
@@ -204,6 +206,13 @@ describe('clawHostService behavior', () => {
       notifyUnhealthyInstance: vi.fn().mockResolvedValue(undefined),
     }
     clawHostPostgresService = {
+      isEnabled: vi.fn().mockReturnValue(false),
+      upsertInstance: vi.fn(),
+      getInstance: vi.fn(),
+      listInstances: vi.fn(),
+      findByBoundApiKeyId: vi.fn(),
+      findByAgent: vi.fn(),
+      markCacheSynced: vi.fn().mockResolvedValue(undefined),
       syncInstance: vi.fn().mockResolvedValue({ enabled: true, synced: true }),
     }
     clawHostGatewayPushService = {

@@ -41,7 +41,10 @@ import {
 } from '../shared/layer-policy.utils'
 import { ClawHostAlertService } from './clawhost-alert.service'
 import { ClawHostGatewayPushService } from './clawhost-gateway-push.service'
-import { ClawHostPostgresService } from './clawhost-postgres.service'
+import {
+  ClawHostPostgresInstanceRecord,
+  ClawHostPostgresService,
+} from './clawhost-postgres.service'
 import { ClawHostRuntimeService } from './clawhost-runtime.service'
 import { ManagedRuntimeTarget } from './clawhost-runtime.types'
 
@@ -171,6 +174,96 @@ export class ClawHostService {
     const podName = this.buildPodName(instanceId)
     const now = new Date()
     const initialSkills = this.buildDefaultInstalledSkills(now)
+    if (this.isControlPlaneEnabled()) {
+      let latestInstance = this.buildInstanceSnapshot({
+        instanceId,
+        orgId: normalizedOrgId,
+        clientName: resolvedClientName,
+        plan,
+        deploymentMode,
+        config: resolvedConfig,
+        skills: initialSkills,
+        healthStatus: this.buildPendingHealthStatus(now),
+        requestedImChannel: options.requestedImChannel,
+        status: deploymentMode === ClawHostDeploymentMode.MANAGED
+          ? ClawHostInstanceStatus.CREATING
+          : ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
+        runtime: {
+          runtimeKind: this.clawHostRuntimeService.resolveRuntimeKind(),
+          namespace,
+          podName: deploymentMode === ClawHostDeploymentMode.MANAGED ? podName : '',
+        },
+      })
+
+      latestInstance = await this.writeControlPlaneInstance(latestInstance, {
+        ownerUserId: options.issuedByUserId?.trim() || '',
+      })
+
+      if (deploymentMode === ClawHostDeploymentMode.MANAGED) {
+        try {
+          const runtime = await this.provisionManagedRuntime({
+            instanceId,
+            orgId: normalizedOrgId,
+            plan,
+            clientName: resolvedClientName,
+            config: resolvedConfig,
+            namespace,
+            podName,
+          })
+          latestInstance = await this.writeControlPlaneInstance({
+            ...latestInstance,
+            status: ClawHostInstanceStatus.RUNNING,
+            runtimeKind: runtime.runtimeKind,
+            containerId: runtime.containerId,
+            containerName: runtime.containerName,
+            runtimeImage: runtime.image,
+            hostPort: runtime.hostPort,
+            healthUrl: runtime.healthUrl,
+            accessUrl: runtime.accessUrl,
+            k8sNamespace: runtime.namespace || namespace,
+            k8sPodName: runtime.podName || podName,
+            healthStatus: this.buildPendingHealthStatus(new Date()),
+            lastHealthMessage: '',
+          } as ClawHostInstance, {
+            ownerUserId: options.issuedByUserId?.trim() || '',
+          })
+        }
+        catch (error) {
+          const failed = await this.writeControlPlaneInstance({
+            ...latestInstance,
+            status: ClawHostInstanceStatus.ERROR,
+            lastHealthMessage: error instanceof Error ? error.message : String(error),
+          } as ClawHostInstance, {
+            ownerUserId: options.issuedByUserId?.trim() || '',
+          })
+          throw new BadRequestException(
+            failed.lastHealthMessage || 'Failed to provision ClawHost runtime',
+          )
+        }
+      }
+
+      let connectionCode: Awaited<ReturnType<ClawHostService['issueConnectionCode']>> | null = null
+      if (options.issuedByUserId?.trim()) {
+        connectionCode = await this.issueConnectionCode(
+          normalizedOrgId,
+          instanceId,
+          options.issuedByUserId,
+        )
+        latestInstance = await this.getInstanceOrThrow(normalizedOrgId, instanceId)
+      }
+
+      return {
+        ...this.toResponse(latestInstance),
+        connectionCode: connectionCode
+          ? {
+              code: connectionCode.code,
+              preview: connectionCode.preview,
+              expiresAt: connectionCode.expiresAt,
+            }
+          : undefined,
+      }
+    }
+
     const runtime = deploymentMode === ClawHostDeploymentMode.MANAGED
       ? await this.provisionManagedRuntime({
           instanceId,
@@ -265,6 +358,63 @@ export class ClawHostService {
     const namespace = this.buildNamespace(orgId)
     const podName = this.buildPodName(instanceId)
     const initialSkills = this.buildDefaultInstalledSkills(new Date())
+    if (this.isControlPlaneEnabled()) {
+      let instance = this.buildInstanceSnapshot({
+        instanceId,
+        orgId,
+        clientName,
+        plan,
+        deploymentMode,
+        config: resolvedConfig,
+        skills: initialSkills,
+        healthStatus: this.buildPendingHealthStatus(new Date()),
+        requestedImChannel: input.requestedImChannel,
+        accessUrl: input.accessUrl,
+        status: deploymentMode === ClawHostDeploymentMode.MANAGED
+          ? ClawHostInstanceStatus.CREATING
+          : ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
+        runtime: {
+          runtimeKind: this.clawHostRuntimeService.resolveRuntimeKind(),
+          namespace,
+          podName: deploymentMode === ClawHostDeploymentMode.MANAGED ? podName : '',
+        },
+      })
+
+      instance = await this.writeControlPlaneInstance(instance)
+
+      if (deploymentMode === ClawHostDeploymentMode.MANAGED) {
+        const runtime = await this.provisionManagedRuntime({
+          instanceId,
+          orgId,
+          plan,
+          clientName,
+          config: resolvedConfig,
+          namespace,
+          podName,
+        })
+        instance = await this.writeControlPlaneInstance({
+          ...instance,
+          status: ClawHostInstanceStatus.RUNNING,
+          runtimeKind: runtime.runtimeKind,
+          containerId: runtime.containerId,
+          containerName: runtime.containerName,
+          runtimeImage: runtime.image,
+          hostPort: runtime.hostPort,
+          healthUrl: runtime.healthUrl,
+          accessUrl: input.accessUrl?.trim() || runtime.accessUrl,
+          k8sNamespace: runtime.namespace || namespace,
+          k8sPodName: runtime.podName || podName,
+          healthStatus: this.buildPendingHealthStatus(new Date()),
+          lastHealthMessage: '',
+        } as ClawHostInstance)
+      }
+
+      return {
+        ...this.toResponse(instance),
+        provisioned: true,
+      }
+    }
+
     const runtime = deploymentMode === ClawHostDeploymentMode.MANAGED
       ? await this.provisionManagedRuntime({
           instanceId,
@@ -349,20 +499,34 @@ export class ClawHostService {
       throw new BadRequestException('Failed to issue connection code')
     }
 
-    await this.clawHostInstanceModel.updateOne(
-      { _id: instance._id },
-      {
-        $set: {
-          connectionCodePreview: this.maskConnectionCode(code),
-          connectionCodeHash: this.hashValue(code),
-          connectionCodeIssuedAt: now,
-          connectionCodeExpiresAt: expiresAt,
-          status: instance.boundApiKeyId
-            ? instance.status
-            : ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance({
+        ...instance,
+        connectionCodePreview: this.maskConnectionCode(code),
+        connectionCodeHash: this.hashValue(code),
+        connectionCodeIssuedAt: now,
+        connectionCodeExpiresAt: expiresAt,
+        status: instance.boundApiKeyId
+          ? instance.status
+          : ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
+      } as ClawHostInstance)
+    }
+    else {
+      await this.clawHostInstanceModel.updateOne(
+        { _id: instance._id },
+        {
+          $set: {
+            connectionCodePreview: this.maskConnectionCode(code),
+            connectionCodeHash: this.hashValue(code),
+            connectionCodeIssuedAt: now,
+            connectionCodeExpiresAt: expiresAt,
+            status: instance.boundApiKeyId
+              ? instance.status
+              : ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
+          },
         },
-      },
-    ).exec()
+      ).exec()
+    }
 
     return {
       instanceId: instance.instanceId,
@@ -410,38 +574,63 @@ export class ClawHostService {
     const now = new Date()
     const capabilities = this.normalizeCapabilities(input.capabilities)
     const nextStatus = this.buildHealthyStatus(now, 1)
+    const nextInstance = {
+      ...instance,
+      status: ClawHostInstanceStatus.RUNNING,
+      boundApiKeyId: apiKey.id,
+      boundApiKeyPrefix: apiKey.prefix,
+      boundAt: now,
+      lastHeartbeatAt: now,
+      lastClientVersion: input.clientVersion?.trim() || '',
+      lastAgentId: input.agentId?.trim() || requestedInstanceId,
+      heartbeatCapabilities: capabilities,
+      healthStatus: nextStatus,
+      connectionCodeHash: '',
+      connectionCodePreview: '',
+      connectionCodeIssuedAt: null,
+      connectionCodeExpiresAt: null,
+    } as ClawHostInstance
 
-    await this.clawHostInstanceModel.updateOne(
-      { _id: instance._id },
-      {
-        $set: {
-          status: ClawHostInstanceStatus.RUNNING,
-          boundApiKeyId: apiKey.id,
-          boundApiKeyPrefix: apiKey.prefix,
-          boundAt: now,
-          lastHeartbeatAt: now,
-          lastClientVersion: input.clientVersion?.trim() || '',
-          lastAgentId: input.agentId?.trim() || requestedInstanceId,
-          heartbeatCapabilities: capabilities,
-          healthStatus: nextStatus,
-          connectionCodeHash: '',
-          connectionCodePreview: '',
-          connectionCodeIssuedAt: null,
-          connectionCodeExpiresAt: null,
-        },
-      },
-    ).exec()
-
-    await this.redisService.del(this.buildConnectionCodeCacheKey(code))
-    await this.syncPostgresMetadata(
-      await this.getInstanceOrThrow(payload.orgId, payload.instanceId),
-      {
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance, {
         ownerUserId: payload.requestedByUserId,
         apiToken: apiKey.key,
         deviceId: input.agentId?.trim() || requestedInstanceId,
         deviceApproved: true,
-      },
-    )
+      })
+    }
+    else {
+      await this.clawHostInstanceModel.updateOne(
+        { _id: instance._id },
+        {
+          $set: {
+            status: ClawHostInstanceStatus.RUNNING,
+            boundApiKeyId: apiKey.id,
+            boundApiKeyPrefix: apiKey.prefix,
+            boundAt: now,
+            lastHeartbeatAt: now,
+            lastClientVersion: input.clientVersion?.trim() || '',
+            lastAgentId: input.agentId?.trim() || requestedInstanceId,
+            heartbeatCapabilities: capabilities,
+            healthStatus: nextStatus,
+            connectionCodeHash: '',
+            connectionCodePreview: '',
+            connectionCodeIssuedAt: null,
+            connectionCodeExpiresAt: null,
+          },
+        },
+      ).exec()
+      await this.syncPostgresMetadata(
+        await this.getInstanceOrThrow(payload.orgId, payload.instanceId),
+        {
+          ownerUserId: payload.requestedByUserId,
+          apiToken: apiKey.key,
+          deviceId: input.agentId?.trim() || requestedInstanceId,
+          deviceApproved: true,
+        },
+      )
+    }
+    await this.redisService.del(this.buildConnectionCodeCacheKey(code))
 
     return {
       status: 'connected',
@@ -456,16 +645,26 @@ export class ClawHostService {
 
   async recordHeartbeat(input: RecordHeartbeatInput) {
     const agentId = input.agentId?.trim() || ''
-    const instance = input.apiKeyId?.trim()
-      ? await this.clawHostInstanceModel.findOne({
-          boundApiKeyId: input.apiKeyId.trim(),
-        }).exec()
-      : agentId && input.orgId?.trim()
+    const instance = this.isControlPlaneEnabled()
+      ? input.apiKeyId?.trim()
+        ? await this.hydratePostgresRecord(
+            await this.clawHostPostgresService.findByBoundApiKeyId(input.apiKeyId.trim()),
+          )
+        : agentId && input.orgId?.trim()
+          ? await this.hydratePostgresRecord(
+              await this.clawHostPostgresService.findByAgent(input.orgId.trim(), agentId),
+            )
+          : null
+      : input.apiKeyId?.trim()
         ? await this.clawHostInstanceModel.findOne({
-            orgId: input.orgId.trim(),
-            instanceId: agentId,
+            boundApiKeyId: input.apiKeyId.trim(),
           }).exec()
-        : null
+        : agentId && input.orgId?.trim()
+          ? await this.clawHostInstanceModel.findOne({
+              orgId: input.orgId.trim(),
+              instanceId: agentId,
+            }).exec()
+          : null
 
     if (!instance) {
       return null
@@ -473,21 +672,40 @@ export class ClawHostService {
 
     const now = new Date()
     const capabilities = this.normalizeCapabilities(input.capabilities)
-    instance.set('status', ClawHostInstanceStatus.RUNNING)
-    instance.set('lastHeartbeatAt', now)
-    instance.set('lastClientVersion', input.clientVersion?.trim() || instance.lastClientVersion || '')
-    instance.set('lastAgentId', agentId || instance.lastAgentId || instance.instanceId)
-    instance.set('heartbeatCapabilities', capabilities)
-    instance.set('healthStatus', this.buildHealthyStatus(now, 1))
-    await instance.save()
-    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance, {
-      deviceId: agentId || instance.instanceId,
-      deviceApproved: true,
-    })
+    const nextInstance = {
+      ...instance,
+      status: ClawHostInstanceStatus.RUNNING,
+      lastHeartbeatAt: now,
+      lastClientVersion: input.clientVersion?.trim() || instance.lastClientVersion || '',
+      lastAgentId: agentId || instance.lastAgentId || instance.instanceId,
+      heartbeatCapabilities: capabilities,
+      healthStatus: this.buildHealthyStatus(now, 1),
+    } as ClawHostInstance
+
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance, {
+        deviceId: agentId || instance.instanceId,
+        deviceApproved: true,
+      })
+    }
+    else {
+      const mutableInstance = instance as any
+      mutableInstance.set('status', ClawHostInstanceStatus.RUNNING)
+      mutableInstance.set('lastHeartbeatAt', now)
+      mutableInstance.set('lastClientVersion', input.clientVersion?.trim() || instance.lastClientVersion || '')
+      mutableInstance.set('lastAgentId', agentId || instance.lastAgentId || instance.instanceId)
+      mutableInstance.set('heartbeatCapabilities', capabilities)
+      mutableInstance.set('healthStatus', this.buildHealthyStatus(now, 1))
+      await mutableInstance.save()
+      await this.syncPostgresMetadata(mutableInstance.toObject() as ClawHostInstance, {
+        deviceId: agentId || instance.instanceId,
+        deviceApproved: true,
+      })
+    }
 
     return {
       instanceId: instance.instanceId,
-      status: instance.status,
+      status: nextInstance.status,
       lastHeartbeatAt: now.toISOString(),
     }
   }
@@ -496,6 +714,20 @@ export class ClawHostService {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     if (this.isManagedInstance(instance)) {
       await this.clawHostRuntimeService.startContainer(this.buildManagedRuntimeTarget(instance))
+    }
+
+    if (this.isControlPlaneEnabled()) {
+      const started = await this.writeControlPlaneInstance({
+        ...instance,
+        status: ClawHostInstanceStatus.RUNNING,
+        healthStatus: this.buildPendingHealthStatus(new Date()),
+        lastHealthMessage: '',
+      } as ClawHostInstance)
+
+      return {
+        ...this.toResponse(started),
+        operation: 'starting',
+      }
     }
 
     const started = await this.clawHostInstanceModel.findByIdAndUpdate(
@@ -526,6 +758,21 @@ export class ClawHostService {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     if (this.isManagedInstance(instance)) {
       await this.clawHostRuntimeService.stopContainer(this.buildManagedRuntimeTarget(instance))
+    }
+
+    if (this.isControlPlaneEnabled()) {
+      const stopped = await this.writeControlPlaneInstance({
+        ...instance,
+        status: ClawHostInstanceStatus.STOPPED,
+        healthStatus: {
+          lastCheck: new Date(),
+          isHealthy: false,
+          latency: 0,
+        },
+        lastHealthMessage: '',
+      } as ClawHostInstance)
+
+      return this.toResponse(stopped)
     }
 
     const stopped = await this.clawHostInstanceModel.findOneAndUpdate(
@@ -566,6 +813,25 @@ export class ClawHostService {
       await this.clawHostRuntimeService.restartContainer(this.buildManagedRuntimeTarget(existing))
     }
 
+    if (this.isControlPlaneEnabled()) {
+      const restarted = await this.writeControlPlaneInstance({
+        ...existing,
+        status: this.isManagedInstance(existing)
+          ? ClawHostInstanceStatus.RUNNING
+          : ClawHostInstanceStatus.CREATING,
+        healthStatus: this.buildPendingHealthStatus(new Date()),
+        lastHeartbeatAt: this.isManagedInstance(existing)
+          ? existing.lastHeartbeatAt
+          : null,
+        lastHealthMessage: '',
+      } as ClawHostInstance)
+
+      return {
+        ...this.toResponse(restarted),
+        operation: 'restarting',
+      }
+    }
+
     const restarted = await this.clawHostInstanceModel.findByIdAndUpdate(
       existing._id,
       {
@@ -602,22 +868,28 @@ export class ClawHostService {
       : this.deriveRuntimeState(instance)
 
     if (derived.shouldPersist) {
-      await this.clawHostInstanceModel.updateOne(
-        { _id: instance._id },
-        {
-          $set: {
-            status: derived.status,
-            healthStatus: derived.healthStatus,
-            lastHealthMessage: derived.healthMessage || '',
-          },
-        },
-      ).exec()
-      await this.syncPostgresMetadata({
+      const nextInstance = {
         ...instance,
         status: derived.status,
         healthStatus: derived.healthStatus,
         lastHealthMessage: derived.healthMessage || '',
-      } as ClawHostInstance)
+      } as ClawHostInstance
+      if (this.isControlPlaneEnabled()) {
+        await this.writeControlPlaneInstance(nextInstance)
+      }
+      else {
+        await this.clawHostInstanceModel.updateOne(
+          { _id: instance._id },
+          {
+            $set: {
+              status: derived.status,
+              healthStatus: derived.healthStatus,
+              lastHealthMessage: derived.healthMessage || '',
+            },
+          },
+        ).exec()
+        await this.syncPostgresMetadata(nextInstance)
+      }
     }
 
     return {
@@ -680,29 +952,37 @@ export class ClawHostService {
     instanceId: string,
     input: InstanceLayerInput,
   ) {
-    const instance = await this.clawHostInstanceModel.findOne({
-      instanceId,
-      orgId: orgId.trim(),
-    }).exec()
-    if (!instance) {
-      throw new NotFoundException('ClawHost instance not found')
-    }
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
 
     this.validateSkillCompositionInput(
       input.skillComposition,
       this.collectInstalledSkillIds(instance.skills || []),
     )
 
-    instance.set(
-      'instanceLayer',
-      this.buildInstanceLayer(
+    const nextInstance = {
+      ...instance,
+      instanceLayer: this.buildInstanceLayer(
         instance.instanceLayer,
         instance.orgId,
         instance.skills || [],
         input,
       ),
-    )
-    await instance.save()
+    } as ClawHostInstance
+
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance)
+    }
+    else {
+      const mutableInstance = await this.clawHostInstanceModel.findOne({
+        instanceId,
+        orgId: orgId.trim(),
+      }).exec()
+      if (!mutableInstance) {
+        throw new NotFoundException('ClawHost instance not found')
+      }
+      mutableInstance.set('instanceLayer', nextInstance.instanceLayer)
+      await mutableInstance.save()
+    }
 
     return this.getInstanceArchitecture(orgId, instanceId)
   }
@@ -716,13 +996,7 @@ export class ClawHostService {
       toolName?: string
     },
   ) {
-    const instance = await this.clawHostInstanceModel.findOne({
-      instanceId,
-      orgId: orgId.trim(),
-    }).exec()
-    if (!instance) {
-      throw new NotFoundException('ClawHost instance not found')
-    }
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
 
     const currentGateway = this.buildGatewayConfig(instance.gatewayConfig)
     const nextGateway = this.buildGatewayConfig({
@@ -738,8 +1012,25 @@ export class ClawHostService {
       throw new BadRequestException('gateway url is required when gateway is enabled')
     }
 
-    instance.set('gatewayConfig', nextGateway)
-    await instance.save()
+    const nextInstance = {
+      ...instance,
+      gatewayConfig: nextGateway,
+    } as ClawHostInstance
+
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance)
+    }
+    else {
+      const mutableInstance = await this.clawHostInstanceModel.findOne({
+        instanceId,
+        orgId: orgId.trim(),
+      }).exec()
+      if (!mutableInstance) {
+        throw new NotFoundException('ClawHost instance not found')
+      }
+      mutableInstance.set('gatewayConfig', nextGateway)
+      await mutableInstance.save()
+    }
 
     const updatedAt = new Date().toISOString()
     if (instance.orgId && instance.lastAgentId) {
@@ -773,7 +1064,7 @@ export class ClawHostService {
       })
     }
 
-    return this.toResponse(instance.toObject() as ClawHostInstance)
+    return this.toResponse(nextInstance)
   }
 
   async configureSharedExperience(
@@ -794,13 +1085,7 @@ export class ClawHostService {
       }>
     },
   ) {
-    const instance = await this.clawHostInstanceModel.findOne({
-      instanceId,
-      orgId: orgId.trim(),
-    }).exec()
-    if (!instance) {
-      throw new NotFoundException('ClawHost instance not found')
-    }
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
 
     const currentConfig = this.buildSharedExperienceConfig(instance.sharedExperienceConfig)
     const nextConfig = this.buildSharedExperienceConfig({
@@ -825,21 +1110,32 @@ export class ClawHostService {
       throw new BadRequestException('defaultChannel must match one of the configured shared channels')
     }
 
-    instance.set('sharedExperienceConfig', nextConfig)
-    await instance.save()
+    const nextInstance = {
+      ...instance,
+      sharedExperienceConfig: nextConfig,
+    } as ClawHostInstance
 
-    return this.toResponse(instance.toObject() as ClawHostInstance)
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance)
+    }
+    else {
+      const mutableInstance = await this.clawHostInstanceModel.findOne({
+        instanceId,
+        orgId: orgId.trim(),
+      }).exec()
+      if (!mutableInstance) {
+        throw new NotFoundException('ClawHost instance not found')
+      }
+      mutableInstance.set('sharedExperienceConfig', nextConfig)
+      await mutableInstance.save()
+    }
+
+    return this.toResponse(nextInstance)
   }
 
   async upgradeSkill(orgId: string, instanceId: string, version: string) {
     const normalizedVersion = version?.trim() || DEFAULT_OPENCLAW_SKILL_VERSION
-    const instance = await this.clawHostInstanceModel.findOne({
-      instanceId,
-      orgId: orgId.trim(),
-    }).exec()
-    if (!instance) {
-      throw new NotFoundException('ClawHost instance not found')
-    }
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
 
     if (this.isManagedInstance(instance)) {
       await this.clawHostRuntimeService.upgradeSkill(
@@ -855,17 +1151,37 @@ export class ClawHostService {
       normalizedVersion,
       upgradedAt,
     )
+    const nextInstance = {
+      ...instance,
+      skills: nextSkills,
+      instanceLayer: this.buildInstanceLayer(instance.instanceLayer, instance.orgId, nextSkills),
+      status: ClawHostInstanceStatus.RUNNING,
+      healthStatus: this.buildHealthyStatus(upgradedAt, 1),
+      lastHealthMessage: '',
+    } as ClawHostInstance
 
-    instance.set('skills', nextSkills)
-    instance.set(
-      'instanceLayer',
-      this.buildInstanceLayer(instance.instanceLayer, instance.orgId, nextSkills),
-    )
-    instance.set('status', ClawHostInstanceStatus.RUNNING)
-    instance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 1))
-    instance.set('lastHealthMessage', '')
-    await instance.save()
-    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance)
+    }
+    else {
+      const mutableInstance = await this.clawHostInstanceModel.findOne({
+        instanceId,
+        orgId: orgId.trim(),
+      }).exec()
+      if (!mutableInstance) {
+        throw new NotFoundException('ClawHost instance not found')
+      }
+      mutableInstance.set('skills', nextSkills)
+      mutableInstance.set(
+        'instanceLayer',
+        this.buildInstanceLayer(instance.instanceLayer, instance.orgId, nextSkills),
+      )
+      mutableInstance.set('status', ClawHostInstanceStatus.RUNNING)
+      mutableInstance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 1))
+      mutableInstance.set('lastHealthMessage', '')
+      await mutableInstance.save()
+      await this.syncPostgresMetadata(mutableInstance.toObject() as ClawHostInstance)
+    }
 
     return {
       instanceId: instance.instanceId,
@@ -880,20 +1196,14 @@ export class ClawHostService {
       throw new BadRequestException('skillId and version are required')
     }
 
-    const instance = await this.clawHostInstanceModel.findOne({
-      instanceId,
-      orgId: orgId.trim(),
-    }).exec()
-    if (!instance) {
-      throw new NotFoundException('ClawHost instance not found')
-    }
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
 
     const installedAt = new Date()
     const nextSkills = this.upsertSkill(instance.skills || [], skillId, version, installedAt)
-    instance.set('skills', nextSkills)
-    instance.set(
-      'instanceLayer',
-      this.buildInstanceLayer(
+    const nextInstance = {
+      ...instance,
+      skills: nextSkills,
+      instanceLayer: this.buildInstanceLayer(
         instance.instanceLayer,
         instance.orgId,
         nextSkills,
@@ -908,9 +1218,24 @@ export class ClawHostService {
           },
         },
       ),
-    )
-    await instance.save()
-    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
+    } as ClawHostInstance
+
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance)
+    }
+    else {
+      const mutableInstance = await this.clawHostInstanceModel.findOne({
+        instanceId,
+        orgId: orgId.trim(),
+      }).exec()
+      if (!mutableInstance) {
+        throw new NotFoundException('ClawHost instance not found')
+      }
+      mutableInstance.set('skills', nextSkills)
+      mutableInstance.set('instanceLayer', nextInstance.instanceLayer)
+      await mutableInstance.save()
+      await this.syncPostgresMetadata(mutableInstance.toObject() as ClawHostInstance)
+    }
 
     return {
       instanceId: instance.instanceId,
@@ -924,23 +1249,17 @@ export class ClawHostService {
       throw new BadRequestException('skillId is required')
     }
 
-    const instance = await this.clawHostInstanceModel.findOne({
-      instanceId,
-      orgId: orgId.trim(),
-    }).exec()
-    if (!instance) {
-      throw new NotFoundException('ClawHost instance not found')
-    }
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
 
     const nextSkills = (instance.skills || []).filter(item => item.skillId !== skillId.trim())
     if (nextSkills.length === (instance.skills || []).length) {
       throw new NotFoundException('ClawHost skill not found')
     }
 
-    instance.set('skills', nextSkills)
-    instance.set(
-      'instanceLayer',
-      this.buildInstanceLayer(
+    const nextInstance = {
+      ...instance,
+      skills: nextSkills,
+      instanceLayer: this.buildInstanceLayer(
         instance.instanceLayer,
         instance.orgId,
         nextSkills,
@@ -955,9 +1274,24 @@ export class ClawHostService {
           },
         },
       ),
-    )
-    await instance.save()
-    await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
+    } as ClawHostInstance
+
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance)
+    }
+    else {
+      const mutableInstance = await this.clawHostInstanceModel.findOne({
+        instanceId,
+        orgId: orgId.trim(),
+      }).exec()
+      if (!mutableInstance) {
+        throw new NotFoundException('ClawHost instance not found')
+      }
+      mutableInstance.set('skills', nextSkills)
+      mutableInstance.set('instanceLayer', nextInstance.instanceLayer)
+      await mutableInstance.save()
+      await this.syncPostgresMetadata(mutableInstance.toObject() as ClawHostInstance)
+    }
 
     return {
       instanceId: instance.instanceId,
@@ -971,11 +1305,18 @@ export class ClawHostService {
       throw new BadRequestException('skillId and version are required')
     }
 
-    const instances = await this.clawHostInstanceModel.find({
-      'orgId': orgId.trim(),
-      'status': ClawHostInstanceStatus.RUNNING,
-      'skills.skillId': skillId,
-    }).exec()
+    const instances = this.isControlPlaneEnabled()
+      ? (await this.clawHostPostgresService.listInstances({
+          orgId: orgId.trim(),
+          status: ClawHostInstanceStatus.RUNNING,
+          limit: 100,
+          offset: 0,
+        })).items.map(item => this.hydratePostgresRecord(item)).filter((item): item is ClawHostInstance => Boolean(item)).filter(item => (item.skills || []).some(skill => skill.skillId === skillId))
+      : await this.clawHostInstanceModel.find({
+          'orgId': orgId.trim(),
+          'status': ClawHostInstanceStatus.RUNNING,
+          'skills.skillId': skillId,
+        }).exec()
 
     const upgradedAt = new Date()
     const upgradedItems = [] as Array<{
@@ -986,31 +1327,55 @@ export class ClawHostService {
     }>
 
     for (const instance of instances) {
-      instance.set('status', ClawHostInstanceStatus.UPGRADING)
-      await instance.save()
+      if (this.isControlPlaneEnabled()) {
+        await this.writeControlPlaneInstance({
+          ...instance,
+          status: ClawHostInstanceStatus.UPGRADING,
+        } as ClawHostInstance)
+      }
+      else {
+        const mutableInstance = instance as any
+        mutableInstance.set('status', ClawHostInstanceStatus.UPGRADING)
+        await mutableInstance.save()
+      }
 
       if (this.isManagedInstance(instance) && skillId === DEFAULT_OPENCLAW_SKILL_ID) {
         await this.clawHostRuntimeService.upgradeSkill(
-          this.buildManagedRuntimeTarget(instance.toObject() as ClawHostInstance),
+          this.buildManagedRuntimeTarget(instance),
           version,
         )
       }
 
       const nextSkills = this.upsertSkill(instance.skills || [], skillId, version, upgradedAt)
-      instance.set('skills', nextSkills)
-      instance.set(
-        'instanceLayer',
-        this.buildInstanceLayer(instance.instanceLayer, instance.orgId, nextSkills),
-      )
-      instance.set('status', ClawHostInstanceStatus.RUNNING)
-      instance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 50))
-      instance.set('lastHealthMessage', '')
-      await instance.save()
-      await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
+      const nextInstance = {
+        ...instance,
+        skills: nextSkills,
+        instanceLayer: this.buildInstanceLayer(instance.instanceLayer, instance.orgId, nextSkills),
+        status: ClawHostInstanceStatus.RUNNING,
+        healthStatus: this.buildHealthyStatus(upgradedAt, 50),
+        lastHealthMessage: '',
+      } as ClawHostInstance
+
+      if (this.isControlPlaneEnabled()) {
+        await this.writeControlPlaneInstance(nextInstance)
+      }
+      else {
+        const mutableInstance = instance as any
+        mutableInstance.set('skills', nextSkills)
+        mutableInstance.set(
+          'instanceLayer',
+          this.buildInstanceLayer(instance.instanceLayer, instance.orgId, nextSkills),
+        )
+        mutableInstance.set('status', ClawHostInstanceStatus.RUNNING)
+        mutableInstance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 50))
+        mutableInstance.set('lastHealthMessage', '')
+        await mutableInstance.save()
+        await this.syncPostgresMetadata(mutableInstance.toObject() as ClawHostInstance)
+      }
 
       upgradedItems.push({
-        instanceId: instance.instanceId,
-        status: instance.status,
+        instanceId: nextInstance.instanceId,
+        status: nextInstance.status,
         skillId,
         version,
       })
@@ -1029,17 +1394,31 @@ export class ClawHostService {
     const limit = this.normalizeLimit(pagination.limit)
     const skip = (page - 1) * limit
     const query = this.buildQuery(filters)
-
-    const [items, total] = await Promise.all([
-      this.clawHostInstanceModel
-        .find(query)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean()
-        .exec(),
-      this.clawHostInstanceModel.countDocuments(query).exec(),
-    ])
+    const [items, total] = this.isControlPlaneEnabled()
+      ? await (async () => {
+          const result = await this.clawHostPostgresService.listInstances({
+            orgId: filters.orgId,
+            status: filters.status,
+            offset: skip,
+            limit,
+          })
+          return [
+            result.items
+              .map(item => this.hydratePostgresRecord(item))
+              .filter((item): item is ClawHostInstance => Boolean(item)),
+            result.total,
+          ] as const
+        })()
+      : await Promise.all([
+          this.clawHostInstanceModel
+            .find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean()
+            .exec(),
+          this.clawHostInstanceModel.countDocuments(query).exec(),
+        ])
 
     return {
       items: items.map((item) => {
@@ -1064,16 +1443,23 @@ export class ClawHostService {
 
   @Cron('*/5 * * * *')
   async runHealthCheck() {
-    const instances = await this.clawHostInstanceModel.find({
-      status: {
-        $in: [
-          ClawHostInstanceStatus.CREATING,
-          ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
-          ClawHostInstanceStatus.RUNNING,
-          ClawHostInstanceStatus.ERROR,
-        ],
-      },
-    }).lean().exec()
+    const statuses = [
+      ClawHostInstanceStatus.CREATING,
+      ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
+      ClawHostInstanceStatus.RUNNING,
+      ClawHostInstanceStatus.ERROR,
+    ]
+    const instances = this.isControlPlaneEnabled()
+      ? (await this.clawHostPostgresService.listInstances({
+          statuses,
+          limit: 500,
+          offset: 0,
+        })).items.map(item => this.hydratePostgresRecord(item)).filter((item): item is ClawHostInstance => Boolean(item))
+      : await this.clawHostInstanceModel.find({
+          status: {
+            $in: statuses,
+          },
+        }).lean().exec()
 
     const results = [] as Array<{
       instanceId: string
@@ -1086,22 +1472,28 @@ export class ClawHostService {
         ? await this.deriveManagedRuntimeState(instance)
         : this.deriveRuntimeState(instance)
       if (derived.shouldPersist) {
-        await this.clawHostInstanceModel.updateOne(
-          { _id: instance._id },
-          {
-            $set: {
-              status: derived.status,
-              healthStatus: derived.healthStatus,
-              lastHealthMessage: derived.healthMessage || '',
-            },
-          },
-        ).exec()
-        await this.syncPostgresMetadata({
+        const nextInstance = {
           ...instance,
           status: derived.status,
           healthStatus: derived.healthStatus,
           lastHealthMessage: derived.healthMessage || '',
-        } as ClawHostInstance)
+        } as ClawHostInstance
+        if (this.isControlPlaneEnabled()) {
+          await this.writeControlPlaneInstance(nextInstance)
+        }
+        else {
+          await this.clawHostInstanceModel.updateOne(
+            { _id: instance._id },
+            {
+              $set: {
+                status: derived.status,
+                healthStatus: derived.healthStatus,
+                lastHealthMessage: derived.healthMessage || '',
+              },
+            },
+          ).exec()
+          await this.syncPostgresMetadata(nextInstance)
+        }
       }
 
       if (!derived.healthStatus.isHealthy) {
@@ -1126,6 +1518,74 @@ export class ClawHostService {
     }
   }
 
+  @Cron('7 */1 * * *')
+  async repairControlPlaneCache() {
+    if (!this.isControlPlaneEnabled()) {
+      return {
+        enabled: false,
+        repaired: 0,
+        removed: 0,
+      }
+    }
+
+    const controlPlane = await this.clawHostPostgresService.listInstances({
+      limit: 1000,
+      offset: 0,
+    })
+    const controlPlaneMap = new Map(
+      controlPlane.items.map(item => [item.instanceId, item]),
+    )
+    const cacheItems = await this.clawHostInstanceModel.find({})
+      .select({
+        instanceId: 1,
+        orgId: 1,
+        status: 1,
+        config: 1,
+        runtimeKind: 1,
+        hostPort: 1,
+        updatedAt: 1,
+      })
+      .lean()
+      .exec() as Array<Record<string, unknown>>
+
+    let repaired = 0
+    for (const item of controlPlane.items) {
+      const cache = cacheItems.find(cacheItem => String(cacheItem['instanceId'] || '') === item.instanceId)
+      const mismatched = !cache
+        || String(cache['orgId'] || '') !== item.orgId
+        || String(cache['status'] || '') !== item.status
+        || String(cache['runtimeKind'] || '') !== (item.runtimeKind || ClawHostRuntimeKind.DOCKER)
+        || Number(cache['hostPort'] || 0) !== Number(item.hostPort || 0)
+
+      if (!mismatched) {
+        continue
+      }
+
+      const hydrated = this.hydratePostgresRecord(item)
+      if (!hydrated) {
+        continue
+      }
+
+      await this.syncMongoCache(hydrated)
+      repaired += 1
+    }
+
+    const orphanIds = cacheItems
+      .map(item => String(item['instanceId'] || ''))
+      .filter(Boolean)
+      .filter(instanceId => !controlPlaneMap.has(instanceId))
+
+    for (const orphanId of orphanIds) {
+      await this.clawHostInstanceModel.deleteOne({ instanceId: orphanId }).exec()
+    }
+
+    return {
+      enabled: true,
+      repaired,
+      removed: orphanIds.length,
+    }
+  }
+
   async getInstanceLogs(orgId: string, instanceId: string, lines = 100) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     const normalizedLines = Math.min(Math.max(lines, 1), 500)
@@ -1147,6 +1607,14 @@ export class ClawHostService {
   }
 
   private async getInstanceOrThrow(orgId: string, instanceId: string) {
+    if (this.isControlPlaneEnabled()) {
+      const record = await this.clawHostPostgresService.getInstance(orgId.trim(), instanceId.trim())
+      const instance = this.hydratePostgresRecord(record)
+      if (instance) {
+        return instance
+      }
+    }
+
     const instance = await this.clawHostInstanceModel.findOne({
       instanceId,
       orgId: orgId.trim(),
@@ -1156,6 +1624,180 @@ export class ClawHostService {
     }
 
     return instance
+  }
+
+  private hydratePostgresRecord(record: ClawHostPostgresInstanceRecord | null) {
+    if (!record) {
+      return null
+    }
+
+    return {
+      _id: new Types.ObjectId(),
+      instanceId: record.instanceId,
+      orgId: record.orgId,
+      clientName: record.clientName,
+      plan: record.plan || 'starter',
+      status: record.status as ClawHostInstanceStatus,
+      deploymentMode: (record.deploymentMode || ClawHostDeploymentMode.BYOC) as ClawHostDeploymentMode,
+      runtimeKind: (record.runtimeKind || ClawHostRuntimeKind.DOCKER) as ClawHostRuntimeKind,
+      config: {
+        cpu: String(record.config?.cpu || ''),
+        memory: String(record.config?.memory || ''),
+        storage: String(record.config?.storage || ''),
+      },
+      skills: Array.isArray(record.skills)
+        ? record.skills.map(skill => ({
+            skillId: String(skill['skillId'] || ''),
+            version: String(skill['version'] || ''),
+            installedAt: skill['installedAt']
+              ? new Date(String(skill['installedAt']))
+              : record.createdAt || new Date(),
+          }))
+        : [],
+      healthStatus: {
+        lastCheck: record.healthStatus?.lastCheck
+          ? new Date(String(record.healthStatus.lastCheck))
+          : null,
+        isHealthy: Boolean(record.healthStatus?.isHealthy),
+        latency: Number(record.healthStatus?.latency || 0),
+      },
+      gatewayConfig: record.gatewayConfig || {},
+      sharedExperienceConfig: record.sharedExperienceConfig || {},
+      instanceLayer: record.instanceLayer || {},
+      requestedImChannel: record.requestedImChannel || '',
+      accessUrl: record.accessUrl || '',
+      installCommand: record.installCommand || this.buildInstallCommand(),
+      healthUrl: record.healthUrl || '',
+      k8sNamespace: record.k8sNamespace || '',
+      k8sPodName: record.k8sPodName || '',
+      hostPort: record.hostPort || 0,
+      runtimeImage: record.runtimeImage || '',
+      containerId: record.containerId || '',
+      containerName: record.containerName || '',
+      lastHealthMessage: record.lastHealthMessage || '',
+      connectionCodePreview: record.connectionCodePreview || '',
+      connectionCodeHash: record.connectionCodeHash || '',
+      connectionCodeIssuedAt: record.connectionCodeIssuedAt || null,
+      connectionCodeExpiresAt: record.connectionCodeExpiresAt || null,
+      boundApiKeyId: record.boundApiKeyId || '',
+      boundApiKeyPrefix: record.boundApiKeyPrefix || '',
+      boundAt: record.boundAt || null,
+      lastHeartbeatAt: record.lastHeartbeatAt || null,
+      lastClientVersion: record.lastClientVersion || '',
+      lastAgentId: record.lastAgentId || '',
+      heartbeatCapabilities: record.heartbeatCapabilities || [],
+      createdAt: record.createdAt || new Date(),
+      updatedAt: record.updatedAt || new Date(),
+    } as unknown as ClawHostInstance
+  }
+
+  private async writeControlPlaneInstance(
+    instance: ClawHostInstance,
+    options: {
+      ownerUserId?: string
+      apiToken?: string
+      deviceId?: string
+      deviceApproved?: boolean
+    } = {},
+  ) {
+    if (!this.isControlPlaneEnabled()) {
+      return instance
+    }
+
+    const record = await this.clawHostPostgresService.upsertInstance({
+      instanceId: instance.instanceId,
+      orgId: instance.orgId,
+      clientName: instance.clientName,
+      plan: instance.plan,
+      status: instance.status,
+      deploymentMode: instance.deploymentMode,
+      runtimeKind: instance.runtimeKind,
+      config: instance.config,
+      skills: instance.skills,
+      healthStatus: instance.healthStatus,
+      instanceLayer: instance.instanceLayer as unknown as Record<string, unknown>,
+      requestedImChannel: instance.requestedImChannel,
+      accessUrl: instance.accessUrl,
+      healthUrl: instance.healthUrl,
+      k8sNamespace: instance.k8sNamespace,
+      k8sPodName: instance.k8sPodName,
+      hostPort: instance.hostPort,
+      runtimeImage: instance.runtimeImage,
+      containerId: instance.containerId,
+      containerName: instance.containerName,
+      gatewayConfig: this.buildGatewayConfig(instance.gatewayConfig),
+      sharedExperienceConfig: this.buildSharedExperienceConfig(instance.sharedExperienceConfig),
+      installCommand: instance.installCommand,
+      lastHealthMessage: instance.lastHealthMessage,
+      connectionCodeHash: instance.connectionCodeHash,
+      connectionCodePreview: instance.connectionCodePreview,
+      connectionCodeIssuedAt: instance.connectionCodeIssuedAt,
+      connectionCodeExpiresAt: instance.connectionCodeExpiresAt,
+      boundApiKeyId: instance.boundApiKeyId,
+      boundApiKeyPrefix: instance.boundApiKeyPrefix,
+      boundAt: instance.boundAt,
+      lastHeartbeatAt: instance.lastHeartbeatAt,
+      lastClientVersion: instance.lastClientVersion,
+      lastAgentId: instance.lastAgentId,
+      heartbeatCapabilities: instance.heartbeatCapabilities,
+      createdAt: instance.createdAt,
+      updatedAt: instance.updatedAt,
+    }, options)
+    const hydrated = this.hydratePostgresRecord(record)
+    if (!hydrated) {
+      throw new BadRequestException('ClawHost PostgreSQL control plane is not available')
+    }
+
+    await this.syncMongoCache(hydrated)
+    return hydrated
+  }
+
+  private async syncMongoCache(instance: ClawHostInstance) {
+    await this.clawHostInstanceModel.updateOne(
+      { instanceId: instance.instanceId },
+      {
+        $set: {
+          orgId: instance.orgId,
+          clientName: instance.clientName,
+          plan: instance.plan,
+          status: instance.status,
+          deploymentMode: instance.deploymentMode,
+          config: instance.config,
+          skills: instance.skills,
+          healthStatus: instance.healthStatus,
+          gatewayConfig: this.buildGatewayConfig(instance.gatewayConfig),
+          sharedExperienceConfig: this.buildSharedExperienceConfig(instance.sharedExperienceConfig),
+          instanceLayer: instance.instanceLayer,
+          k8sNamespace: instance.k8sNamespace,
+          k8sPodName: instance.k8sPodName,
+          runtimeKind: instance.runtimeKind,
+          containerId: instance.containerId,
+          containerName: instance.containerName,
+          runtimeImage: instance.runtimeImage,
+          hostPort: instance.hostPort,
+          healthUrl: instance.healthUrl,
+          lastHealthMessage: instance.lastHealthMessage,
+          requestedImChannel: instance.requestedImChannel,
+          accessUrl: instance.accessUrl,
+          installCommand: instance.installCommand,
+          connectionCodePreview: instance.connectionCodePreview,
+          connectionCodeHash: instance.connectionCodeHash,
+          connectionCodeIssuedAt: instance.connectionCodeIssuedAt,
+          connectionCodeExpiresAt: instance.connectionCodeExpiresAt,
+          boundApiKeyId: instance.boundApiKeyId,
+          boundApiKeyPrefix: instance.boundApiKeyPrefix,
+          boundAt: instance.boundAt,
+          lastHeartbeatAt: instance.lastHeartbeatAt,
+          lastClientVersion: instance.lastClientVersion,
+          lastAgentId: instance.lastAgentId,
+          heartbeatCapabilities: instance.heartbeatCapabilities,
+          createdAt: instance.createdAt,
+          updatedAt: instance.updatedAt,
+        },
+      },
+      { upsert: true },
+    ).exec()
+    await this.clawHostPostgresService.markCacheSynced(instance.instanceId)
   }
 
   private async getOrganizationOrNull(orgId: string) {
@@ -1284,6 +1926,82 @@ export class ClawHostService {
       version: DEFAULT_OPENCLAW_SKILL_VERSION,
       installedAt,
     }]
+  }
+
+  private isControlPlaneEnabled() {
+    return this.clawHostPostgresService.isEnabled()
+  }
+
+  private buildInstanceSnapshot(input: {
+    instanceId: string
+    orgId: string
+    clientName: string
+    plan: string
+    deploymentMode: ClawHostDeploymentMode
+    config: ClawHostInstanceConfig
+    skills: ClawHostInstalledSkill[]
+    healthStatus: ClawHostHealthStatus
+    requestedImChannel?: string
+    accessUrl?: string
+    status: ClawHostInstanceStatus
+    runtime?: {
+      runtimeKind?: ClawHostRuntimeKind
+      containerId?: string
+      containerName?: string
+      image?: string
+      hostPort?: number
+      healthUrl?: string
+      accessUrl?: string
+      namespace?: string
+      podName?: string
+    } | null
+  }) {
+    const createdAt = new Date()
+    const runtimeKind = input.runtime?.runtimeKind || this.clawHostRuntimeService.resolveRuntimeKind()
+    const accessUrl = input.accessUrl?.trim()
+      || input.runtime?.accessUrl?.trim()
+      || this.buildAccessUrl(input.instanceId)
+
+    return {
+      _id: new Types.ObjectId(),
+      instanceId: input.instanceId,
+      orgId: input.orgId,
+      clientName: input.clientName,
+      plan: input.plan,
+      status: input.status,
+      deploymentMode: input.deploymentMode,
+      config: input.config,
+      skills: input.skills,
+      healthStatus: input.healthStatus,
+      gatewayConfig: this.buildGatewayConfig(),
+      sharedExperienceConfig: this.buildSharedExperienceConfig(),
+      instanceLayer: this.buildDefaultInstanceLayer(input.orgId, input.skills),
+      k8sNamespace: input.runtime?.namespace || this.buildNamespace(input.orgId),
+      k8sPodName: input.runtime?.podName || '',
+      runtimeKind,
+      containerId: input.runtime?.containerId || '',
+      containerName: input.runtime?.containerName || '',
+      runtimeImage: input.runtime?.image || '',
+      hostPort: input.runtime?.hostPort || 0,
+      healthUrl: input.runtime?.healthUrl || '',
+      lastHealthMessage: '',
+      requestedImChannel: input.requestedImChannel?.trim() || '',
+      accessUrl,
+      installCommand: this.buildInstallCommand(),
+      connectionCodePreview: '',
+      connectionCodeHash: '',
+      connectionCodeIssuedAt: null,
+      connectionCodeExpiresAt: null,
+      boundApiKeyId: '',
+      boundApiKeyPrefix: '',
+      boundAt: null,
+      lastHeartbeatAt: null,
+      lastClientVersion: '',
+      lastAgentId: '',
+      heartbeatCapabilities: [],
+      createdAt,
+      updatedAt: createdAt,
+    } as unknown as ClawHostInstance
   }
 
   private buildDefaultInstanceLayer(
@@ -1496,11 +2214,14 @@ export class ClawHostService {
   }
 
   private async resolvePreferredManagedPort() {
-    const items = await this.clawHostInstanceModel.find({
-      deploymentMode: ClawHostDeploymentMode.MANAGED,
-      runtimeKind: ClawHostRuntimeKind.DOCKER,
-      hostPort: { $gt: 0 },
-    }).select({ hostPort: 1 }).lean().exec() as Array<Record<string, unknown>>
+    const items = this.isControlPlaneEnabled()
+      ? (await this.clawHostPostgresService.listManagedDockerHostPorts())
+          .map(hostPort => ({ hostPort }))
+      : await this.clawHostInstanceModel.find({
+        deploymentMode: ClawHostDeploymentMode.MANAGED,
+        runtimeKind: ClawHostRuntimeKind.DOCKER,
+        hostPort: { $gt: 0 },
+      }).select({ hostPort: 1 }).lean().exec() as Array<Record<string, unknown>>
 
     const usedPorts = new Set(
       items
@@ -1809,6 +2530,7 @@ export class ClawHostService {
       | 'config'
       | 'skills'
       | 'healthStatus'
+      | 'instanceLayer'
       | 'requestedImChannel'
       | 'accessUrl'
       | 'healthUrl'
@@ -1819,12 +2541,17 @@ export class ClawHostService {
       | 'containerId'
       | 'containerName'
       | 'lastHealthMessage'
+      | 'connectionCodeHash'
       | 'boundApiKeyPrefix'
+      | 'boundApiKeyId'
       | 'boundAt'
       | 'lastHeartbeatAt'
       | 'lastClientVersion'
+      | 'lastAgentId'
       | 'heartbeatCapabilities'
       | 'connectionCodePreview'
+      | 'connectionCodeIssuedAt'
+      | 'connectionCodeExpiresAt'
     >,
     options: {
       ownerUserId?: string
@@ -1845,6 +2572,7 @@ export class ClawHostService {
         config: instance.config,
         skills: instance.skills,
         healthStatus: instance.healthStatus,
+        instanceLayer: instance.instanceLayer as unknown as Record<string, unknown>,
         requestedImChannel: instance.requestedImChannel,
         accessUrl: instance.accessUrl,
         healthUrl: instance.healthUrl,
@@ -1855,12 +2583,17 @@ export class ClawHostService {
         containerId: instance.containerId,
         containerName: instance.containerName,
         lastHealthMessage: instance.lastHealthMessage,
+        connectionCodeHash: instance.connectionCodeHash,
         boundApiKeyPrefix: instance.boundApiKeyPrefix,
+        boundApiKeyId: instance.boundApiKeyId,
         boundAt: instance.boundAt,
         lastHeartbeatAt: instance.lastHeartbeatAt,
         lastClientVersion: instance.lastClientVersion,
+        lastAgentId: instance.lastAgentId,
         heartbeatCapabilities: instance.heartbeatCapabilities,
         connectionCodePreview: instance.connectionCodePreview,
+        connectionCodeIssuedAt: instance.connectionCodeIssuedAt,
+        connectionCodeExpiresAt: instance.connectionCodeExpiresAt,
       }, options)
     }
     catch (error) {
@@ -1948,7 +2681,7 @@ export class ClawHostService {
     )
 
     return {
-      id: instance._id?.toString?.() || '',
+      id: instance._id?.toString?.() || instance.instanceId,
       instanceId: instance.instanceId,
       orgId: instance.orgId,
       clientName: instance.clientName,

@@ -9,7 +9,57 @@ describe('clawHostPostgresService behavior', () => {
 
   beforeEach(() => {
     process.env.CLAWHOST_POSTGRES_URL = 'postgres://clawhost:test@127.0.0.1:5432/clawhost'
-    query = vi.fn().mockResolvedValue({ rows: [] })
+    query = vi.fn().mockImplementation((statement: string) => {
+      if (statement.includes('INSERT INTO clawhost_instances')) {
+        return Promise.resolve({
+          rowCount: 1,
+          rows: [{
+            instance_id: 'chi-org-demo-1',
+            org_id: 'org-1',
+            client_name: '直营客服',
+            plan: 'starter',
+            status: 'running',
+            deployment_mode: 'managed',
+            runtime_kind: 'docker',
+            config: {
+              cpu: '500m',
+              memory: '1Gi',
+              storage: '10Gi',
+            },
+            skills: [{
+              skillId: 'mediaclaw-client',
+              version: 'latest',
+              installedAt: new Date('2026-04-10T18:00:00.000Z'),
+            }],
+            health_status: {
+              lastCheck: new Date('2026-04-10T18:01:00.000Z'),
+              isHealthy: true,
+              latency: 12,
+            },
+            instance_layer: {},
+            gateway_config: {},
+            shared_experience_config: {},
+            requested_im_channel: 'feishu',
+            access_url: 'https://chi-org-demo-1.mediaclaw.ai',
+            health_url: 'http://127.0.0.1:3900/health',
+            host_port: 3900,
+            runtime_image: 'mediaclaw/openclaw:latest',
+            container_id: 'container-1',
+            container_name: 'mediaclaw-clawhost-1',
+            bound_api_key_prefix: 'mc_live_1234',
+            bound_at: new Date('2026-04-10T18:02:00.000Z'),
+            last_heartbeat_at: new Date('2026-04-10T18:03:00.000Z'),
+            last_client_version: '1.2.3',
+            heartbeat_capabilities: ['skill:heartbeat', 'skill:deliveries'],
+            connection_code_preview: 'MC-****-****-ABCD',
+            created_at: new Date('2026-04-10T18:00:00.000Z'),
+            updated_at: new Date('2026-04-10T18:03:00.000Z'),
+          }],
+        })
+      }
+
+      return Promise.resolve({ rowCount: 0, rows: [] })
+    })
     release = vi.fn()
 
     service = new ClawHostPostgresService(new MediaclawConfigService())
