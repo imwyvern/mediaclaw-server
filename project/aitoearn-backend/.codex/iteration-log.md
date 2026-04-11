@@ -558,3 +558,16 @@
     - `pnpm nx test aitoearn-server -- --run` 通过，`125` 个测试文件、`397` 个测试全部通过
   - 功能自测结论：Batch 3 相关架构升级项在当前代码已持续闭环，本轮没有出现新的 backend 架构缺口、没有新增 failure，也没有因为当前工作树里未归属的 `tts.service.ts` / `.tmp-vitest` 残留而污染验证结论，停止条件满足
 - 下一步计划：提交本次 Batch 3 验证记录；如继续后续 gap 批次，继续保持只提交 iteration 记录，不把当前工作树中无关脏改动混入。
+
+## 2026-04-10 23:23:57 PDT
+- 当前改动：执行 Batch 1 retry/retry/retry/retry/retry/retry/retry/retry/retry/retry 复核。按停止条件先跑 `build/lint/test`，过程中发现 `libs/mongodb/src/schemas/viral-content.schema.ts` 含未解决的 merge conflict marker，直接阻塞 `mongodb:build`。已保留深度采集新增的 `ViralContentAcquisitionInsight` 结构，移除冲突标记，并把冲突块格式统一到当前 schema 风格，确保 `viral content` 模型继续承载 `completionRate / commentSentiment / creatorPersona / publishDistribution / incrementalState` 等字段。
+- 验证结果：
+  - 首轮失败分析：
+    - `pnpm nx build aitoearn-server` 失败，根因是 `libs/mongodb/src/schemas/viral-content.schema.ts` 存在 `<<<<<<< / ======= / >>>>>>>` 冲突标记
+    - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+  - 修复后当前工作树全量验证：
+    - `pnpm nx build aitoearn-server` 通过
+    - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+    - `pnpm nx test aitoearn-server -- --run` 通过，`125` 个测试文件、`397` 个测试全部通过
+  - 功能自测结论：Batch 1 相关后端 `🔶` 项在当前代码已持续闭环；本轮新增发现并修复的是一个真实编译阻塞缺陷，不属于功能回退。修复后没有发现新的 backend 功能缺口或新增 failure，停止条件满足
+- 下一步计划：提交本轮 `viral-content schema` 冲突修复与 Batch 1 验证记录两个原子提交；如继续后续 gap 批次，保持先验证再提交，不把无关脏改动混入。
