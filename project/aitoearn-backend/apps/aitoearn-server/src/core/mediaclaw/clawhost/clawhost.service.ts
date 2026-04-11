@@ -113,6 +113,43 @@ const HEARTBEAT_FRESH_MS = 3 * 60 * 1000
 const DEFAULT_OPENCLAW_SKILL_ID = 'mediaclaw-client'
 const DEFAULT_OPENCLAW_SKILL_VERSION = 'latest'
 const CLAWHOST_ALERT_TTL_SECONDS = 15 * 60
+const CLAWHOST_STATUS_TRANSITIONS: Record<ClawHostInstanceStatus, ClawHostInstanceStatus[]> = {
+  [ClawHostInstanceStatus.CREATING]: [
+    ClawHostInstanceStatus.RUNNING,
+    ClawHostInstanceStatus.ERROR,
+    ClawHostInstanceStatus.STOPPED,
+    ClawHostInstanceStatus.TERMINATED,
+  ],
+  [ClawHostInstanceStatus.PENDING_MANUAL_SETUP]: [
+    ClawHostInstanceStatus.RUNNING,
+    ClawHostInstanceStatus.STOPPED,
+    ClawHostInstanceStatus.TERMINATED,
+    ClawHostInstanceStatus.ERROR,
+  ],
+  [ClawHostInstanceStatus.RUNNING]: [
+    ClawHostInstanceStatus.UPGRADING,
+    ClawHostInstanceStatus.STOPPED,
+    ClawHostInstanceStatus.ERROR,
+    ClawHostInstanceStatus.TERMINATED,
+  ],
+  [ClawHostInstanceStatus.STOPPED]: [
+    ClawHostInstanceStatus.RUNNING,
+    ClawHostInstanceStatus.TERMINATED,
+    ClawHostInstanceStatus.ERROR,
+  ],
+  [ClawHostInstanceStatus.UPGRADING]: [
+    ClawHostInstanceStatus.RUNNING,
+    ClawHostInstanceStatus.ERROR,
+    ClawHostInstanceStatus.TERMINATED,
+  ],
+  [ClawHostInstanceStatus.ERROR]: [
+    ClawHostInstanceStatus.RUNNING,
+    ClawHostInstanceStatus.STOPPED,
+    ClawHostInstanceStatus.UPGRADING,
+    ClawHostInstanceStatus.TERMINATED,
+  ],
+  [ClawHostInstanceStatus.TERMINATED]: [],
+}
 
 const CLAWHOST_PLAN_PRESETS: Record<string, ClawHostInstanceConfig> = {
   starter: {
@@ -712,6 +749,7 @@ export class ClawHostService {
 
   async startInstance(orgId: string, instanceId: string) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
+    this.assertLifecycleTransition(instance.status, ClawHostInstanceStatus.RUNNING, 'start')
     if (this.isManagedInstance(instance)) {
       await this.clawHostRuntimeService.startContainer(this.buildManagedRuntimeTarget(instance))
     }
@@ -756,6 +794,7 @@ export class ClawHostService {
 
   async stopInstance(orgId: string, instanceId: string) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
+    this.assertLifecycleTransition(instance.status, ClawHostInstanceStatus.STOPPED, 'stop')
     if (this.isManagedInstance(instance)) {
       await this.clawHostRuntimeService.stopContainer(this.buildManagedRuntimeTarget(instance))
     }
@@ -802,6 +841,7 @@ export class ClawHostService {
 
   async restartInstance(orgId: string, instanceId: string) {
     const existing = await this.getInstanceOrThrow(orgId, instanceId)
+    this.assertLifecycleTransition(existing.status, ClawHostInstanceStatus.RUNNING, 'restart')
 
     this.logger.log({
       message: 'ClawHost instance restarting',
@@ -861,11 +901,57 @@ export class ClawHostService {
     }
   }
 
+  async terminateInstance(orgId: string, instanceId: string) {
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
+    this.assertLifecycleTransition(instance.status, ClawHostInstanceStatus.TERMINATED, 'terminate')
+
+    if (this.isManagedInstance(instance)) {
+      await this.clawHostRuntimeService.terminateContainer(this.buildManagedRuntimeTarget(instance))
+    }
+
+    const terminatedAt = new Date()
+    const nextInstance = {
+      ...instance,
+      status: ClawHostInstanceStatus.TERMINATED,
+      healthStatus: {
+        lastCheck: terminatedAt,
+        isHealthy: false,
+        latency: 0,
+      },
+      lastHealthMessage: 'instance_terminated',
+    } as ClawHostInstance
+
+    if (this.isControlPlaneEnabled()) {
+      await this.writeControlPlaneInstance(nextInstance)
+    }
+    else {
+      await this.clawHostInstanceModel.updateOne(
+        { _id: instance._id },
+        {
+          $set: {
+            status: nextInstance.status,
+            healthStatus: nextInstance.healthStatus,
+            lastHealthMessage: nextInstance.lastHealthMessage,
+          },
+        },
+      ).exec()
+      await this.syncPostgresMetadata(nextInstance)
+    }
+
+    return {
+      ...this.toResponse(nextInstance),
+      operation: 'terminated',
+    }
+  }
+
   async getInstanceHealth(orgId: string, instanceId: string) {
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
     const derived = this.isManagedInstance(instance)
       ? await this.deriveManagedRuntimeState(instance)
       : this.deriveRuntimeState(instance)
+    const scaling = this.isManagedInstance(instance) && derived.status === ClawHostInstanceStatus.RUNNING
+      ? await this.evaluateManagedAutoscaling(instance)
+      : null
 
     if (derived.shouldPersist) {
       const nextInstance = {
@@ -899,6 +985,7 @@ export class ClawHostService {
       connectionStatus: derived.connectionStatus,
       lastHeartbeatAt: instance.lastHeartbeatAt,
       message: derived.healthMessage || '',
+      scaling,
     }
   }
 
@@ -1136,6 +1223,7 @@ export class ClawHostService {
   async upgradeSkill(orgId: string, instanceId: string, version: string) {
     const normalizedVersion = version?.trim() || DEFAULT_OPENCLAW_SKILL_VERSION
     const instance = await this.getInstanceOrThrow(orgId, instanceId)
+    this.assertLifecycleTransition(instance.status, ClawHostInstanceStatus.UPGRADING, 'upgrade')
 
     if (this.isManagedInstance(instance)) {
       await this.clawHostRuntimeService.upgradeSkill(
@@ -1327,6 +1415,7 @@ export class ClawHostService {
     }>
 
     for (const instance of instances) {
+      this.assertLifecycleTransition(instance.status, ClawHostInstanceStatus.UPGRADING, 'batch-upgrade')
       if (this.isControlPlaneEnabled()) {
         await this.writeControlPlaneInstance({
           ...instance,
@@ -1465,12 +1554,16 @@ export class ClawHostService {
       instanceId: string
       status: ClawHostInstanceStatus
       healthStatus: ClawHostHealthStatus
+      scaling?: Awaited<ReturnType<ClawHostService['evaluateManagedAutoscaling']>> | null
     }>
 
     for (const instance of instances) {
       const derived = this.isManagedInstance(instance)
         ? await this.deriveManagedRuntimeState(instance)
         : this.deriveRuntimeState(instance)
+      const scaling = this.isManagedInstance(instance) && derived.status === ClawHostInstanceStatus.RUNNING
+        ? await this.evaluateManagedAutoscaling(instance)
+        : null
       if (derived.shouldPersist) {
         const nextInstance = {
           ...instance,
@@ -1507,6 +1600,7 @@ export class ClawHostService {
         instanceId: instance.instanceId,
         status: derived.status,
         healthStatus: derived.healthStatus,
+        scaling,
       })
     }
 
@@ -2458,11 +2552,11 @@ export class ClawHostService {
 
   private async deriveManagedRuntimeState(instance: Pick<
     ClawHostInstance,
-    '_id' | 'status' | 'healthStatus' | 'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl' | 'lastHealthMessage'
+    '_id' | 'instanceId' | 'orgId' | 'config' | 'status' | 'healthStatus' | 'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl' | 'lastHealthMessage'
   >) {
     const now = new Date()
     const inspected = await this.clawHostRuntimeService.inspectManagedContainer(
-      this.buildManagedRuntimeTarget(instance as Pick<ClawHostInstance, 'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl'>),
+      this.buildManagedRuntimeTarget(instance),
     )
     const isHealthy = inspected.exists && inspected.running && inspected.apiHealthy
 
@@ -2485,6 +2579,27 @@ export class ClawHostService {
         instance.status !== (isHealthy ? ClawHostInstanceStatus.RUNNING : ClawHostInstanceStatus.ERROR)
         || instance.healthStatus?.isHealthy !== isHealthy
         || instance.lastHealthMessage !== (inspected.errorMessage || ''),
+    }
+  }
+
+  private async evaluateManagedAutoscaling(
+    instance: Pick<
+      ClawHostInstance,
+      'instanceId' | 'orgId' | 'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl' | 'config'
+    >,
+  ) {
+    try {
+      return await this.clawHostRuntimeService.evaluateAutoscaling(
+        this.buildManagedRuntimeTarget(instance),
+      )
+    }
+    catch (error) {
+      this.logger.warn({
+        message: 'ClawHost autoscaling evaluation failed',
+        instanceId: instance.instanceId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return null
     }
   }
 
@@ -2732,16 +2847,38 @@ export class ClawHostService {
   private buildManagedRuntimeTarget(
     instance: Pick<
       ClawHostInstance,
-      'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl'
+      'instanceId' | 'orgId' | 'runtimeKind' | 'containerId' | 'containerName' | 'k8sNamespace' | 'k8sPodName' | 'healthUrl' | 'config'
     >,
   ): ManagedRuntimeTarget {
     return {
+      instanceId: instance.instanceId,
+      orgId: instance.orgId,
       runtimeKind: instance.runtimeKind || ClawHostRuntimeKind.DOCKER,
       containerId: instance.containerId,
       containerName: instance.containerName || '',
       namespace: instance.k8sNamespace || '',
       podName: instance.k8sPodName || '',
       healthUrl: instance.healthUrl || '',
+      config: instance.config,
     }
+  }
+
+  private assertLifecycleTransition(
+    current: ClawHostInstanceStatus,
+    next: ClawHostInstanceStatus,
+    operation: string,
+  ) {
+    if (current === next) {
+      return
+    }
+
+    const allowedNext = CLAWHOST_STATUS_TRANSITIONS[current] || []
+    if (allowedNext.includes(next)) {
+      return
+    }
+
+    throw new BadRequestException(
+      `ClawHost instance cannot ${operation} from ${current} to ${next}`,
+    )
   }
 }

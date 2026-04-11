@@ -19,6 +19,57 @@ export interface CreateManagedRuntimeInput {
   }
 }
 
+export interface ManagedRuntimeQuota {
+  cpu: string
+  memory: string
+  storage: string
+}
+
+export interface ManagedRuntimeHealthProbe {
+  path: string
+  port: string | number
+  initialDelaySeconds: number
+  periodSeconds: number
+}
+
+export interface ManagedRuntimeTemplate {
+  runtimeKind: ClawHostRuntimeKind
+  namespace: string
+  workloadName: string
+  serviceName: string
+  quota: ManagedRuntimeQuota
+  probes: {
+    readiness: ManagedRuntimeHealthProbe
+    liveness: ManagedRuntimeHealthProbe
+  }
+  labels: Record<string, string>
+}
+
+export interface ManagedRuntimeScalingMetrics {
+  queueDepth: number
+  responseTimeMs: number
+  queueLatencyMs: number
+  capturedAt: string
+}
+
+export interface ManagedRuntimeScalingPolicy {
+  minReplicas: number
+  maxReplicas: number
+  queueDepthScaleUpThreshold: number
+  queueDepthScaleDownThreshold: number
+  responseTimeScaleUpThresholdMs: number
+  responseTimeScaleDownThresholdMs: number
+}
+
+export interface ManagedRuntimeScaleDecision {
+  action: 'none' | 'scale_up' | 'scale_down'
+  currentReplicas: number
+  desiredReplicas: number
+  reason: string
+  metrics: ManagedRuntimeScalingMetrics
+  policy: ManagedRuntimeScalingPolicy
+}
+
 export interface ManagedRuntimeRecord {
   runtimeKind: ClawHostRuntimeKind
   containerId: string
@@ -29,6 +80,9 @@ export interface ManagedRuntimeRecord {
   healthUrl: string
   namespace?: string
   podName?: string
+  quota?: ManagedRuntimeQuota
+  currentReplicas?: number
+  desiredReplicas?: number
 }
 
 export interface ManagedRuntimeState {
@@ -39,15 +93,26 @@ export interface ManagedRuntimeState {
   apiHealthy: boolean
   latencyMs: number
   errorMessage: string
+  currentReplicas: number
+  desiredReplicas: number
+  quota?: ManagedRuntimeQuota
+  template?: ManagedRuntimeTemplate
 }
 
 export interface ManagedRuntimeTarget {
   runtimeKind: ClawHostRuntimeKind
   containerId: string
+  instanceId?: string
+  orgId?: string
   containerName?: string
   namespace?: string
   podName?: string
   healthUrl?: string
+  config?: {
+    cpu?: string
+    memory?: string
+    storage?: string
+  }
 }
 
 export interface ClawHostRuntimeDriver {
@@ -56,8 +121,12 @@ export interface ClawHostRuntimeDriver {
   start: (target: ManagedRuntimeTarget) => Promise<void>
   stop: (target: ManagedRuntimeTarget) => Promise<void>
   restart: (target: ManagedRuntimeTarget) => Promise<void>
+  terminate: (target: ManagedRuntimeTarget) => Promise<void>
   upgradeSkill: (target: ManagedRuntimeTarget, version: string) => Promise<void>
+  reconcileResources: (target: ManagedRuntimeTarget) => Promise<void>
+  scale: (target: ManagedRuntimeTarget, replicas: number) => Promise<void>
   inspect: (target: ManagedRuntimeTarget) => Promise<ManagedRuntimeState>
+  describeTemplate: (target: ManagedRuntimeTarget) => Promise<ManagedRuntimeTemplate>
   getLogs: (target: ManagedRuntimeTarget, tail: number) => Promise<string[]>
 }
 

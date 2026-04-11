@@ -16,6 +16,7 @@ export enum ClawHostInstanceStatus {
   STOPPED = 'stopped',
   ERROR = 'error',
   UPGRADING = 'upgrading',
+  TERMINATED = 'terminated',
 }
 
 export enum ClawHostDeploymentMode {

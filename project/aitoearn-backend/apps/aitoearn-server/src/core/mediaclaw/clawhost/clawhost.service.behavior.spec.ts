@@ -39,6 +39,7 @@ vi.mock('@yikart/mongodb', () => {
       STOPPED: 'stopped',
       UPGRADING: 'upgrading',
       ERROR: 'error',
+      TERMINATED: 'terminated',
     },
     ClawHostRuntimeKind: {
       DOCKER: 'docker',
@@ -198,7 +199,11 @@ describe('clawHostService behavior', () => {
       startContainer: vi.fn(),
       stopContainer: vi.fn(),
       restartContainer: vi.fn(),
+      terminateContainer: vi.fn(),
       upgradeSkill: vi.fn(),
+      reconcileResources: vi.fn(),
+      evaluateAutoscaling: vi.fn().mockResolvedValue(null),
+      describeManagedTemplate: vi.fn(),
       inspectManagedContainer: vi.fn(),
       getContainerLogs: vi.fn().mockResolvedValue([]),
     }
@@ -436,5 +441,22 @@ describe('clawHostService behavior', () => {
       }),
       { ownerUserId: '' },
     )
+  })
+
+  it('应终止托管实例并返回 terminated 状态', async () => {
+    const instance = createManagedInstance()
+    clawHostInstanceModel.findOne.mockReturnValue(createExecQuery(instance))
+    clawHostInstanceModel.updateOne.mockReturnValue(createExecQuery({ acknowledged: true }))
+
+    const result = await service.terminateInstance('org-1', instance.instanceId)
+
+    expect(clawHostRuntimeService.terminateContainer).toHaveBeenCalledWith(expect.objectContaining({
+      instanceId: instance.instanceId,
+      orgId: instance.orgId,
+      runtimeKind: 'docker',
+    }))
+    expect(clawHostInstanceModel.updateOne).toHaveBeenCalled()
+    expect(result.status).toBe('terminated')
+    expect(result.operation).toBe('terminated')
   })
 })

@@ -6,9 +6,11 @@ import {
   ClawHostRuntimeDriver,
   ClawHostRuntimeKind,
   CreateManagedRuntimeInput,
+  ManagedRuntimeQuota,
   ManagedRuntimeRecord,
   ManagedRuntimeState,
   ManagedRuntimeTarget,
+  ManagedRuntimeTemplate,
 } from './clawhost-runtime.types'
 
 interface KubectlResult {
@@ -21,6 +23,7 @@ interface KubernetesDeploymentStatus {
     name?: string
   }
   status?: {
+    replicas?: number
     readyReplicas?: number
     availableReplicas?: number
     unavailableReplicas?: number
@@ -40,9 +43,7 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
   constructor(private readonly configService: MediaclawConfigService) {}
 
   async createManagedRuntime(input: CreateManagedRuntimeInput): Promise<ManagedRuntimeRecord> {
-    const namespace = this.normalizeNamespace(
-      input.namespace || this.configService.getString('MEDIACLAW_CLAWHOST_K8S_NAMESPACE', 'mediaclaw-clawhost'),
-    )
+    const namespace = this.resolveNamespace(input.orgId, input.namespace)
     const podName = this.normalizeKubernetesName(input.podName || input.instanceId)
     const deploymentName = this.buildDeploymentName(podName)
     const serviceName = this.buildServiceName(podName)
@@ -52,6 +53,7 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
       'MEDIACLAW_CLAWHOST_K8S_SERVICE_DOMAIN',
       'svc.cluster.local',
     )
+    const quota = this.resolveQuota(input.config)
 
     await this.ensureNamespace(namespace)
     await this.kubectl([
@@ -69,6 +71,7 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
         serviceName,
         pvcName,
         image,
+        quota,
       })),
     })
     await this.kubectl([
@@ -90,6 +93,9 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
       healthUrl: `http://${serviceName}.${namespace}.${serviceDomain}/health`,
       namespace,
       podName,
+      quota,
+      currentReplicas: 1,
+      desiredReplicas: 1,
     }
   }
 
@@ -113,6 +119,21 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
     await this.waitForDeployment(target)
   }
 
+  async terminate(target: ManagedRuntimeTarget) {
+    const namespace = this.requireNamespace(target)
+    const podName = this.requirePodName(target)
+    const resources = [
+      `deployment/${target.containerId}`,
+      `service/${target.containerName || this.buildServiceName(podName)}`,
+      `pvc/${this.buildPvcName(podName)}`,
+      `resourcequota/${this.buildQuotaName(podName)}`,
+    ]
+
+    for (const resource of resources) {
+      await this.kubectl(['delete', resource, '-n', namespace, '--ignore-not-found=true'])
+    }
+  }
+
   async upgradeSkill(target: ManagedRuntimeTarget, version: string) {
     const namespace = this.requireNamespace(target)
     await this.kubectl([
@@ -124,6 +145,50 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
       `MEDIACLAW_SKILL_VERSION=${version}`,
     ])
     await this.waitForDeployment(target)
+  }
+
+  async reconcileResources(target: ManagedRuntimeTarget) {
+    const namespace = this.requireNamespace(target)
+    const podName = this.requirePodName(target)
+    const quota = this.resolveQuota(target.config)
+    const containerName = this.normalizeKubernetesName(podName)
+
+    await this.kubectl([
+      'set',
+      'resources',
+      `deployment/${target.containerId}`,
+      '-n',
+      namespace,
+      '-c',
+      containerName,
+      `--requests=cpu=${quota.cpu},memory=${quota.memory}`,
+      `--limits=cpu=${this.resolveCpuLimit(quota.cpu)},memory=${this.resolveMemoryLimit(quota.memory)}`,
+    ])
+
+    await this.kubectl([
+      'apply',
+      '-n',
+      namespace,
+      '-f',
+      '-',
+    ], {
+      input: JSON.stringify(this.buildResourceQuotaManifest(namespace, podName, quota)),
+    })
+  }
+
+  async scale(target: ManagedRuntimeTarget, replicas: number) {
+    const namespace = this.requireNamespace(target)
+    await this.kubectl([
+      'scale',
+      `deployment/${target.containerId}`,
+      '-n',
+      namespace,
+      `--replicas=${Math.max(replicas, 0)}`,
+    ])
+
+    if (replicas > 0) {
+      await this.waitForDeployment(target)
+    }
   }
 
   async inspect(target: ManagedRuntimeTarget): Promise<ManagedRuntimeState> {
@@ -139,6 +204,8 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
         'json',
       ])
       const deployment = JSON.parse(result.stdout) as KubernetesDeploymentStatus
+      const currentReplicas = Number(deployment.status?.readyReplicas || deployment.status?.availableReplicas || 0)
+      const desiredReplicas = Number(deployment.status?.replicas || currentReplicas || 0)
       const readyReplicas = Number(deployment.status?.readyReplicas || 0)
       const availableReplicas = Number(deployment.status?.availableReplicas || 0)
       const unavailableReplicas = Number(deployment.status?.unavailableReplicas || 0)
@@ -165,6 +232,10 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
         apiHealthy,
         latencyMs: apiHealthy ? 1 : 0,
         errorMessage,
+        currentReplicas,
+        desiredReplicas,
+        quota: this.resolveQuota(target.config),
+        template: await this.describeTemplate(target),
       }
     }
     catch (error) {
@@ -176,7 +247,44 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
         apiHealthy: false,
         latencyMs: 0,
         errorMessage: error instanceof Error ? error.message : String(error),
+        currentReplicas: 0,
+        desiredReplicas: 0,
+        quota: this.resolveQuota(target.config),
+        template: await this.describeTemplate(target),
       }
+    }
+  }
+
+  async describeTemplate(target: ManagedRuntimeTarget): Promise<ManagedRuntimeTemplate> {
+    const namespace = this.requireNamespace(target)
+    const podName = this.requirePodName(target)
+    const serviceName = target.containerName || this.buildServiceName(podName)
+    const quota = this.resolveQuota(target.config)
+
+    return {
+      runtimeKind: this.kind,
+      namespace,
+      workloadName: target.containerId,
+      serviceName,
+      quota,
+      probes: {
+        readiness: {
+          path: '/health',
+          port: 'http',
+          initialDelaySeconds: 5,
+          periodSeconds: 10,
+        },
+        liveness: {
+          path: '/health',
+          port: 'http',
+          initialDelaySeconds: 15,
+          periodSeconds: 20,
+        },
+      },
+      labels: {
+        'mediaclaw.instance_id': target.instanceId || '',
+        'mediaclaw.org_id': target.orgId || '',
+      },
     }
   }
 
@@ -206,21 +314,6 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
     }
   }
 
-  private async scale(target: ManagedRuntimeTarget, replicas: number) {
-    const namespace = this.requireNamespace(target)
-    await this.kubectl([
-      'scale',
-      `deployment/${target.containerId}`,
-      '-n',
-      namespace,
-      `--replicas=${replicas}`,
-    ])
-
-    if (replicas > 0) {
-      await this.waitForDeployment(target)
-    }
-  }
-
   private async waitForDeployment(target: ManagedRuntimeTarget) {
     await this.kubectl([
       'rollout',
@@ -233,9 +326,11 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
   }
 
   private requireNamespace(target: ManagedRuntimeTarget) {
-    return this.normalizeNamespace(
-      target.namespace || this.configService.getString('MEDIACLAW_CLAWHOST_K8S_NAMESPACE', 'mediaclaw-clawhost'),
-    )
+    return this.resolveNamespace(target.orgId || '', target.namespace)
+  }
+
+  private requirePodName(target: ManagedRuntimeTarget) {
+    return this.normalizeKubernetesName(target.podName || target.instanceId || target.containerId)
   }
 
   private buildManifest(args: {
@@ -246,6 +341,7 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
     serviceName: string
     pvcName: string
     image: string
+    quota: ManagedRuntimeQuota
   }) {
     const labels = {
       'app.kubernetes.io/name': 'mediaclaw-clawhost',
@@ -259,6 +355,7 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
       apiVersion: 'v1',
       kind: 'List',
       items: [
+        this.buildResourceQuotaManifest(args.namespace, args.podName, args.quota),
         {
           apiVersion: 'v1',
           kind: 'PersistentVolumeClaim',
@@ -334,20 +431,22 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
                       initialDelaySeconds: 15,
                       periodSeconds: 20,
                     },
+                    startupProbe: {
+                      httpGet: {
+                        path: '/health',
+                        port: 'http',
+                      },
+                      failureThreshold: 12,
+                      periodSeconds: 5,
+                    },
                     resources: {
                       requests: {
-                        cpu: args.input.config?.cpu?.trim() || '500m',
-                        memory: args.input.config?.memory?.trim() || '1Gi',
+                        cpu: args.quota.cpu,
+                        memory: args.quota.memory,
                       },
                       limits: {
-                        cpu: this.configService.getString(
-                          'MEDIACLAW_CLAWHOST_K8S_CPU_LIMIT',
-                          args.input.config?.cpu?.trim() || '500m',
-                        ),
-                        memory: this.configService.getString(
-                          'MEDIACLAW_CLAWHOST_K8S_MEMORY_LIMIT',
-                          args.input.config?.memory?.trim() || '1Gi',
-                        ),
+                        cpu: this.resolveCpuLimit(args.quota.cpu),
+                        memory: this.resolveMemoryLimit(args.quota.memory),
                       },
                     },
                     volumeMounts: [
@@ -408,8 +507,27 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
     return this.normalizeKubernetesName(`pvc-${podName}`)
   }
 
+  private buildQuotaName(podName: string) {
+    return this.normalizeKubernetesName(`quota-${podName}`)
+  }
+
   private normalizeNamespace(value: string) {
     return this.normalizeKubernetesName(value || 'mediaclaw-clawhost')
+  }
+
+  private resolveNamespace(orgId: string, namespace?: string) {
+    if (namespace?.trim()) {
+      return this.normalizeNamespace(namespace)
+    }
+
+    const orgToken = this.normalizeKubernetesName(orgId).slice(-20)
+    if (orgToken) {
+      return `clawhost-${orgToken}`
+    }
+
+    return this.normalizeNamespace(
+      this.configService.getString('MEDIACLAW_CLAWHOST_K8S_NAMESPACE', 'mediaclaw-clawhost'),
+    )
   }
 
   private normalizeKubernetesName(value: string) {
@@ -420,6 +538,47 @@ export class ClawHostK8sRuntimeDriver implements ClawHostRuntimeDriver {
       .replace(/^-+|-+$/g, '')
 
     return (normalized || 'mediaclaw').slice(0, 63)
+  }
+
+  private resolveQuota(config?: ManagedRuntimeTarget['config']): ManagedRuntimeQuota {
+    return {
+      cpu: config?.cpu?.trim() || '500m',
+      memory: config?.memory?.trim() || '1Gi',
+      storage: config?.storage?.trim() || '10Gi',
+    }
+  }
+
+  private resolveCpuLimit(cpu: string) {
+    return this.configService.getString('MEDIACLAW_CLAWHOST_K8S_CPU_LIMIT', cpu)
+  }
+
+  private resolveMemoryLimit(memory: string) {
+    return this.configService.getString('MEDIACLAW_CLAWHOST_K8S_MEMORY_LIMIT', memory)
+  }
+
+  private buildResourceQuotaManifest(
+    namespace: string,
+    podName: string,
+    quota: ManagedRuntimeQuota,
+  ) {
+    return {
+      apiVersion: 'v1',
+      kind: 'ResourceQuota',
+      metadata: {
+        name: this.buildQuotaName(podName),
+        namespace,
+      },
+      spec: {
+        hard: {
+          'requests.cpu': quota.cpu,
+          'requests.memory': quota.memory,
+          'requests.storage': quota.storage,
+          'limits.cpu': this.resolveCpuLimit(quota.cpu),
+          'limits.memory': this.resolveMemoryLimit(quota.memory),
+          'persistentvolumeclaims': '1',
+        },
+      },
+    }
   }
 
   private kubectl(args: string[], options: { input?: string } = {}) {

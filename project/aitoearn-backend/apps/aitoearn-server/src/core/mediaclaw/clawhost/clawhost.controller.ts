@@ -73,6 +73,14 @@ export class ClawHostController {
     return this.clawHostService.restartInstance(user.orgId || user.id, instanceId)
   }
 
+  @Delete('instances/:id')
+  async terminateInstance(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.terminateInstance(user.orgId || user.id, instanceId)
+  }
+
   @Get('instances/:id/health')
   async getInstanceHealth(
     @GetToken() user: { orgId?: string, id: string },
