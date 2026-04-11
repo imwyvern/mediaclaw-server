@@ -70,8 +70,17 @@ export class AgentObservabilityService {
     })
   }
 
-  async listLogs(agentId: string, pagination: { page: number, pageSize: number, status?: 'running' | 'success' | 'failed' }) {
-    return this.agentInvocationLogRepository.listByAgentIdWithPagination(agentId, pagination)
+  async listLogs(
+    agentId: string,
+    scope: {
+      userId: string
+      orgId?: string
+      page: number
+      pageSize: number
+      status?: 'running' | 'success' | 'failed'
+    },
+  ) {
+    return this.agentInvocationLogRepository.listVisibleByAgentIdWithPagination(agentId, scope)
   }
 
   aggregateTrace(trace: ProductAgentStepResult[]) {

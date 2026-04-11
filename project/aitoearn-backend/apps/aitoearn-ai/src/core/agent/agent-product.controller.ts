@@ -68,10 +68,15 @@ export class AgentProductController {
   })
   @Get('agents/:id/logs')
   async getAgentLogs(
+    @GetToken() token: TokenInfo,
     @Param('id') agentId: string,
     @Query() query: ListAgentLogsDto,
   ) {
+    const tokenRecord = token as TokenInfo & { orgId?: unknown }
+    const tokenOrgId = typeof tokenRecord.orgId === 'string' ? tokenRecord.orgId : undefined
     const [items, total] = await this.agentProductService.getAgentLogs(agentId, {
+      userId: token.id,
+      orgId: tokenOrgId,
       page: query.page,
       pageSize: query.pageSize,
       status: query.status,

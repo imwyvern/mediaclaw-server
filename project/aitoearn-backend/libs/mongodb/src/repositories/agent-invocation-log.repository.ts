@@ -9,6 +9,11 @@ interface AgentInvocationLogPagination {
   status?: 'running' | 'success' | 'failed'
 }
 
+interface AgentInvocationLogScope extends AgentInvocationLogPagination {
+  userId: string
+  orgId?: string
+}
+
 export class AgentInvocationLogRepository extends BaseRepository<AgentInvocationLog> {
   constructor(
     @InjectModel(AgentInvocationLog.name) agentInvocationLogModel: Model<AgentInvocationLog>,
@@ -23,6 +28,20 @@ export class AgentInvocationLogRepository extends BaseRepository<AgentInvocation
       filter: {
         agentId,
         ...(pagination.status ? { status: pagination.status } : {}),
+      },
+      options: { sort: { createdAt: -1 } },
+    })
+  }
+
+  async listVisibleByAgentIdWithPagination(agentId: string, scope: AgentInvocationLogScope) {
+    return this.findWithPagination({
+      page: scope.page,
+      pageSize: scope.pageSize,
+      filter: {
+        agentId,
+        userId: scope.userId,
+        ...(scope.orgId ? { orgId: scope.orgId } : {}),
+        ...(scope.status ? { status: scope.status } : {}),
       },
       options: { sort: { createdAt: -1 } },
     })

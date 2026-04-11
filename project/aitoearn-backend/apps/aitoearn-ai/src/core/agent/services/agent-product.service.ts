@@ -91,9 +91,15 @@ export class AgentProductService {
 
   async getAgentLogs(
     agentId: string,
-    pagination: { page: number, pageSize: number, status?: 'running' | 'success' | 'failed' },
+    scope: {
+      userId: string
+      orgId?: string
+      page: number
+      pageSize: number
+      status?: 'running' | 'success' | 'failed'
+    },
   ) {
-    return this.agentObservabilityService.listLogs(agentId, pagination)
+    return this.agentObservabilityService.listLogs(agentId, scope)
   }
 
   private toListItem(definition: ProductAgentDefinition, versions: ProductAgentDefinition[]) {
