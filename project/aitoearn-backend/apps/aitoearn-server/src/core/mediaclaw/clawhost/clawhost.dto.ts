@@ -13,6 +13,11 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator'
+import {
+  LayerBillingPolicyDto,
+  LayerPermissionPolicyDto,
+  LayerQuotaPolicyDto,
+} from '../shared/layer-policy.dto'
 
 export class ClawHostInstanceConfigDto {
   @IsString()
@@ -193,6 +198,102 @@ export class ConfigureSharedExperienceDto {
   @ValidateNested({ each: true })
   @Type(() => ClawHostSharedExperienceChannelDto)
   channels?: ClawHostSharedExperienceChannelDto[]
+}
+
+export class ClawHostInstanceResourceIsolationDto {
+  @IsOptional()
+  @IsString()
+  isolationLevel?: string
+
+  @IsOptional()
+  @IsBoolean()
+  dedicatedRuntime?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  dedicatedStorage?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  dedicatedNetwork?: boolean
+}
+
+export class ClawHostConfigInheritanceDto {
+  @IsOptional()
+  @IsBoolean()
+  inheritQuotaPolicy?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  inheritBillingPolicy?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  inheritPermissionPolicy?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  inheritSkillDefaults?: boolean
+
+  @IsOptional()
+  @IsString()
+  inheritedFromOrgId?: string
+}
+
+export class ClawHostSkillCompositionDto {
+  @IsOptional()
+  @IsString()
+  primarySkillId?: string
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  installedSkillIds?: string[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  bundleIds?: string[]
+
+  @IsOptional()
+  @IsBoolean()
+  autoUpgrade?: boolean
+
+  @IsOptional()
+  @IsString()
+  versionPolicy?: string
+}
+
+export class UpdateClawHostArchitectureDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ClawHostInstanceResourceIsolationDto)
+  resourceIsolation?: ClawHostInstanceResourceIsolationDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LayerQuotaPolicyDto)
+  quotaPolicy?: LayerQuotaPolicyDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LayerBillingPolicyDto)
+  billingPolicy?: LayerBillingPolicyDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LayerPermissionPolicyDto)
+  permissionPolicy?: LayerPermissionPolicyDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ClawHostConfigInheritanceDto)
+  configInheritance?: ClawHostConfigInheritanceDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ClawHostSkillCompositionDto)
+  skillComposition?: ClawHostSkillCompositionDto
 }
 
 export class ListClawHostInstancesQueryDto {

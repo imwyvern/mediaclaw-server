@@ -1,23 +1,14 @@
 import { Module } from '@nestjs/common'
-import { MongooseModule } from '@nestjs/mongoose'
-import {
-  MarketplaceTemplate,
-  MarketplaceTemplateSchema,
-  PipelineTemplate,
-  PipelineTemplateSchema,
-} from '@yikart/mongodb'
+import { ClawHostModule } from '../clawhost/clawhost.module'
 import { MarketplaceController } from './marketplace.controller'
 import { MarketplaceService } from './marketplace.service'
+import { SkillMarketplaceController } from './skill-marketplace.controller'
+import { SkillMarketplaceService } from './skill-marketplace.service'
 
 @Module({
-  imports: [
-    MongooseModule.forFeature([
-      { name: MarketplaceTemplate.name, schema: MarketplaceTemplateSchema },
-      { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
-    ]),
-  ],
-  controllers: [MarketplaceController],
-  providers: [MarketplaceService],
-  exports: [MarketplaceService],
+  imports: [ClawHostModule],
+  controllers: [MarketplaceController, SkillMarketplaceController],
+  providers: [MarketplaceService, SkillMarketplaceService],
+  exports: [MarketplaceService, SkillMarketplaceService],
 })
 export class MarketplaceModule {}

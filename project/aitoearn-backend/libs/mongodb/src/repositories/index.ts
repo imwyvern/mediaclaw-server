@@ -10,6 +10,7 @@ import { BrandRepository } from './brand.repository'
 import { ContentGenerationTaskRepository } from './content-generation-task.repository'
 import { CreditsBalanceRepository } from './credits-balance.repository'
 import { CreditsRecordRepository } from './credits-record.repository'
+import { MarketplaceTemplateRepository } from './marketplace-template.repository'
 import { MaterialAdaptationRepository } from './material-adaptation.repository'
 import { MaterialGroupRepository } from './material-group.repository'
 import { MaterialTaskRepository } from './material-task.repository'
@@ -17,10 +18,12 @@ import { MaterialRepository } from './material.repository'
 import { MediaGroupRepository } from './media-group.repository'
 import { MediaRepository } from './media.repository'
 import { NotificationRepository } from './notification.repository'
+import { PipelineTemplateRepository } from './pipeline-template.repository'
 import { PipelineRepository } from './pipeline.repository'
 import { PointsRecordRepository } from './points-record.repository'
 import { PublishRecordRepository } from './publish-record.repository'
 import { QrCodeArtImageRepository } from './qr-code-art-image.repository'
+import { SkillMarketplaceEntryRepository } from './skill-marketplace-entry.repository'
 import { UserNotificationControlRepository } from './user-notification-control.repository'
 import { UserRepository } from './user.repository'
 import { VideoTaskRepository } from './video-task.repository'
@@ -38,6 +41,7 @@ export * from './brand.repository'
 export * from './content-generation-task.repository'
 export * from './credits-balance.repository'
 export * from './credits-record.repository'
+export * from './marketplace-template.repository'
 export * from './material-adaptation.repository'
 export * from './material-group.repository'
 export * from './material-task.repository'
@@ -46,10 +50,12 @@ export * from './media-group.repository'
 export * from './media.repository'
 export * from './notification.repository'
 export * from './oauth2-credential.repository'
+export * from './pipeline-template.repository'
 export * from './pipeline.repository'
 export * from './points-record.repository'
 export * from './publish-record.repository'
 export * from './qr-code-art-image.repository'
+export * from './skill-marketplace-entry.repository'
 export * from './user-notification-control.repository'
 export * from './user.repository'
 export * from './video-task.repository'
@@ -61,6 +67,7 @@ export const repositories = [
   AssetRepository,
   BlogRepository,
   BrandRepository,
+  MarketplaceTemplateRepository,
   NotificationRepository,
   CreditsBalanceRepository,
   CreditsRecordRepository,
@@ -80,5 +87,7 @@ export const repositories = [
   UserNotificationControlRepository,
   QrCodeArtImageRepository,
   PipelineRepository,
+  PipelineTemplateRepository,
+  SkillMarketplaceEntryRepository,
   VideoTaskRepository,
 ] as const

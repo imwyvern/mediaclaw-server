@@ -1,17 +1,23 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { InjectModel } from '@nestjs/mongoose'
+import { getModelToken } from '@nestjs/mongoose'
 import {
   Brand,
+  ClawHostDeploymentMode,
+  ClawHostInstance,
+  ClawHostInstanceStatus,
   Invoice,
   MediaClawUser,
   normalizeUserRole,
   Organization,
   OrgStatus,
   OrgType,
+  SkillMarketplaceEntry,
+  SkillMarketplaceEntryStatus,
   Subscription,
   SubscriptionStatus,
   UserRole,
@@ -40,17 +46,21 @@ interface PaginationInput {
 @Injectable()
 export class ClientMgmtService {
   constructor(
-    @InjectModel(Organization.name)
+    @Inject(getModelToken(Organization.name))
     private readonly organizationModel: Model<Organization>,
-    @InjectModel(MediaClawUser.name)
+    @Inject(getModelToken(MediaClawUser.name))
     private readonly mediaClawUserModel: Model<MediaClawUser>,
-    @InjectModel(Brand.name)
+    @Inject(getModelToken(Brand.name))
     private readonly brandModel: Model<Brand>,
-    @InjectModel(VideoTask.name)
+    @Inject(getModelToken(VideoTask.name))
     private readonly videoTaskModel: Model<VideoTask>,
-    @InjectModel(Subscription.name)
+    @Inject(getModelToken(ClawHostInstance.name))
+    private readonly clawHostInstanceModel: Model<ClawHostInstance>,
+    @Inject(getModelToken(SkillMarketplaceEntry.name))
+    private readonly skillMarketplaceEntryModel: Model<SkillMarketplaceEntry>,
+    @Inject(getModelToken(Subscription.name))
     private readonly subscriptionModel: Model<Subscription>,
-    @InjectModel(Invoice.name)
+    @Inject(getModelToken(Invoice.name))
     private readonly invoiceModel: Model<Invoice>,
     private readonly enterpriseAuthService: EnterpriseAuthService,
     private readonly orgMemberAdminService: OrgMemberAdminService,
@@ -188,6 +198,122 @@ export class ClientMgmtService {
     return this.videoTaskModel.countDocuments({
       createdAt: { $gte: startOfDay },
     })
+  }
+
+  async getPlatformOverview() {
+    const [
+      orgTotal,
+      orgActive,
+      orgTrial,
+      orgSuspended,
+      crossInstanceStatsEnabledOrgs,
+      opsConsoleEnabledOrgs,
+      skillMarketplaceEnabledOrgs,
+      instanceTotal,
+      instanceRunning,
+      instanceManaged,
+      instanceByoc,
+      skillTotal,
+      skillPublished,
+      skillFeatured,
+      usageAggregate,
+      installAggregate,
+    ] = await Promise.all([
+      this.organizationModel.countDocuments({}),
+      this.organizationModel.countDocuments({ status: OrgStatus.ACTIVE }),
+      this.organizationModel.countDocuments({ status: OrgStatus.TRIAL }),
+      this.organizationModel.countDocuments({ status: OrgStatus.SUSPENDED }),
+      this.organizationModel.countDocuments({ 'platformLayer.strategy.enableCrossInstanceStats': true }),
+      this.organizationModel.countDocuments({ 'platformLayer.strategy.enableOpsConsole': true }),
+      this.organizationModel.countDocuments({ 'platformLayer.strategy.allowSkillMarketplace': true }),
+      this.clawHostInstanceModel.countDocuments({}),
+      this.clawHostInstanceModel.countDocuments({ status: ClawHostInstanceStatus.RUNNING }),
+      this.clawHostInstanceModel.countDocuments({ deploymentMode: ClawHostDeploymentMode.MANAGED }),
+      this.clawHostInstanceModel.countDocuments({ deploymentMode: ClawHostDeploymentMode.BYOC }),
+      this.skillMarketplaceEntryModel.countDocuments({}),
+      this.skillMarketplaceEntryModel.countDocuments({ status: SkillMarketplaceEntryStatus.PUBLISHED }),
+      this.skillMarketplaceEntryModel.countDocuments({ isFeatured: true }),
+      this.organizationModel.aggregate<{
+        _id: null
+        monthlyQuota: number
+        monthlyUsed: number
+      }>([
+        {
+          $group: {
+            _id: null,
+            monthlyQuota: { $sum: '$monthlyQuota' },
+            monthlyUsed: { $sum: '$monthlyUsed' },
+          },
+        },
+      ]),
+      this.skillMarketplaceEntryModel.aggregate<{
+        _id: null
+        totalInstalls: number
+        activeInstallCount: number
+      }>([
+        {
+          $project: {
+            installs: { $ifNull: ['$installs', 0] },
+            activeInstallCount: {
+              $size: {
+                $filter: {
+                  input: { $ifNull: ['$installHistory', []] },
+                  as: 'item',
+                  cond: {
+                    $eq: ['$$item.uninstalledAt', null],
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalInstalls: { $sum: '$installs' },
+            activeInstallCount: { $sum: '$activeInstallCount' },
+          },
+        },
+      ]),
+    ])
+
+    const usage = usageAggregate[0] || { monthlyQuota: 0, monthlyUsed: 0 }
+    const installs = installAggregate[0] || { totalInstalls: 0, activeInstallCount: 0 }
+
+    return {
+      organizations: {
+        total: orgTotal,
+        active: orgActive,
+        trial: orgTrial,
+        suspended: orgSuspended,
+      },
+      platformPolicyCoverage: {
+        crossInstanceStatsEnabledOrgs,
+        opsConsoleEnabledOrgs,
+        skillMarketplaceEnabledOrgs,
+      },
+      instances: {
+        total: instanceTotal,
+        running: instanceRunning,
+        managed: instanceManaged,
+        byoc: instanceByoc,
+      },
+      skills: {
+        total: skillTotal,
+        published: skillPublished,
+        featured: skillFeatured,
+        totalInstalls: installs.totalInstalls,
+        activeInstallCount: installs.activeInstallCount,
+      },
+      usage: {
+        monthlyQuota: usage.monthlyQuota,
+        monthlyUsed: usage.monthlyUsed,
+        utilizationRate: usage.monthlyQuota > 0
+          ? Number(((usage.monthlyUsed / usage.monthlyQuota) * 100).toFixed(2))
+          : 0,
+      },
+      updatedAt: new Date(),
+    }
   }
 
   async getOrgDetail(orgId: string) {

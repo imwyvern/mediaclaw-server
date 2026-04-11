@@ -2,6 +2,11 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Schema as MongooseSchema } from 'mongoose'
 
 import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
+import {
+  LayerBillingPolicy,
+  LayerPermissionPolicy,
+  LayerQuotaPolicy,
+} from './layer-policy.schema'
 import { WithTimestampSchema } from './timestamp.schema'
 
 export enum ClawHostInstanceStatus {
@@ -122,6 +127,81 @@ export class ClawHostSharedExperienceConfig {
   lastActivatedAt: Date | null
 }
 
+@Schema({ _id: false })
+export class ClawHostInstanceResourceIsolation {
+  @Prop({ type: String, default: 'namespace' })
+  isolationLevel: string
+
+  @Prop({ type: Boolean, default: true })
+  dedicatedRuntime: boolean
+
+  @Prop({ type: Boolean, default: true })
+  dedicatedStorage: boolean
+
+  @Prop({ type: Boolean, default: true })
+  dedicatedNetwork: boolean
+}
+
+@Schema({ _id: false })
+export class ClawHostConfigInheritance {
+  @Prop({ type: Boolean, default: true })
+  inheritQuotaPolicy: boolean
+
+  @Prop({ type: Boolean, default: true })
+  inheritBillingPolicy: boolean
+
+  @Prop({ type: Boolean, default: true })
+  inheritPermissionPolicy: boolean
+
+  @Prop({ type: Boolean, default: true })
+  inheritSkillDefaults: boolean
+
+  @Prop({ type: String, default: '' })
+  inheritedFromOrgId: string
+
+  @Prop({ type: Date, default: null })
+  inheritedAt: Date | null
+}
+
+@Schema({ _id: false })
+export class ClawHostSkillComposition {
+  @Prop({ type: String, default: '' })
+  primarySkillId: string
+
+  @Prop({ type: [String], default: [] })
+  installedSkillIds: string[]
+
+  @Prop({ type: [String], default: [] })
+  bundleIds: string[]
+
+  @Prop({ type: Boolean, default: false })
+  autoUpgrade: boolean
+
+  @Prop({ type: String, default: 'pinned' })
+  versionPolicy: string
+}
+
+@Schema({ _id: false })
+export class ClawHostInstanceLayer {
+  @Prop({ type: ClawHostInstanceResourceIsolation, default: () => ({}) })
+  resourceIsolation: ClawHostInstanceResourceIsolation
+
+  @Prop({ type: LayerQuotaPolicy, default: () => ({}) })
+  quotaPolicy: LayerQuotaPolicy
+
+  @Prop({ type: LayerBillingPolicy, default: () => ({}) })
+  billingPolicy: LayerBillingPolicy
+
+  @Prop({ type: LayerPermissionPolicy, default: () => ({}) })
+  permissionPolicy: LayerPermissionPolicy
+
+  @Prop({ type: ClawHostConfigInheritance, default: () => ({}) })
+  configInheritance: ClawHostConfigInheritance
+
+  @Prop({ type: ClawHostSkillComposition, default: () => ({}) })
+  skillComposition: ClawHostSkillComposition
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'clawhost_instances' })
 export class ClawHostInstance extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -202,6 +282,9 @@ export class ClawHostInstance extends WithTimestampSchema {
   @Prop({ type: ClawHostSharedExperienceConfig, default: () => ({}) })
   sharedExperienceConfig: ClawHostSharedExperienceConfig
 
+  @Prop({ type: ClawHostInstanceLayer, default: () => ({}) })
+  instanceLayer: ClawHostInstanceLayer
+
   @Prop({ type: String, default: '' })
   requestedImChannel: string
 
@@ -251,6 +334,6 @@ ClawHostInstanceSchema.index({ orgId: 1, status: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ clientName: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ orgId: 1, deploymentMode: 1, createdAt: -1 })
 ClawHostInstanceSchema.index({ orgId: 1, plan: 1, createdAt: -1 })
-ClawHostInstanceSchema.index({ 'sharedExperienceConfig.enabled': 1, status: 1, createdAt: -1 })
+ClawHostInstanceSchema.index({ 'sharedExperienceConfig.enabled': 1, 'status': 1, 'createdAt': -1 })
 ClawHostInstanceSchema.index({ containerId: 1 }, { sparse: true })
 ClawHostInstanceSchema.index({ boundApiKeyId: 1 }, { sparse: true })

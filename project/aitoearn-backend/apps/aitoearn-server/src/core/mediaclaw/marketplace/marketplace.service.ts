@@ -1,15 +1,17 @@
+import type { LeanDoc } from '@yikart/mongodb'
 import {
   BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { InjectModel } from '@nestjs/mongoose'
 import {
+
   MarketplaceCurrency,
   MarketplaceTemplate,
-  PipelineTemplate,
+  MarketplaceTemplateRepository,
+  PipelineTemplateRepository,
 } from '@yikart/mongodb'
-import { Model, SortOrder, Types } from 'mongoose'
+import { FilterQuery, SortOrder, Types } from 'mongoose'
 
 interface MarketplaceFilters {
   search?: string
@@ -25,13 +27,19 @@ interface PaginationInput {
   limit?: number
 }
 
+interface MarketplaceReviewSnapshot {
+  orgId: string
+  rating: number
+  review: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 @Injectable()
 export class MarketplaceService {
   constructor(
-    @InjectModel(MarketplaceTemplate.name)
-    private readonly marketplaceTemplateModel: Model<MarketplaceTemplate>,
-    @InjectModel(PipelineTemplate.name)
-    private readonly pipelineTemplateModel: Model<PipelineTemplate>,
+    private readonly marketplaceTemplateRepository: MarketplaceTemplateRepository,
+    private readonly pipelineTemplateRepository: PipelineTemplateRepository,
   ) {}
 
   async publishTemplate(
@@ -47,7 +55,7 @@ export class MarketplaceService {
       currency?: MarketplaceCurrency
     },
   ) {
-    const pipelineTemplate = await this.pipelineTemplateModel.findById(pipelineTemplateId).lean().exec()
+    const pipelineTemplate = await this.pipelineTemplateRepository.getById(pipelineTemplateId)
     if (!pipelineTemplate) {
       throw new NotFoundException('Pipeline template not found')
     }
@@ -55,37 +63,19 @@ export class MarketplaceService {
       throw new NotFoundException('Pipeline template not found')
     }
 
-    const published = await this.marketplaceTemplateModel.findOneAndUpdate(
+    const published = await this.marketplaceTemplateRepository.upsertPublishedTemplate(
+      new Types.ObjectId(orgId),
+      new Types.ObjectId(pipelineTemplateId),
       {
-        pipelineTemplateId: new Types.ObjectId(pipelineTemplateId),
-        authorOrgId: new Types.ObjectId(orgId),
+        title: data.title?.trim() || pipelineTemplate.name,
+        description: data.description || '',
+        thumbnailUrl: data.thumbnailUrl || '',
+        tags: this.normalizeTags(data.tags),
+        price: Math.max(data.price || 0, 0),
+        currency: data.currency || MarketplaceCurrency.CNY,
+        isApproved: false,
       },
-      {
-        $set: {
-          title: data.title?.trim() || pipelineTemplate.name,
-          description: data.description || '',
-          thumbnailUrl: data.thumbnailUrl || '',
-          tags: this.normalizeTags(data.tags),
-          price: Math.max(data.price || 0, 0),
-          currency: data.currency || MarketplaceCurrency.CNY,
-          isApproved: false,
-        },
-        $setOnInsert: {
-          pipelineTemplateId: new Types.ObjectId(pipelineTemplateId),
-          authorOrgId: new Types.ObjectId(orgId),
-          downloads: 0,
-          rating: 0,
-          reviewCount: 0,
-          isFeatured: false,
-          reviews: [],
-          purchaseHistory: [],
-        },
-      },
-      {
-        upsert: true,
-        new: true,
-      },
-    ).lean().exec()
+    )
 
     return this.toResponse(published, true)
   }
@@ -98,19 +88,10 @@ export class MarketplaceService {
   ) {
     const page = Math.max(Number(pagination.page || 1), 1)
     const limit = Math.min(Math.max(Number(pagination.limit || 20), 1), 100)
-    const skip = (page - 1) * limit
     const query = this.buildListQuery(filters, requesterOrgId)
     const sortOption = this.resolveSort(sort)
 
-    const [items, total] = await Promise.all([
-      this.marketplaceTemplateModel.find(query)
-        .sort(sortOption)
-        .skip(skip)
-        .limit(limit)
-        .lean()
-        .exec(),
-      this.marketplaceTemplateModel.countDocuments(query),
-    ])
+    const [items, total] = await this.marketplaceTemplateRepository.listByQuery(query, sortOption, page, limit)
 
     return {
       items: items.map(item => this.toResponse(item)),
@@ -121,7 +102,7 @@ export class MarketplaceService {
   }
 
   async getTemplate(id: string, requesterOrgId?: string) {
-    const template = await this.marketplaceTemplateModel.findById(id).lean().exec()
+    const template = await this.marketplaceTemplateRepository.getById(id)
     if (!template) {
       throw new NotFoundException('Marketplace template not found')
     }
@@ -133,7 +114,7 @@ export class MarketplaceService {
   }
 
   async purchaseTemplate(orgId: string, templateId: string) {
-    const template = await this.marketplaceTemplateModel.findById(templateId).lean().exec()
+    const template = await this.marketplaceTemplateRepository.getById(templateId)
     if (!template) {
       throw new NotFoundException('Marketplace template not found')
     }
@@ -146,7 +127,7 @@ export class MarketplaceService {
     )
 
     if (!hasPurchased) {
-      await this.marketplaceTemplateModel.findByIdAndUpdate(templateId, {
+      await this.marketplaceTemplateRepository.updateTemplate(templateId, {
         $inc: { downloads: 1 },
         $push: {
           purchaseHistory: {
@@ -154,10 +135,10 @@ export class MarketplaceService {
             purchasedAt: new Date(),
           },
         },
-      }).exec()
+      })
     }
 
-    const latest = await this.marketplaceTemplateModel.findById(templateId).lean().exec()
+    const latest = await this.marketplaceTemplateRepository.getById(templateId)
     return {
       purchased: true,
       alreadyPurchased: hasPurchased,
@@ -172,18 +153,24 @@ export class MarketplaceService {
       throw new BadRequestException('Rating must be between 1 and 5')
     }
 
-    const template = await this.marketplaceTemplateModel.findById(templateId).lean().exec()
+    const template = await this.marketplaceTemplateRepository.getById(templateId)
     if (!template) {
       throw new NotFoundException('Marketplace template not found')
     }
 
-    const reviews: Array<Record<string, any>> = [...(template.reviews || [])]
-    const existingIndex = reviews.findIndex(item => item['orgId'].toString() === orgId)
-    const nextReview = {
-      orgId: new Types.ObjectId(orgId),
+    const reviews: MarketplaceReviewSnapshot[] = (template.reviews || []).map(item => ({
+      orgId: item.orgId.toString(),
+      rating: item.rating,
+      review: item.review,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    }))
+    const existingIndex = reviews.findIndex(item => item.orgId === orgId)
+    const nextReview: MarketplaceReviewSnapshot = {
+      orgId,
       rating,
       review: review?.trim() || '',
-      createdAt: existingIndex >= 0 ? reviews[existingIndex]['createdAt'] : new Date(),
+      createdAt: existingIndex >= 0 ? reviews[existingIndex].createdAt : new Date(),
       updatedAt: new Date(),
     }
 
@@ -196,31 +183,32 @@ export class MarketplaceService {
 
     const reviewCount = reviews.length
     const averageRating = reviewCount > 0
-      ? Number((reviews.reduce((sum, item) => sum + item['rating'], 0) / reviewCount).toFixed(2))
+      ? Number((reviews.reduce((sum, item) => sum + item.rating, 0) / reviewCount).toFixed(2))
       : 0
 
-    const updated = await this.marketplaceTemplateModel.findByIdAndUpdate(
+    const updated = await this.marketplaceTemplateRepository.updateTemplate(
       templateId,
       {
-        reviews,
+        reviews: reviews.map(item => ({
+          ...item,
+          orgId: new Types.ObjectId(item.orgId),
+        })),
         rating: averageRating,
         reviewCount,
       },
-      { new: true },
-    ).lean().exec()
+    )
 
     return this.toResponse(updated, true)
   }
 
   async featureTemplate(id: string) {
-    const updated = await this.marketplaceTemplateModel.findByIdAndUpdate(
+    const updated = await this.marketplaceTemplateRepository.updateTemplate(
       id,
       {
         isFeatured: true,
         isApproved: true,
       },
-      { new: true },
-    ).lean().exec()
+    )
 
     if (!updated) {
       throw new NotFoundException('Marketplace template not found')
@@ -229,8 +217,8 @@ export class MarketplaceService {
     return this.toResponse(updated, true)
   }
 
-  private buildListQuery(filters: MarketplaceFilters, requesterOrgId?: string) {
-    const query: Record<string, any> = {
+  private buildListQuery(filters: MarketplaceFilters, requesterOrgId?: string): FilterQuery<MarketplaceTemplate> {
+    const query: Record<string, unknown> = {
       isApproved: filters.isApproved ?? true,
     }
 
@@ -269,7 +257,7 @@ export class MarketplaceService {
       query['price'] = { $gt: 0 }
     }
 
-    return query
+    return query as FilterQuery<MarketplaceTemplate>
   }
 
   private resolveSort(sort?: string) {
@@ -297,35 +285,7 @@ export class MarketplaceService {
     return [...new Set((tags || []).map(tag => tag.trim()).filter(Boolean))]
   }
 
-  private toResponse(template: {
-    _id: { toString: () => string }
-    pipelineTemplateId: { toString: () => string }
-    authorOrgId: { toString: () => string }
-    title: string
-    description: string
-    thumbnailUrl: string
-    tags: string[]
-    price: number
-    currency: MarketplaceCurrency
-    downloads: number
-    rating: number
-    reviewCount: number
-    isApproved: boolean
-    isFeatured: boolean
-    reviews?: Array<{
-      orgId: { toString: () => string }
-      rating: number
-      review: string
-      createdAt: Date
-      updatedAt: Date
-    }>
-    purchaseHistory?: Array<{
-      orgId: { toString: () => string }
-      purchasedAt: Date
-    }>
-    createdAt?: Date
-    updatedAt?: Date
-  } | null, includeDetails = false) {
+  private toResponse(template: LeanDoc<MarketplaceTemplate> | null, includeDetails = false) {
     if (!template) {
       throw new NotFoundException('Marketplace template not found')
     }

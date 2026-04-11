@@ -2,6 +2,11 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Schema as MongooseSchema } from 'mongoose'
 
 import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
+import {
+  LayerBillingPolicy,
+  LayerPermissionPolicy,
+  LayerQuotaPolicy,
+} from './layer-policy.schema'
 import { WithTimestampSchema } from './timestamp.schema'
 
 export enum OrgType {
@@ -112,6 +117,36 @@ export class OrganizationEnterpriseProfile {
   description: string
 }
 
+@Schema({ _id: false })
+export class OrganizationPlatformStrategy {
+  @Prop({ type: Boolean, default: true })
+  enableCrossInstanceStats: boolean
+
+  @Prop({ type: Boolean, default: true })
+  enableOpsConsole: boolean
+
+  @Prop({ type: Boolean, default: true })
+  allowSkillMarketplace: boolean
+
+  @Prop({ type: String, default: 'stable' })
+  rolloutChannel: string
+}
+
+@Schema({ _id: false })
+export class OrganizationPlatformLayer {
+  @Prop({ type: LayerQuotaPolicy, default: () => ({}) })
+  quotaPolicy: LayerQuotaPolicy
+
+  @Prop({ type: LayerBillingPolicy, default: () => ({}) })
+  billingPolicy: LayerBillingPolicy
+
+  @Prop({ type: LayerPermissionPolicy, default: () => ({}) })
+  permissionPolicy: LayerPermissionPolicy
+
+  @Prop({ type: OrganizationPlatformStrategy, default: () => ({}) })
+  strategy: OrganizationPlatformStrategy
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'organizations' })
 export class Organization extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -171,6 +206,9 @@ export class Organization extends WithTimestampSchema {
   @Prop({ type: OrganizationEnterpriseProfile, default: () => ({}) })
   enterpriseProfile: OrganizationEnterpriseProfile
 
+  @Prop({ type: OrganizationPlatformLayer, default: () => ({}) })
+  platformLayer: OrganizationPlatformLayer
+
   @Prop({ type: Object, default: {} })
   apiKeys: OrganizationApiKeyMap
 
@@ -178,7 +216,7 @@ export class Organization extends WithTimestampSchema {
   modelPreferences: OrganizationModelPreferences
 
   @Prop({ type: Object, default: {} })
-  settings: Record<string, any>
+  settings: Record<string, unknown>
 }
 
 export const OrganizationSchema = SchemaFactory.createForClass(Organization)

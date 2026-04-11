@@ -20,6 +20,7 @@ import {
   GetClawHostLogsQueryDto,
   InstallClawHostSkillDto,
   ListClawHostInstancesQueryDto,
+  UpdateClawHostArchitectureDto,
   UpgradeClawHostSkillDto,
 } from './clawhost.dto'
 import { ClawHostService } from './clawhost.service'
@@ -88,6 +89,14 @@ export class ClawHostController {
     return this.clawHostService.getInstance(user.orgId || user.id, instanceId)
   }
 
+  @Get('instances/:id/architecture')
+  async getInstanceArchitecture(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+  ) {
+    return this.clawHostService.getInstanceArchitecture(user.orgId || user.id, instanceId)
+  }
+
   @Post('instances/:id/gateway')
   async configureGateway(
     @GetToken() user: { orgId?: string, id: string },
@@ -104,6 +113,19 @@ export class ClawHostController {
     @Body() body: ConfigureSharedExperienceDto,
   ) {
     return this.clawHostService.configureSharedExperience(user.orgId || user.id, instanceId, body)
+  }
+
+  @Put('instances/:id/architecture')
+  async updateInstanceArchitecture(
+    @GetToken() user: { orgId?: string, id: string },
+    @Param('id') instanceId: string,
+    @Body() body: UpdateClawHostArchitectureDto,
+  ) {
+    return this.clawHostService.updateInstanceArchitecture(
+      user.orgId || user.id,
+      instanceId,
+      body,
+    )
   }
 
   @Get('instances/:id/status')

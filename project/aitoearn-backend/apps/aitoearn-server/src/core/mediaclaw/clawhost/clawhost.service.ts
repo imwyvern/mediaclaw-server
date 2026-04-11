@@ -1,25 +1,44 @@
 import { createHash, randomBytes } from 'node:crypto'
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common'
-import { InjectModel } from '@nestjs/mongoose'
+import { getModelToken } from '@nestjs/mongoose'
 import { Cron } from '@nestjs/schedule'
 import {
+  ClawHostConfigInheritance,
   ClawHostDeploymentMode,
   ClawHostHealthStatus,
   ClawHostInstalledSkill,
   ClawHostInstance,
   ClawHostInstanceConfig,
+  ClawHostInstanceLayer,
+  ClawHostInstanceResourceIsolation,
   ClawHostInstanceStatus,
   ClawHostRuntimeKind,
+  ClawHostSkillComposition,
+  LayerBillingModel,
+  LayerBillingPolicy,
+  LayerPermissionPolicy,
+  LayerQuotaPolicy,
+  Organization,
   UserRole,
 } from '@yikart/mongodb'
 import { RedisService } from '@yikart/redis'
-import { Model } from 'mongoose'
+import { Model, Types } from 'mongoose'
 import { MediaClawApiKeyService } from '../apikey/apikey.service'
+import {
+  mergeBillingPolicy,
+  mergePermissionPolicy,
+  mergeQuotaPolicy,
+  normalizeLayerBillingPolicy,
+  normalizeLayerPermissionPolicy,
+  normalizeLayerQuotaPolicy,
+  normalizeStringList,
+} from '../shared/layer-policy.utils'
 import { ClawHostAlertService } from './clawhost-alert.service'
 import { ClawHostGatewayPushService } from './clawhost-gateway-push.service'
 import { ClawHostPostgresService } from './clawhost-postgres.service'
@@ -69,6 +88,15 @@ interface RecordHeartbeatInput {
   capabilities?: string[]
 }
 
+interface InstanceLayerInput {
+  resourceIsolation?: Partial<ClawHostInstanceResourceIsolation>
+  quotaPolicy?: Partial<LayerQuotaPolicy>
+  billingPolicy?: Partial<LayerBillingPolicy>
+  permissionPolicy?: Partial<LayerPermissionPolicy>
+  configInheritance?: Partial<ClawHostConfigInheritance>
+  skillComposition?: Partial<ClawHostSkillComposition>
+}
+
 interface ConnectCodePayload {
   orgId: string
   instanceId: string
@@ -111,8 +139,10 @@ export class ClawHostService {
   private readonly logger = new Logger(ClawHostService.name)
 
   constructor(
-    @InjectModel(ClawHostInstance.name)
+    @Inject(getModelToken(ClawHostInstance.name))
     private readonly clawHostInstanceModel: Model<ClawHostInstance>,
+    @Inject(getModelToken(Organization.name))
+    private readonly organizationModel: Model<Organization>,
     private readonly redisService: RedisService,
     private readonly apiKeyService: MediaClawApiKeyService,
     private readonly clawHostRuntimeService: ClawHostRuntimeService,
@@ -140,6 +170,7 @@ export class ClawHostService {
     const namespace = this.buildNamespace(normalizedOrgId)
     const podName = this.buildPodName(instanceId)
     const now = new Date()
+    const initialSkills = this.buildDefaultInstalledSkills(now)
     const runtime = deploymentMode === ClawHostDeploymentMode.MANAGED
       ? await this.provisionManagedRuntime({
           instanceId,
@@ -161,14 +192,11 @@ export class ClawHostService {
         : ClawHostInstanceStatus.PENDING_MANUAL_SETUP,
       deploymentMode,
       config: resolvedConfig,
-      skills: [{
-        skillId: DEFAULT_OPENCLAW_SKILL_ID,
-        version: DEFAULT_OPENCLAW_SKILL_VERSION,
-        installedAt: now,
-      }],
+      skills: initialSkills,
       healthStatus: this.buildPendingHealthStatus(now),
       gatewayConfig: this.buildGatewayConfig(),
       sharedExperienceConfig: this.buildSharedExperienceConfig(),
+      instanceLayer: this.buildDefaultInstanceLayer(normalizedOrgId, initialSkills),
       k8sNamespace: runtime?.namespace || namespace,
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
         ? runtime?.podName || podName
@@ -236,6 +264,7 @@ export class ClawHostService {
     const resolvedConfig = this.resolveConfig(plan, input.config)
     const namespace = this.buildNamespace(orgId)
     const podName = this.buildPodName(instanceId)
+    const initialSkills = this.buildDefaultInstalledSkills(new Date())
     const runtime = deploymentMode === ClawHostDeploymentMode.MANAGED
       ? await this.provisionManagedRuntime({
           instanceId,
@@ -258,14 +287,11 @@ export class ClawHostService {
         : ClawHostInstanceStatus.CREATING,
       deploymentMode,
       config: resolvedConfig,
-      skills: [{
-        skillId: DEFAULT_OPENCLAW_SKILL_ID,
-        version: DEFAULT_OPENCLAW_SKILL_VERSION,
-        installedAt: new Date(),
-      }],
+      skills: initialSkills,
       healthStatus: this.buildPendingHealthStatus(new Date()),
       gatewayConfig: this.buildGatewayConfig(),
       sharedExperienceConfig: this.buildSharedExperienceConfig(),
+      instanceLayer: this.buildDefaultInstanceLayer(orgId, initialSkills),
       k8sNamespace: runtime?.namespace || namespace,
       k8sPodName: deploymentMode === ClawHostDeploymentMode.MANAGED
         ? runtime?.podName || podName
@@ -617,6 +643,70 @@ export class ClawHostService {
     })
   }
 
+  async getInstanceArchitecture(orgId: string, instanceId: string) {
+    const instance = await this.getInstanceOrThrow(orgId, instanceId)
+    const org = await this.getOrganizationOrNull(instance.orgId)
+    const platformLayer = this.buildPlatformLayerSnapshot(org?.platformLayer)
+    const instanceLayer = this.buildInstanceLayer(
+      instance.instanceLayer,
+      instance.orgId,
+      instance.skills || [],
+    )
+
+    return {
+      instanceId: instance.instanceId,
+      orgId: instance.orgId,
+      platformLayer,
+      instanceLayer: {
+        ...instanceLayer,
+        resourceIsolation: this.buildResourceIsolationSnapshot(instance, instanceLayer.resourceIsolation),
+      },
+      resolved: {
+        quotaPolicy: instanceLayer.configInheritance.inheritQuotaPolicy
+          ? mergeQuotaPolicy(platformLayer.quotaPolicy, instanceLayer.quotaPolicy)
+          : instanceLayer.quotaPolicy,
+        billingPolicy: instanceLayer.configInheritance.inheritBillingPolicy
+          ? mergeBillingPolicy(platformLayer.billingPolicy, instanceLayer.billingPolicy)
+          : instanceLayer.billingPolicy,
+        permissionPolicy: instanceLayer.configInheritance.inheritPermissionPolicy
+          ? mergePermissionPolicy(platformLayer.permissionPolicy, instanceLayer.permissionPolicy)
+          : instanceLayer.permissionPolicy,
+      },
+    }
+  }
+
+  async updateInstanceArchitecture(
+    orgId: string,
+    instanceId: string,
+    input: InstanceLayerInput,
+  ) {
+    const instance = await this.clawHostInstanceModel.findOne({
+      instanceId,
+      orgId: orgId.trim(),
+    }).exec()
+    if (!instance) {
+      throw new NotFoundException('ClawHost instance not found')
+    }
+
+    this.validateSkillCompositionInput(
+      input.skillComposition,
+      this.collectInstalledSkillIds(instance.skills || []),
+    )
+
+    instance.set(
+      'instanceLayer',
+      this.buildInstanceLayer(
+        instance.instanceLayer,
+        instance.orgId,
+        instance.skills || [],
+        input,
+      ),
+    )
+    await instance.save()
+
+    return this.getInstanceArchitecture(orgId, instanceId)
+  }
+
   async configureGateway(
     orgId: string,
     instanceId: string,
@@ -767,6 +857,10 @@ export class ClawHostService {
     )
 
     instance.set('skills', nextSkills)
+    instance.set(
+      'instanceLayer',
+      this.buildInstanceLayer(instance.instanceLayer, instance.orgId, nextSkills),
+    )
     instance.set('status', ClawHostInstanceStatus.RUNNING)
     instance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 1))
     instance.set('lastHealthMessage', '')
@@ -797,6 +891,24 @@ export class ClawHostService {
     const installedAt = new Date()
     const nextSkills = this.upsertSkill(instance.skills || [], skillId, version, installedAt)
     instance.set('skills', nextSkills)
+    instance.set(
+      'instanceLayer',
+      this.buildInstanceLayer(
+        instance.instanceLayer,
+        instance.orgId,
+        nextSkills,
+        {
+          skillComposition: {
+            installedSkillIds: this.appendSkillToComposition(
+              instance.instanceLayer?.skillComposition?.installedSkillIds,
+              skillId,
+              nextSkills,
+            ),
+            primarySkillId: instance.instanceLayer?.skillComposition?.primarySkillId || skillId,
+          },
+        },
+      ),
+    )
     await instance.save()
     await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
 
@@ -826,6 +938,24 @@ export class ClawHostService {
     }
 
     instance.set('skills', nextSkills)
+    instance.set(
+      'instanceLayer',
+      this.buildInstanceLayer(
+        instance.instanceLayer,
+        instance.orgId,
+        nextSkills,
+        {
+          skillComposition: {
+            installedSkillIds: this.removeSkillFromComposition(
+              instance.instanceLayer?.skillComposition?.installedSkillIds,
+              skillId.trim(),
+              nextSkills,
+            ),
+            primarySkillId: instance.instanceLayer?.skillComposition?.primarySkillId,
+          },
+        },
+      ),
+    )
     await instance.save()
     await this.syncPostgresMetadata(instance.toObject() as ClawHostInstance)
 
@@ -868,6 +998,10 @@ export class ClawHostService {
 
       const nextSkills = this.upsertSkill(instance.skills || [], skillId, version, upgradedAt)
       instance.set('skills', nextSkills)
+      instance.set(
+        'instanceLayer',
+        this.buildInstanceLayer(instance.instanceLayer, instance.orgId, nextSkills),
+      )
       instance.set('status', ClawHostInstanceStatus.RUNNING)
       instance.set('healthStatus', this.buildHealthyStatus(upgradedAt, 50))
       instance.set('lastHealthMessage', '')
@@ -1024,6 +1158,50 @@ export class ClawHostService {
     return instance
   }
 
+  private async getOrganizationOrNull(orgId: string) {
+    if (!Types.ObjectId.isValid(orgId)) {
+      return null
+    }
+
+    return this.organizationModel.findById(new Types.ObjectId(orgId)).lean().exec()
+  }
+
+  private buildPlatformLayerSnapshot(
+    source?: Partial<Organization['platformLayer']> | null,
+  ) {
+    return {
+      quotaPolicy: normalizeLayerQuotaPolicy(source?.quotaPolicy),
+      billingPolicy: normalizeLayerBillingPolicy(source?.billingPolicy, LayerBillingModel.QUOTA),
+      permissionPolicy: normalizeLayerPermissionPolicy(source?.permissionPolicy),
+      strategy: {
+        enableCrossInstanceStats: source?.strategy?.enableCrossInstanceStats ?? true,
+        enableOpsConsole: source?.strategy?.enableOpsConsole ?? true,
+        allowSkillMarketplace: source?.strategy?.allowSkillMarketplace ?? true,
+        rolloutChannel: typeof source?.strategy?.rolloutChannel === 'string'
+          ? source.strategy.rolloutChannel.trim() || 'stable'
+          : 'stable',
+      },
+    }
+  }
+
+  private buildResourceIsolationSnapshot(
+    instance: Pick<
+      ClawHostInstance,
+      'deploymentMode' | 'runtimeKind' | 'k8sNamespace' | 'k8sPodName' | 'containerName' | 'hostPort'
+    >,
+    isolation: ClawHostInstanceResourceIsolation,
+  ) {
+    return {
+      ...isolation,
+      deploymentMode: instance.deploymentMode || ClawHostDeploymentMode.BYOC,
+      runtimeKind: instance.runtimeKind || ClawHostRuntimeKind.DOCKER,
+      namespace: instance.k8sNamespace || '',
+      podName: instance.k8sPodName || '',
+      containerName: instance.containerName || '',
+      hostPort: instance.hostPort || 0,
+    }
+  }
+
   private buildQuery(filters: ListInstancesFilters) {
     const query: Record<string, unknown> = {}
 
@@ -1097,6 +1275,202 @@ export class ClawHostService {
 
     return {
       ...(CLAWHOST_PLAN_PRESETS[plan] || this.defaultConfig()),
+    }
+  }
+
+  private buildDefaultInstalledSkills(installedAt: Date) {
+    return [{
+      skillId: DEFAULT_OPENCLAW_SKILL_ID,
+      version: DEFAULT_OPENCLAW_SKILL_VERSION,
+      installedAt,
+    }]
+  }
+
+  private buildDefaultInstanceLayer(
+    orgId: string,
+    skills: ClawHostInstalledSkill[],
+  ) {
+    return this.buildInstanceLayer(
+      undefined,
+      orgId,
+      skills,
+      {
+        configInheritance: {
+          inheritedFromOrgId: orgId,
+        },
+        skillComposition: {
+          primarySkillId: DEFAULT_OPENCLAW_SKILL_ID,
+          installedSkillIds: skills.map(skill => skill.skillId),
+        },
+      },
+    )
+  }
+
+  private buildInstanceLayer(
+    current: Partial<ClawHostInstanceLayer> | null | undefined,
+    orgId: string,
+    skills: ClawHostInstalledSkill[],
+    overrides?: InstanceLayerInput | null,
+  ): ClawHostInstanceLayer {
+    const actualInstalledSkillIds = this.collectInstalledSkillIds(skills)
+    const nextConfiguredSkillIds = Array.isArray(overrides?.skillComposition?.installedSkillIds)
+      ? this.restrictSkillIds(overrides.skillComposition.installedSkillIds, actualInstalledSkillIds)
+      : Array.isArray(current?.skillComposition?.installedSkillIds)
+        ? this.restrictSkillIds(current.skillComposition.installedSkillIds, actualInstalledSkillIds)
+        : actualInstalledSkillIds
+
+    return {
+      resourceIsolation: this.buildResourceIsolation(
+        current?.resourceIsolation,
+        overrides?.resourceIsolation,
+      ),
+      quotaPolicy: normalizeLayerQuotaPolicy({
+        ...(current?.quotaPolicy || {}),
+        ...(overrides?.quotaPolicy || {}),
+      }),
+      billingPolicy: normalizeLayerBillingPolicy({
+        ...(current?.billingPolicy || {}),
+        ...(overrides?.billingPolicy || {}),
+      }, LayerBillingModel.QUOTA),
+      permissionPolicy: normalizeLayerPermissionPolicy({
+        ...(current?.permissionPolicy || {}),
+        ...(overrides?.permissionPolicy || {}),
+      }),
+      configInheritance: this.buildConfigInheritance(
+        current?.configInheritance,
+        overrides?.configInheritance,
+        orgId,
+      ),
+      skillComposition: this.buildSkillComposition(
+        current?.skillComposition,
+        overrides?.skillComposition,
+        nextConfiguredSkillIds.length > 0 ? nextConfiguredSkillIds : actualInstalledSkillIds,
+      ),
+    }
+  }
+
+  private buildResourceIsolation(
+    current?: Partial<ClawHostInstanceResourceIsolation> | null,
+    overrides?: Partial<ClawHostInstanceResourceIsolation> | null,
+  ): ClawHostInstanceResourceIsolation {
+    return {
+      isolationLevel: typeof overrides?.isolationLevel === 'string'
+        ? overrides.isolationLevel.trim() || 'namespace'
+        : typeof current?.isolationLevel === 'string'
+          ? current.isolationLevel.trim() || 'namespace'
+          : 'namespace',
+      dedicatedRuntime: overrides?.dedicatedRuntime ?? current?.dedicatedRuntime ?? true,
+      dedicatedStorage: overrides?.dedicatedStorage ?? current?.dedicatedStorage ?? true,
+      dedicatedNetwork: overrides?.dedicatedNetwork ?? current?.dedicatedNetwork ?? true,
+    }
+  }
+
+  private buildConfigInheritance(
+    current: Partial<ClawHostConfigInheritance> | null | undefined,
+    overrides: Partial<ClawHostConfigInheritance> | null | undefined,
+    orgId: string,
+  ): ClawHostConfigInheritance {
+    const inheritedFromOrgId = typeof overrides?.inheritedFromOrgId === 'string'
+      ? overrides.inheritedFromOrgId.trim() || orgId
+      : typeof current?.inheritedFromOrgId === 'string'
+        ? current.inheritedFromOrgId.trim() || orgId
+        : orgId
+
+    return {
+      inheritQuotaPolicy: overrides?.inheritQuotaPolicy ?? current?.inheritQuotaPolicy ?? true,
+      inheritBillingPolicy: overrides?.inheritBillingPolicy ?? current?.inheritBillingPolicy ?? true,
+      inheritPermissionPolicy:
+        overrides?.inheritPermissionPolicy ?? current?.inheritPermissionPolicy ?? true,
+      inheritSkillDefaults:
+        overrides?.inheritSkillDefaults ?? current?.inheritSkillDefaults ?? true,
+      inheritedFromOrgId,
+      inheritedAt: overrides ? current?.inheritedAt || new Date() : current?.inheritedAt || null,
+    }
+  }
+
+  private buildSkillComposition(
+    current: Partial<ClawHostSkillComposition> | null | undefined,
+    overrides: Partial<ClawHostSkillComposition> | null | undefined,
+    installedSkillIds: string[],
+  ): ClawHostSkillComposition {
+    const normalizedBundleIds = Array.isArray(overrides?.bundleIds)
+      ? normalizeStringList(overrides.bundleIds)
+      : Array.isArray(current?.bundleIds)
+        ? normalizeStringList(current.bundleIds)
+        : []
+    const configuredPrimary = typeof overrides?.primarySkillId === 'string'
+      ? overrides.primarySkillId.trim()
+      : typeof current?.primarySkillId === 'string'
+        ? current.primarySkillId.trim()
+        : ''
+    const primarySkillId = installedSkillIds.includes(configuredPrimary)
+      ? configuredPrimary
+      : installedSkillIds[0] || ''
+
+    return {
+      primarySkillId,
+      installedSkillIds,
+      bundleIds: normalizedBundleIds,
+      autoUpgrade: overrides?.autoUpgrade ?? current?.autoUpgrade ?? false,
+      versionPolicy: typeof overrides?.versionPolicy === 'string'
+        ? overrides.versionPolicy.trim() || 'pinned'
+        : typeof current?.versionPolicy === 'string'
+          ? current.versionPolicy.trim() || 'pinned'
+          : 'pinned',
+    }
+  }
+
+  private collectInstalledSkillIds(skills: ClawHostInstalledSkill[]) {
+    return [...new Set(skills.map(skill => skill.skillId).filter(Boolean))]
+  }
+
+  private restrictSkillIds(candidateSkillIds: string[], allowedSkillIds: string[]) {
+    const allowed = new Set(allowedSkillIds)
+    const normalized = normalizeStringList(candidateSkillIds).filter(skillId => allowed.has(skillId))
+    return normalized.length > 0 ? normalized : allowedSkillIds
+  }
+
+  private appendSkillToComposition(
+    currentSkillIds: string[] | undefined,
+    skillId: string,
+    nextSkills: ClawHostInstalledSkill[],
+  ) {
+    return this.restrictSkillIds(
+      [...normalizeStringList(currentSkillIds), skillId.trim()],
+      this.collectInstalledSkillIds(nextSkills),
+    )
+  }
+
+  private removeSkillFromComposition(
+    currentSkillIds: string[] | undefined,
+    skillId: string,
+    nextSkills: ClawHostInstalledSkill[],
+  ) {
+    return this.restrictSkillIds(
+      normalizeStringList(currentSkillIds).filter(item => item !== skillId),
+      this.collectInstalledSkillIds(nextSkills),
+    )
+  }
+
+  private validateSkillCompositionInput(
+    input: Partial<ClawHostSkillComposition> | null | undefined,
+    installedSkillIds: string[],
+  ) {
+    if (!input) {
+      return
+    }
+
+    const installed = new Set(installedSkillIds)
+    const requestedInstalledSkills = normalizeStringList(input.installedSkillIds)
+    if (requestedInstalledSkills.some(skillId => !installed.has(skillId))) {
+      throw new BadRequestException('skillComposition.installedSkillIds must reference installed skills')
+    }
+
+    const primarySkillId = typeof input.primarySkillId === 'string'
+      ? input.primarySkillId.trim()
+      : ''
+    if (primarySkillId && !installed.has(primarySkillId)) {
+      throw new BadRequestException('skillComposition.primarySkillId must reference an installed skill')
     }
   }
 
@@ -1567,6 +1941,11 @@ export class ClawHostService {
     const derived = this.isManagedInstance(instance)
       ? this.deriveManagedRuntimeStateFromSnapshot(instance)
       : this.deriveRuntimeState(instance)
+    const instanceLayer = this.buildInstanceLayer(
+      instance.instanceLayer,
+      instance.orgId,
+      instance.skills || [],
+    )
 
     return {
       id: instance._id?.toString?.() || '',
@@ -1583,6 +1962,10 @@ export class ClawHostService {
       })),
       healthStatus: derived.healthStatus,
       lastHealthMessage: derived.healthMessage || instance.lastHealthMessage || '',
+      instanceLayer: {
+        ...instanceLayer,
+        resourceIsolation: this.buildResourceIsolationSnapshot(instance, instanceLayer.resourceIsolation),
+      },
       k8sNamespace: instance.k8sNamespace,
       k8sPodName: instance.k8sPodName,
       connectionInfo: {

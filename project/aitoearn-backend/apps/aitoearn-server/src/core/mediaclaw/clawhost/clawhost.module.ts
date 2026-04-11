@@ -1,6 +1,11 @@
 import { Module } from '@nestjs/common'
 import { MongooseModule } from '@nestjs/mongoose'
-import { ClawHostInstance, ClawHostInstanceSchema } from '@yikart/mongodb'
+import {
+  ClawHostInstance,
+  ClawHostInstanceSchema,
+  Organization,
+  OrganizationSchema,
+} from '@yikart/mongodb'
 import { MediaClawApiKeyModule } from '../apikey/apikey.module'
 import { MediaclawConfigModule } from '../mediaclaw-config.module'
 import { ClawHostAlertService } from './clawhost-alert.service'
@@ -17,6 +22,7 @@ import { ClawHostService } from './clawhost.service'
   imports: [
     MongooseModule.forFeature([
       { name: ClawHostInstance.name, schema: ClawHostInstanceSchema },
+      { name: Organization.name, schema: OrganizationSchema },
     ]),
     MediaClawApiKeyModule,
     MediaclawConfigModule,

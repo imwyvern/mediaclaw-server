@@ -46,4 +46,9 @@ export class AdminDashboardController {
       queueLatency: snapshot.queue.latency,
     }
   }
+
+  @Get('platform-overview')
+  async getPlatformOverview() {
+    return this.clientMgmtService.getPlatformOverview()
+  }
 }

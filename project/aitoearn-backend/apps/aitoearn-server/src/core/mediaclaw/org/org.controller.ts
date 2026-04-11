@@ -1,3 +1,4 @@
+import type { OrganizationUpdateInput } from './org.service'
 import {
   Body,
   Delete,
@@ -15,6 +16,7 @@ import {
 } from '@yikart/mongodb'
 import { Type } from 'class-transformer'
 import {
+  IsBoolean,
   IsEnum,
   IsObject,
   IsOptional,
@@ -23,6 +25,11 @@ import {
 } from 'class-validator'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { PermissionGuard, Roles } from '../permission.guard'
+import {
+  LayerBillingPolicyDto,
+  LayerPermissionPolicyDto,
+  LayerQuotaPolicyDto,
+} from '../shared/layer-policy.dto'
 import { OrgService } from './org.service'
 
 class EnterpriseProfileDto {
@@ -122,6 +129,46 @@ class UpdateModelPreferencesDto {
   analysis?: string | null
 }
 
+class PlatformStrategyDto {
+  @IsOptional()
+  @IsBoolean()
+  enableCrossInstanceStats?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  enableOpsConsole?: boolean
+
+  @IsOptional()
+  @IsBoolean()
+  allowSkillMarketplace?: boolean
+
+  @IsOptional()
+  @IsString()
+  rolloutChannel?: string
+}
+
+class UpdatePlatformLayerDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LayerQuotaPolicyDto)
+  quotaPolicy?: LayerQuotaPolicyDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LayerBillingPolicyDto)
+  billingPolicy?: LayerBillingPolicyDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LayerPermissionPolicyDto)
+  permissionPolicy?: LayerPermissionPolicyDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PlatformStrategyDto)
+  strategy?: PlatformStrategyDto
+}
+
 @UseGuards(PermissionGuard)
 @Roles(UserRole.ENTERPRISE_ADMIN)
 @MediaClawApiController('api/v1/org')
@@ -146,6 +193,11 @@ export class OrgController {
   @Get('model-preferences')
   async getModelPreferences(@GetToken() user: { orgId?: string, id?: string }) {
     return this.orgService.getModelPreferences(this.resolveOrgId(user))
+  }
+
+  @Get('platform-layer')
+  async getPlatformLayer(@GetToken() user: { orgId?: string, id?: string }) {
+    return this.orgService.getPlatformLayer(this.resolveOrgId(user))
   }
 
   @Post('members/invite')
@@ -226,6 +278,14 @@ export class OrgController {
     return this.orgService.updateModelPreferences(this.resolveOrgId(user), preferences)
   }
 
+  @Patch('platform-layer')
+  async updatePlatformLayer(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: UpdatePlatformLayerDto,
+  ) {
+    return this.orgService.updatePlatformLayer(this.resolveOrgId(user), body)
+  }
+
   @Patch(':id')
   async update(
     @GetToken() user: { orgId?: string, id?: string },
@@ -252,11 +312,11 @@ export class OrgController {
     }
   }
 
-  private toOrganizationPayload(body: UpsertOrganizationDto) {
+  private toOrganizationPayload(body: UpsertOrganizationDto): OrganizationUpdateInput {
     return {
       ...body,
       ...(body.enterpriseProfile ? { enterpriseProfile: { ...body.enterpriseProfile } } : {}),
       ...(body.settings ? { settings: { ...body.settings } } : {}),
-    } as any
+    }
   }
 }
