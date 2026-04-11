@@ -11,7 +11,7 @@ import {
 import { Queue } from 'bullmq'
 import { Model, Types } from 'mongoose'
 import { AcquisitionService } from '../acquisition/acquisition.service'
-import { TikHubPlatform } from '../acquisition/tikhub.service'
+import { TikHubPlatform, TikHubService } from '../acquisition/tikhub.service'
 import { DiscoveryNotificationService } from './discovery-notification.service'
 import {
   DEFAULT_DISCOVERY_INDUSTRIES,
@@ -86,6 +86,7 @@ export class DiscoveryIngestionService implements OnModuleInit {
     @InjectModel(Organization.name)
     private readonly organizationModel: Model<Organization>,
     private readonly acquisitionService: AcquisitionService,
+    private readonly tikHubService: TikHubService,
     private readonly discoveryService: DiscoveryService,
     private readonly discoveryNotificationService: DiscoveryNotificationService,
   ) {}
@@ -226,21 +227,57 @@ export class DiscoveryIngestionService implements OnModuleInit {
       normalizedKeyword,
       this.searchLimit,
     )
+    const deepResponse = response.source === 'tikhub'
+      ? await this.tikHubService.searchVideosIncremental(
+          platform,
+          normalizedKeyword,
+          this.searchLimit,
+          {
+            enrichDepth: 'deep',
+            incrementalState: await this.resolveIncrementalState(
+              platform,
+              normalizedIndustry,
+              normalizedKeyword,
+            ),
+          },
+        )
+      : response
     const ingestResult = await this.discoveryService.ingestSearchResults({
-      platform: response.platform,
+      platform: deepResponse.platform,
       industry: normalizedIndustry,
       keywords: this.mergeKeywords(relatedKeywords, [
         normalizedIndustry,
         normalizedKeyword,
       ]),
-      items: response.items,
+      items: deepResponse.items,
     })
 
     return {
       ...ingestResult,
       keyword: normalizedKeyword,
-      source: response.source,
+      source: deepResponse.source,
     }
+  }
+
+  private async resolveIncrementalState(
+    platform: TikHubPlatform,
+    industry: string,
+    keyword: string,
+  ) {
+    const latest = await this.viralContentModel
+      .findOne({
+        platform,
+        industry,
+        keywords: keyword,
+      })
+      .sort({ discoveredAt: -1, createdAt: -1 })
+      .lean()
+      .exec() as unknown as LeanViralContent | null
+
+    const state = latest?.acquisitionInsight?.['incrementalState']
+    return state && typeof state === 'object'
+      ? state as { cursor?: string, watermark?: string, page?: number }
+      : undefined
   }
 
   private async buildScanPlans(options: DiscoveryRunOptions) {

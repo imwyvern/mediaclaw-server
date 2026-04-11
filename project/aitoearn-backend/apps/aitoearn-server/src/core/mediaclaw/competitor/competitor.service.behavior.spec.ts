@@ -32,6 +32,7 @@ describe('competitorService behavior', () => {
   let viralContentModel: Record<string, Mock>
   let brandModel: Record<string, Mock>
   let organizationModel: Record<string, Mock>
+  let acquisitionService: Record<string, Mock>
   let tikHubService: Record<string, Mock>
   let discoveryService: Record<string, Mock>
 
@@ -51,8 +52,11 @@ describe('competitorService behavior', () => {
     organizationModel = {
       findById: vi.fn(),
     }
-    tikHubService = {
+    acquisitionService = {
       searchVideos: vi.fn(),
+    }
+    tikHubService = {
+      trackCreatorAccount: vi.fn(),
     }
     discoveryService = {
       ingestSearchResults: vi.fn(),
@@ -63,6 +67,7 @@ describe('competitorService behavior', () => {
       viralContentModel as any,
       brandModel as any,
       organizationModel as any,
+      acquisitionService as any,
       tikHubService as any,
       discoveryService as any,
     )
@@ -112,7 +117,42 @@ describe('competitorService behavior', () => {
         },
       }),
     )
-    tikHubService.searchVideos.mockResolvedValue({
+    tikHubService.trackCreatorAccount.mockResolvedValue({
+      source: 'tikhub',
+      creatorId: 'target-creator',
+      accountUrl: 'https://www.douyin.com/user/target-creator',
+      profile: {
+        nickname: 'target creator',
+        profileUrl: 'https://www.douyin.com/user/target-creator',
+      },
+      pagination: {
+        cursor: 'cursor-1',
+        page: 1,
+      },
+      health: {
+        state: 'healthy',
+        successRate: 1,
+      },
+      platform: 'douyin',
+      items: [
+        {
+          platform: 'douyin',
+          videoId: 'video-1',
+          title: 'Target creator skincare routine',
+          author: 'target creator',
+          contentUrl: 'https://example.com/videos/video-1',
+          thumbnailUrl: 'https://example.com/thumb-1.jpg',
+          publishedAt: '2026-04-08T00:00:00.000Z',
+          metrics: {
+            views: 5000,
+            likes: 400,
+            comments: 40,
+            shares: 30,
+          },
+        },
+      ],
+    })
+    acquisitionService.searchVideos.mockResolvedValue({
       source: 'tikhub',
       platform: 'douyin',
       items: [
@@ -148,14 +188,22 @@ describe('competitorService behavior', () => {
       'https://www.douyin.com/user/target-creator',
     )
 
-    expect(tikHubService.searchVideos).toHaveBeenCalledTimes(2)
-    expect(tikHubService.searchVideos).toHaveBeenNthCalledWith(
+    expect(tikHubService.trackCreatorAccount).toHaveBeenCalledWith(
+      'douyin',
+      expect.objectContaining({
+        creatorId: 'target-creator',
+        accountUrl: 'https://www.douyin.com/user/target-creator',
+        trackedVideoIds: [],
+      }),
+    )
+    expect(acquisitionService.searchVideos).toHaveBeenCalledTimes(2)
+    expect(acquisitionService.searchVideos).toHaveBeenNthCalledWith(
       1,
       'douyin',
       'target-creator',
       10,
     )
-    expect(tikHubService.searchVideos).toHaveBeenNthCalledWith(
+    expect(acquisitionService.searchVideos).toHaveBeenNthCalledWith(
       2,
       'douyin',
       'target creator',
@@ -171,6 +219,22 @@ describe('competitorService behavior', () => {
           'target-creator',
           'target creator',
         ]),
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            videoId: 'video-1',
+          }),
+        ]),
+      }),
+    )
+    expect(competitorModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      competitorId.toString(),
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          tracking: expect.objectContaining({
+            creatorId: 'target-creator',
+            trackedVideoIds: ['video-1'],
+          }),
+        }),
       }),
     )
     expect(result.sync).toEqual(

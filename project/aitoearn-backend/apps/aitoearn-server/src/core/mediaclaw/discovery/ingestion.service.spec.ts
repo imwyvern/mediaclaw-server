@@ -25,6 +25,7 @@ describe('discoveryIngestionService', () => {
   let brandModel: Record<string, Mock>
   let organizationModel: Record<string, Mock>
   let acquisitionService: Record<string, Mock>
+  let tikHubService: Record<string, Mock>
   let discoveryService: Record<string, Mock>
   let discoveryNotificationService: Record<string, Mock>
 
@@ -48,6 +49,9 @@ describe('discoveryIngestionService', () => {
     acquisitionService = {
       searchVideos: vi.fn(),
     }
+    tikHubService = {
+      searchVideosIncremental: vi.fn(),
+    }
     discoveryService = {
       ingestSearchResults: vi.fn(),
     }
@@ -62,6 +66,7 @@ describe('discoveryIngestionService', () => {
       brandModel as any,
       organizationModel as any,
       acquisitionService as any,
+      tikHubService as any,
       discoveryService as any,
       discoveryNotificationService as any,
     )
@@ -83,6 +88,12 @@ describe('discoveryIngestionService', () => {
 
   it('should bootstrap discovery ingestion for explicit industries and platforms', async () => {
     acquisitionService.searchVideos.mockResolvedValue({
+      source: 'tikhub',
+      platform: 'douyin',
+      items: [],
+    })
+    viralContentModel.findOne = vi.fn().mockReturnValue(createQueryResult(null))
+    tikHubService.searchVideosIncremental.mockResolvedValue({
       source: 'tikhub',
       platform: 'douyin',
       items: [
@@ -118,6 +129,15 @@ describe('discoveryIngestionService', () => {
       'douyin',
       '美妆',
       10,
+    )
+    expect(tikHubService.searchVideosIncremental).toHaveBeenCalledWith(
+      'douyin',
+      '美妆',
+      10,
+      expect.objectContaining({
+        enrichDepth: 'deep',
+        incrementalState: undefined,
+      }),
     )
     expect(discoveryService.ingestSearchResults).toHaveBeenCalledWith(
       expect.objectContaining({

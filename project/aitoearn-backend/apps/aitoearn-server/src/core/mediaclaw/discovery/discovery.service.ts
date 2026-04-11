@@ -136,6 +136,7 @@ export class DiscoveryService {
         thumbnailUrl: item.thumbnailUrl,
         discoveredAt: item.discoveredAt,
         publishedAt: item.publishedAt,
+        acquisitionInsight: item.acquisitionInsight || null,
         metrics: {
           views: this.normalizeMetric(item.views),
           likes: this.normalizeMetric(item.likes),
@@ -254,6 +255,22 @@ export class DiscoveryService {
               discoveredAt,
               contentUrl: item.contentUrl,
               thumbnailUrl: item.thumbnailUrl,
+              acquisitionInsight: item.insights
+                ? {
+                    ...item.insights,
+                    creatorProfile: item.creatorProfile || null,
+                    incrementalState: item.incrementalState || null,
+                    collectorHealth: item.collectorHealth || null,
+                    trackedAccount: item.trackedAccount || null,
+                    syncedAt: new Date(),
+                  }
+                : {
+                    creatorProfile: item.creatorProfile || null,
+                    incrementalState: item.incrementalState || null,
+                    collectorHealth: item.collectorHealth || null,
+                    trackedAccount: item.trackedAccount || null,
+                    syncedAt: new Date(),
+                  },
             },
             $setOnInsert: {
               remixStatus: this.getRejectedStatus(),

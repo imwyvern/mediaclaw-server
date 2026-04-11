@@ -185,6 +185,7 @@ describe('discoveryService', () => {
             comments: 90,
             shares: 45,
           },
+          acquisitionInsight: null,
         },
       ],
     })

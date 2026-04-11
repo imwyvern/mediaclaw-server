@@ -9,6 +9,7 @@ import { Model, Types } from 'mongoose'
 import { AcquisitionService } from '../acquisition/acquisition.service'
 import {
   SearchVideoSummary,
+  TikHubService,
 } from '../acquisition/tikhub.service'
 import { DiscoveryService } from '../discovery/discovery.service'
 
@@ -50,6 +51,7 @@ export class CompetitorService {
     @InjectModel(Organization.name)
     private readonly organizationModel: Model<Organization>,
     private readonly acquisitionService: AcquisitionService,
+    private readonly tikHubService: TikHubService,
     private readonly discoveryService: DiscoveryService,
   ) {}
 
@@ -164,6 +166,7 @@ export class CompetitorService {
         likes: item.likes,
         comments: item.comments,
         shares: item.shares,
+        acquisitionInsight: item.acquisitionInsight || null,
         contentUrl: item.contentUrl,
         thumbnailUrl: item.thumbnailUrl,
         discoveredAt: item.discoveredAt,
@@ -246,6 +249,7 @@ export class CompetitorService {
             shares: item.shares,
             industry: item.industry,
             keywords: item.keywords,
+            acquisitionInsight: item.acquisitionInsight || null,
             contentUrl: item.contentUrl,
             thumbnailUrl: item.thumbnailUrl,
             discoveredAt: item.discoveredAt,
@@ -340,6 +344,15 @@ export class CompetitorService {
     const sources = new Set<string>()
     let scannedCount = 0
 
+    const trackedSnapshot = competitor.tracking || {}
+    const trackedFeed = await this.tryTrackCompetitorFeed(competitor, trackedSnapshot)
+    if (trackedFeed) {
+      sources.add(trackedFeed.source)
+      scannedCount += trackedFeed.items.length
+      collectedItems.push(...trackedFeed.items)
+      await this.persistCompetitorTracking(competitor._id.toString(), trackedFeed)
+    }
+
     for (const term of context.searchTerms) {
       const response = await this.acquisitionService.searchVideos(
         competitor.platform,
@@ -397,6 +410,75 @@ export class CompetitorService {
       searchScannedCount: scannedCount,
       matchedCount: uniqueItems.length,
     }
+  }
+
+  private async tryTrackCompetitorFeed(
+    competitor: LeanCompetitor,
+    trackingState: Record<string, any>,
+  ) {
+    try {
+      return await this.tikHubService.trackCreatorAccount(competitor.platform, {
+        creatorId: competitor.accountId || trackingState?.['creatorId'] || '',
+        accountUrl: competitor.accountUrl,
+        limit: 10,
+        incrementalState: trackingState?.['incremental'],
+        trackedVideoIds: trackingState?.['trackedVideoIds'] || [],
+        previousMetrics: trackingState?.['lastMetricSnapshot'] || null,
+      })
+    }
+    catch {
+      return null
+    }
+  }
+
+  private async persistCompetitorTracking(
+    competitorId: string,
+    trackedFeed: {
+      creatorId?: string
+      accountUrl?: string
+      profile?: {
+        nickname?: string
+        profileUrl?: string
+      } | null
+      pagination?: {
+        cursor?: string
+        watermark?: string
+        page?: number
+      } | null
+      health?: unknown
+      items: SearchVideoSummary[]
+    },
+  ) {
+    const latestItem = trackedFeed.items
+      .slice()
+      .sort((left, right) => {
+        return new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime()
+      })[0]
+    const latestMetrics = latestItem?.metrics
+      ? {
+          views: latestItem.metrics.views,
+          likes: latestItem.metrics.likes,
+          comments: latestItem.metrics.comments,
+          shares: latestItem.metrics.shares,
+        }
+      : null
+
+    await this.competitorModel
+      .findByIdAndUpdate(competitorId, {
+        $set: {
+          tracking: {
+            creatorId: trackedFeed.creatorId || '',
+            creatorNickname: trackedFeed.profile?.nickname || '',
+            profileUrl: trackedFeed.accountUrl || trackedFeed.profile?.profileUrl || '',
+            incremental: trackedFeed.pagination || {},
+            trackedVideoIds: trackedFeed.items.map(item => item.videoId),
+            lastPublishedAt: latestItem ? new Date(latestItem.publishedAt) : null,
+            lastMetricSnapshot: latestMetrics,
+            collectorHealth: trackedFeed.health || null,
+          },
+        },
+      })
+      .exec()
   }
 
   private async resolveSyncContext(
@@ -582,6 +664,7 @@ export class CompetitorService {
       accountName: item.accountName,
       accountUrl: item.accountUrl,
       metrics: item.metrics,
+      tracking: item.tracking || null,
       lastSyncedAt: item.lastSyncedAt,
       isActive: item.isActive,
       createdAt: item.createdAt,

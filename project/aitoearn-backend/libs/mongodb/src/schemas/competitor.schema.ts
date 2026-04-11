@@ -18,6 +18,45 @@ class CompetitorMetrics {
   postFrequency: number
 }
 
+@Schema({ _id: false })
+class CompetitorIncrementalState {
+  @Prop({ type: String, default: '' })
+  cursor?: string
+
+  @Prop({ type: String, default: '' })
+  watermark?: string
+
+  @Prop({ type: Number, default: 0 })
+  page?: number
+}
+
+@Schema({ _id: false })
+class CompetitorTrackingState {
+  @Prop({ type: String, default: '' })
+  creatorId?: string
+
+  @Prop({ type: String, default: '' })
+  creatorNickname?: string
+
+  @Prop({ type: String, default: '' })
+  profileUrl?: string
+
+  @Prop({ type: CompetitorIncrementalState, default: () => ({}) })
+  incremental: CompetitorIncrementalState
+
+  @Prop({ type: [String], default: [] })
+  trackedVideoIds: string[]
+
+  @Prop({ type: Date, default: null })
+  lastPublishedAt?: Date | null
+
+  @Prop({ type: Object, default: null })
+  lastMetricSnapshot?: Record<string, unknown> | null
+
+  @Prop({ type: Object, default: null })
+  collectorHealth?: Record<string, unknown> | null
+}
+
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'competitors' })
 export class Competitor extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
@@ -46,6 +85,9 @@ export class Competitor extends WithTimestampSchema {
 
   @Prop({ type: Boolean, default: true, index: true })
   isActive: boolean
+
+  @Prop({ type: CompetitorTrackingState, default: () => ({}) })
+  tracking?: CompetitorTrackingState
 }
 
 export const CompetitorSchema = SchemaFactory.createForClass(Competitor)

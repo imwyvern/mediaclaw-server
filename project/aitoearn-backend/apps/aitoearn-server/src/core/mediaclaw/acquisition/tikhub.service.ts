@@ -1,9 +1,21 @@
+import type {
+  PlatformDeepInsight,
+  PlatformIncrementalState,
+  TikHubPlatformAdapter,
+} from './adapters/platform-adapter.interface'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
-import { ContentProvider } from './content-provider.interface'
+import { ProxyAgent } from 'undici'
+import { createTikHubPlatformAdapters } from './adapters/platform-adapter.registry'
+import {
+  ContentProvider,
+  ContentProviderSearchItem,
+} from './content-provider.interface'
+import {
+  SUPPORTED_TIKHUB_PLATFORMS,
+  TikHubPlatform,
+} from './tikhub.platforms'
 
-const SUPPORTED_TIKHUB_PLATFORMS = ['douyin', 'xhs', 'kuaishou', 'bilibili'] as const
-
-export type TikHubPlatform = typeof SUPPORTED_TIKHUB_PLATFORMS[number]
+export type { TikHubPlatform } from './tikhub.platforms'
 
 type RequestMethod = 'GET' | 'POST'
 
@@ -16,20 +28,12 @@ interface TikHubRequestContract {
   note: string
 }
 
-export interface SearchVideoSummary {
-  platform: string
-  videoId: string
-  title: string
-  author: string
-  contentUrl: string
-  thumbnailUrl: string
-  publishedAt: string
-  metrics: {
-    views: number
-    likes: number
-    comments: number
-    shares: number
-  }
+export interface SearchVideoSummary extends ContentProviderSearchItem {
+  insights?: PlatformDeepInsight | null
+  creatorProfile?: TikHubCreatorProfile | null
+  incrementalState?: PlatformIncrementalState | null
+  collectorHealth?: TikHubCollectorHealth | null
+  trackedAccount?: TikHubTrackedAccountSnapshot | null
 }
 
 interface TikHubVideoDetailData {
@@ -37,6 +41,8 @@ interface TikHubVideoDetailData {
   videoId: string
   title: string
   author: string
+  creatorId?: string
+  creatorProfileUrl?: string
   description: string
   durationSeconds: number
   contentUrl: string
@@ -94,6 +100,78 @@ interface PlatformContract {
   sourceByShareUrl: TikHubRequestContract
 }
 
+interface TikHubSearchOptions {
+  incrementalState?: PlatformIncrementalState
+  enrichDepth?: 'basic' | 'deep'
+}
+
+interface TikHubCreatorTrackOptions {
+  creatorId?: string
+  accountUrl?: string
+  limit?: number
+  incrementalState?: PlatformIncrementalState
+  trackedVideoIds?: string[]
+  previousMetrics?: Record<string, number> | null
+}
+
+interface TikHubRequestExecutionOptions {
+  platform: TikHubPlatform
+  operation: string
+}
+
+interface TikHubCollectorHealth {
+  platform: TikHubPlatform | 'all'
+  requestCount: number
+  successCount: number
+  failureCount: number
+  rateLimitedCount: number
+  proxyRotationCount: number
+  consecutiveFailures: number
+  averageLatencyMs: number
+  currentProxy: string | null
+  lastError: string
+  lastSuccessAt: string | null
+  lastRateLimitedAt: string | null
+}
+
+interface TikHubCollectorHealthState {
+  requestCount: number
+  successCount: number
+  failureCount: number
+  rateLimitedCount: number
+  proxyRotationCount: number
+  consecutiveFailures: number
+  totalLatencyMs: number
+  currentProxy: string | null
+  lastError: string
+  lastSuccessAt: string | null
+  lastRateLimitedAt: string | null
+}
+
+interface TikHubTrackedAccountSnapshot {
+  creatorId: string
+  accountUrl: string
+  isNewWork: boolean
+  metricDelta: {
+    views: number
+    likes: number
+    comments: number
+    shares: number
+  }
+  snapshotAt: string
+}
+
+class TikHubRequestError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode?: number,
+    readonly rateLimited = false,
+  ) {
+    super(message)
+    this.name = 'TikHubRequestError'
+  }
+}
+
 @Injectable()
 export class TikHubService implements ContentProvider {
   private readonly logger = new Logger(TikHubService.name)
@@ -101,7 +179,10 @@ export class TikHubService implements ContentProvider {
   private readonly requestTimeoutMs = 5000
   // Search endpoints are materially slower than detail/share-url endpoints in production.
   private readonly searchRequestTimeoutMs = 12000
-  private readonly maxAttempts = 2
+  private readonly maxAttempts = 3
+  private readonly platformAdapters = createTikHubPlatformAdapters()
+  private readonly collectorHealth = new Map<TikHubPlatform, TikHubCollectorHealthState>()
+  private proxyCursor = 0
   readonly providerName = 'tikhub'
   readonly priority = 10
 
@@ -114,6 +195,108 @@ export class TikHubService implements ContentProvider {
    * - Bilibili search/detail use the documented general-search and single-video endpoints.
    */
   async searchVideos(platform: string, keyword: string, limit = 10) {
+    return this.searchPlatformVideos(platform, keyword, limit)
+  }
+
+  async searchVideosIncremental(
+    platform: string,
+    keyword: string,
+    limit = 10,
+    options: TikHubSearchOptions = {},
+  ) {
+    return this.searchPlatformVideos(platform, keyword, limit, options)
+  }
+
+  async trackCreatorAccount(platform: string, input: TikHubCreatorTrackOptions) {
+    const normalizedPlatform = this.assertPlatform(platform)
+    const safeLimit = this.normalizeLimit(input.limit || 10)
+    const profileResponse = await this.getCreatorProfile(normalizedPlatform, {
+      creatorId: input.creatorId,
+      accountUrl: input.accountUrl,
+      limit: safeLimit,
+      state: input.incrementalState,
+    })
+    const trackingState = profileResponse.pagination || input.incrementalState || {}
+    const trackedVideoIds = new Set(
+      (input.trackedVideoIds || []).map(item => item.trim()).filter(Boolean),
+    )
+    const metricsBaseline = input.previousMetrics || null
+
+    const items = (profileResponse.data?.recentPosts || []).map((item) => {
+      const isNewWork = !trackedVideoIds.has(item.videoId)
+      const metricDelta = this.calculateMetricDelta(item.metrics, metricsBaseline)
+      return {
+        ...item,
+        creatorProfile: profileResponse.data?.profile || null,
+        incrementalState: trackingState,
+        collectorHealth: this.getAcquisitionHealth(normalizedPlatform),
+        trackedAccount: {
+          creatorId: profileResponse.data?.profile.creatorId || input.creatorId || '',
+          accountUrl: input.accountUrl || profileResponse.data?.profile.profileUrl || '',
+          isNewWork,
+          metricDelta,
+          snapshotAt: new Date().toISOString(),
+        },
+      }
+    })
+
+    return {
+      provider: this.providerName,
+      source: profileResponse.source,
+      platform: normalizedPlatform,
+      creatorId: profileResponse.creatorId,
+      accountUrl: input.accountUrl || '',
+      pagination: trackingState,
+      health: this.getAcquisitionHealth(normalizedPlatform),
+      profile: profileResponse.data?.profile || null,
+      items,
+    }
+  }
+
+  getAcquisitionHealth(platform?: TikHubPlatform): TikHubCollectorHealth {
+    if (platform) {
+      return this.serializeCollectorHealth(platform, this.ensureCollectorHealth(platform))
+    }
+
+    const states = Array.from(this.collectorHealth.entries())
+    const aggregate: TikHubCollectorHealthState = states.reduce<TikHubCollectorHealthState>(
+      (accumulator, [, state]) => ({
+        requestCount: accumulator.requestCount + state.requestCount,
+        successCount: accumulator.successCount + state.successCount,
+        failureCount: accumulator.failureCount + state.failureCount,
+        rateLimitedCount: accumulator.rateLimitedCount + state.rateLimitedCount,
+        proxyRotationCount: accumulator.proxyRotationCount + state.proxyRotationCount,
+        consecutiveFailures: Math.max(accumulator.consecutiveFailures, state.consecutiveFailures),
+        totalLatencyMs: accumulator.totalLatencyMs + state.totalLatencyMs,
+        currentProxy: state.currentProxy || accumulator.currentProxy,
+        lastError: state.lastError || accumulator.lastError,
+        lastSuccessAt: state.lastSuccessAt || accumulator.lastSuccessAt,
+        lastRateLimitedAt: state.lastRateLimitedAt || accumulator.lastRateLimitedAt,
+      }),
+      {
+        requestCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        rateLimitedCount: 0,
+        proxyRotationCount: 0,
+        consecutiveFailures: 0,
+        totalLatencyMs: 0,
+        currentProxy: null,
+        lastError: '',
+        lastSuccessAt: null,
+        lastRateLimitedAt: null,
+      },
+    )
+
+    return this.serializeCollectorHealth('all', aggregate)
+  }
+
+  private async searchPlatformVideos(
+    platform: string,
+    keyword: string,
+    limit = 10,
+    options: TikHubSearchOptions = {},
+  ) {
     const normalizedPlatform = this.assertPlatform(platform)
     const safeKeyword = keyword.trim()
     if (!safeKeyword) {
@@ -124,6 +307,7 @@ export class TikHubService implements ContentProvider {
     const contract = this.buildPlatformContract(normalizedPlatform, {
       keyword: safeKeyword,
       limit: safeLimit,
+      state: options.incrementalState,
     })
 
     if (!this.hasApiKey()) {
@@ -136,6 +320,8 @@ export class TikHubService implements ContentProvider {
         keyword: safeKeyword,
         limit: safeLimit,
         request: contract.search,
+        pagination: options.incrementalState || null,
+        health: this.getAcquisitionHealth(normalizedPlatform),
         items: [],
       }
     }
@@ -143,8 +329,20 @@ export class TikHubService implements ContentProvider {
     const response = await this.requestWithRetry<Record<string, unknown>>(
       contract.search,
       this.resolveSearchTimeoutMs(),
+      {
+        platform: normalizedPlatform,
+        operation: 'search',
+      },
     )
-    const items = this.parseSearchResponse(normalizedPlatform, response, safeLimit)
+    const pagination = this.getPlatformAdapter(normalizedPlatform).extractSearchState(response)
+    let items: SearchVideoSummary[] = this.parseSearchResponse(normalizedPlatform, response, safeLimit).map(item => ({
+      ...item,
+      incrementalState: pagination,
+      collectorHealth: this.getAcquisitionHealth(normalizedPlatform),
+    }))
+    if (options.enrichDepth === 'deep') {
+      items = await this.enrichSearchItems(normalizedPlatform, items)
+    }
 
     return {
       provider: this.providerName,
@@ -153,6 +351,8 @@ export class TikHubService implements ContentProvider {
       keyword: safeKeyword,
       limit: safeLimit,
       request: contract.search,
+      pagination,
+      health: this.getAcquisitionHealth(normalizedPlatform),
       items,
     }
   }
@@ -181,7 +381,10 @@ export class TikHubService implements ContentProvider {
       }
     }
 
-    const response = await this.requestWithRetry<Record<string, unknown>>(contract.detail)
+    const response = await this.requestWithRetry<Record<string, unknown>>(contract.detail, this.requestTimeoutMs, {
+      platform: normalizedPlatform,
+      operation: 'detail',
+    })
 
     return {
       provider: this.providerName,
@@ -215,7 +418,10 @@ export class TikHubService implements ContentProvider {
     for (const platform of platforms) {
       try {
         const contract = this.buildPlatformContract(platform, { videoId: safeVideoId })
-        const response = await this.requestWithRetry<Record<string, unknown>>(contract.detail)
+        const response = await this.requestWithRetry<Record<string, unknown>>(contract.detail, this.requestTimeoutMs, {
+          platform,
+          operation: 'detail',
+        })
         const data = this.parseDetailResponse(platform, response, safeVideoId)
         if (data) {
           return {
@@ -268,7 +474,10 @@ export class TikHubService implements ContentProvider {
       }
     }
 
-    const response = await this.requestWithRetry<Record<string, unknown>>(contract.sourceByShareUrl)
+    const response = await this.requestWithRetry<Record<string, unknown>>(contract.sourceByShareUrl, this.requestTimeoutMs, {
+      platform,
+      operation: 'source',
+    })
     const data = platform === 'bilibili'
       ? await this.resolveBilibiliSourceVideo(normalizedShareUrl, response)
       : this.parseSourceResponse(platform, response, normalizedShareUrl)
@@ -322,7 +531,10 @@ export class TikHubService implements ContentProvider {
       }
     }
 
-    const response = await this.requestWithRetry<Record<string, unknown>>(request)
+    const response = await this.requestWithRetry<Record<string, unknown>>(request, this.requestTimeoutMs, {
+      platform: normalizedPlatform,
+      operation: 'comments',
+    })
 
     return {
       provider: this.providerName,
@@ -342,6 +554,7 @@ export class TikHubService implements ContentProvider {
       creatorId?: string
       accountUrl?: string
       limit?: number
+      state?: PlatformIncrementalState
     },
   ) {
     const normalizedPlatform = this.assertPlatform(platform)
@@ -376,6 +589,7 @@ export class TikHubService implements ContentProvider {
       resolved.creatorId,
       safeLimit,
       safeAccountUrl,
+      input.state,
     )
 
     if (!this.hasApiKey()) {
@@ -394,9 +608,16 @@ export class TikHubService implements ContentProvider {
     }
 
     const [profilePayload, postsPayload] = await Promise.all([
-      this.requestWithRetry<Record<string, unknown>>(contracts.profile),
-      this.requestWithRetry<Record<string, unknown>>(contracts.posts),
+      this.requestWithRetry<Record<string, unknown>>(contracts.profile, this.requestTimeoutMs, {
+        platform: normalizedPlatform,
+        operation: 'creator-profile',
+      }),
+      this.requestWithRetry<Record<string, unknown>>(contracts.posts, this.resolveSearchTimeoutMs(), {
+        platform: normalizedPlatform,
+        operation: 'creator-posts',
+      }),
     ])
+    const pagination = this.getPlatformAdapter(normalizedPlatform).extractCreatorPostState(postsPayload)
 
     return {
       provider: this.providerName,
@@ -406,6 +627,8 @@ export class TikHubService implements ContentProvider {
       accountUrl: safeAccountUrl,
       limit: safeLimit,
       requests: contracts,
+      pagination,
+      health: this.getAcquisitionHealth(normalizedPlatform),
       data: this.parseCreatorProfileResponse(
         normalizedPlatform,
         profilePayload,
@@ -434,11 +657,14 @@ export class TikHubService implements ContentProvider {
       limit?: number
       videoId?: string
       shareUrl?: string
+      state?: PlatformIncrementalState
     },
   ): PlatformContract {
     const headers = this.getHeaders()
     const baseUrl = this.getBaseUrl()
     const bilibiliVideoId = this.extractBilibiliVideoId(params.shareUrl || '') || params.videoId || ''
+    const adapter = this.getPlatformAdapter(platform)
+    const searchPagination = adapter.applySearchPagination(params.limit || 10, params.state)
 
     const contractMap: Record<TikHubPlatform, PlatformContract> = {
       douyin: {
@@ -455,7 +681,9 @@ export class TikHubService implements ContentProvider {
             content_type: '0',
             backtrace: '',
             search_id: '',
+            ...searchPagination.body,
           },
+          query: searchPagination.query,
           note: 'Douyin video search V2 uses POST body with keyword, cursor, and search filters.',
         },
         detail: {
@@ -489,7 +717,9 @@ export class TikHubService implements ContentProvider {
             sort: 'general',
             noteType: '_1',
             noteTime: '',
+            ...searchPagination.query,
           },
+          body: searchPagination.body,
           note: 'Xiaohongshu web search is page-based and supports sort, noteType, and noteTime filters.',
         },
         detail: {
@@ -519,7 +749,9 @@ export class TikHubService implements ContentProvider {
           query: {
             keyword: params.keyword || '',
             page: 1,
+            ...searchPagination.query,
           },
+          body: searchPagination.body,
           note: 'Kuaishou search V2 uses keyword plus page-based pagination.',
         },
         detail: {
@@ -552,7 +784,9 @@ export class TikHubService implements ContentProvider {
             page: 1,
             page_size: params.limit || 10,
             duration: 0,
+            ...searchPagination.query,
           },
+          body: searchPagination.body,
           note: 'Bilibili general search covers video ranking and supports page_size directly.',
         },
         detail: {
@@ -642,9 +876,12 @@ export class TikHubService implements ContentProvider {
     creatorId: string,
     limit: number,
     accountUrl: string,
+    state?: PlatformIncrementalState,
   ): TikHubCreatorContracts {
     const baseUrl = this.getBaseUrl()
     const headers = this.getHeaders()
+    const adapter = this.getPlatformAdapter(platform)
+    const pagination = adapter.applyCreatorPostPagination(limit, state)
 
     const contractMap: Record<TikHubPlatform, TikHubCreatorContracts> = {
       douyin: {
@@ -665,7 +902,9 @@ export class TikHubService implements ContentProvider {
             sec_user_id: creatorId,
             max_cursor: 0,
             count: limit,
+            ...pagination.body,
           },
+          query: pagination.query,
           note: 'Douyin user posts endpoint returns latest aweme items.',
         },
       },
@@ -687,7 +926,9 @@ export class TikHubService implements ContentProvider {
             user_id: creatorId,
             cursor: '',
             num: limit,
+            ...pagination.query,
           },
+          body: pagination.body,
           note: 'Xiaohongshu user notes endpoint returns latest notes for the creator.',
         },
       },
@@ -709,7 +950,9 @@ export class TikHubService implements ContentProvider {
             user_id: creatorId,
             pcursor: '',
             count: limit,
+            ...pagination.query,
           },
+          body: pagination.body,
           note: 'Kuaishou user post endpoint returns the latest photos/videos.',
         },
       },
@@ -742,7 +985,9 @@ export class TikHubService implements ContentProvider {
             mid: creatorId,
             pn: 1,
             ps: limit,
+            ...pagination.query,
           },
+          body: pagination.body,
           note: 'Bilibili user videos endpoint returns creator archive list by mid.',
         },
       },
@@ -754,19 +999,38 @@ export class TikHubService implements ContentProvider {
   private async requestWithRetry<T>(
     request: TikHubRequestContract,
     timeoutMs = this.requestTimeoutMs,
+    options?: TikHubRequestExecutionOptions,
   ): Promise<T> {
     let lastError: Error | null = null
 
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      const startedAt = Date.now()
       try {
-        return await this.executeRequest<T>(request, timeoutMs)
+        const proxyAssignment = options?.platform
+          ? this.rotateProxy(options.platform, attempt)
+          : null
+        const result = await this.executeRequest<T>(request, timeoutMs, proxyAssignment?.agent)
+        if (options?.platform) {
+          this.markCollectorSuccess(options.platform, Date.now() - startedAt, proxyAssignment?.label || null)
+        }
+        return result
       }
       catch (error) {
         lastError = error instanceof Error ? error : new Error('Unknown TikHub request error')
+        if (options?.platform) {
+          this.markCollectorFailure(
+            options.platform,
+            Date.now() - startedAt,
+            lastError,
+            error instanceof TikHubRequestError ? error.rateLimited : false,
+            attempt > 1,
+          )
+        }
         if (attempt < this.maxAttempts) {
           this.logger.warn(
             `Request retry ${attempt}/${this.maxAttempts - 1} failed: ${lastError.message}`,
           )
+          await this.sleep(this.resolveRetryDelayMs(attempt, error))
         }
       }
     }
@@ -777,6 +1041,7 @@ export class TikHubService implements ContentProvider {
   private async executeRequest<T>(
     request: TikHubRequestContract,
     timeoutMs = this.requestTimeoutMs,
+    proxyAgent?: ProxyAgent,
   ): Promise<T> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -790,11 +1055,16 @@ export class TikHubService implements ContentProvider {
           ? JSON.stringify(request.body)
           : undefined,
         signal: controller.signal,
-      })
+        dispatcher: proxyAgent,
+      } as RequestInit & { dispatcher?: ProxyAgent })
       const rawText = await response.text()
 
       if (!response.ok) {
-        throw new Error(`TikHub request failed with ${response.status}: ${rawText || url}`)
+        throw new TikHubRequestError(
+          `TikHub request failed with ${response.status}: ${rawText || url}`,
+          response.status,
+          this.isRateLimitedResponse(response.status, rawText),
+        )
       }
 
       if (!rawText.trim()) {
@@ -1007,6 +1277,18 @@ export class TikHubService implements ContentProvider {
       ) || fallbackVideoId,
       title: this.stripMarkup(this.readString(detail['title'], detail['desc'], detail['display_title'])),
       author: this.readString(author?.['nickname'], author?.['name'], author?.['uname']),
+      creatorId: this.readString(
+        author?.['sec_user_id'],
+        author?.['user_id'],
+        author?.['uid'],
+        author?.['mid'],
+        author?.['id'],
+      ) || undefined,
+      creatorProfileUrl: this.readString(
+        author?.['profile_url'],
+        author?.['homepage'],
+        author?.['space_url'],
+      ) || undefined,
       description: this.stripMarkup(this.readString(detail['desc'], detail['title'], detail['summary'])),
       durationSeconds: this.normalizeDurationSeconds(
         detail['duration'],
@@ -1165,6 +1447,228 @@ export class TikHubService implements ContentProvider {
     return {
       profile,
       recentPosts,
+    }
+  }
+
+  private async enrichSearchItems(
+    platform: TikHubPlatform,
+    items: SearchVideoSummary[],
+  ) {
+    const enrichedItems: SearchVideoSummary[] = []
+
+    for (const item of items) {
+      enrichedItems.push(await this.enrichSingleItem(platform, item))
+    }
+
+    return enrichedItems
+  }
+
+  private async enrichSingleItem(
+    platform: TikHubPlatform,
+    item: SearchVideoSummary,
+  ) {
+    let detail: TikHubVideoDetailData | null = null
+    let comments: TikHubVideoComment[] = []
+    let creatorProfile: TikHubCreatorProfile | null = null
+
+    try {
+      detail = (await this.getVideoDetail(platform, item.videoId)).data
+    }
+    catch (error) {
+      this.logger.warn(`Deep detail enrichment skipped for ${platform}:${item.videoId}: ${this.stringifyError(error)}`)
+    }
+
+    try {
+      comments = (await this.getVideoComments(platform, {
+        videoId: item.videoId,
+        limit: 20,
+      })).comments
+    }
+    catch (error) {
+      this.logger.warn(`Comment enrichment skipped for ${platform}:${item.videoId}: ${this.stringifyError(error)}`)
+    }
+
+    const creatorId = detail?.creatorId || ''
+    if (creatorId) {
+      try {
+        creatorProfile = (await this.getCreatorProfile(platform, {
+          creatorId,
+          accountUrl: detail?.creatorProfileUrl,
+          limit: 10,
+        })).data?.profile || null
+      }
+      catch (error) {
+        this.logger.warn(`Creator enrichment skipped for ${platform}:${item.videoId}: ${this.stringifyError(error)}`)
+      }
+    }
+
+    const adapter = this.getPlatformAdapter(platform)
+    const insight = adapter.buildDeepInsight({
+      title: item.title,
+      description: detail?.description || item.title,
+      author: item.author,
+      durationSeconds: detail?.durationSeconds || 0,
+      publishedAt: item.publishedAt,
+      metrics: item.metrics,
+      comments: comments.map(comment => ({
+        content: comment.content,
+        likeCount: comment.likeCount,
+      })),
+      creatorStats: creatorProfile
+        ? {
+            followerCount: creatorProfile.followerCount,
+            followingCount: creatorProfile.followingCount,
+            likeCount: creatorProfile.likeCount,
+            bio: creatorProfile.bio,
+            recentPostHours: [],
+          }
+        : null,
+    })
+
+    return {
+      ...item,
+      insights: insight,
+      creatorProfile,
+      collectorHealth: this.getAcquisitionHealth(platform),
+    }
+  }
+
+  private calculateMetricDelta(
+    metrics: SearchVideoSummary['metrics'],
+    previousMetrics?: Record<string, number> | null,
+  ) {
+    const base = previousMetrics || {}
+    return {
+      views: Math.max(0, this.readNumber(metrics.views) - this.readNumber(base['views'])),
+      likes: Math.max(0, this.readNumber(metrics.likes) - this.readNumber(base['likes'])),
+      comments: Math.max(0, this.readNumber(metrics.comments) - this.readNumber(base['comments'])),
+      shares: Math.max(0, this.readNumber(metrics.shares) - this.readNumber(base['shares'])),
+    }
+  }
+
+  private getPlatformAdapter(platform: TikHubPlatform): TikHubPlatformAdapter {
+    return this.platformAdapters[platform]
+  }
+
+  private getProxyPool() {
+    return (process.env['TIKHUB_PROXY_POOL'] || '')
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+  }
+
+  private rotateProxy(platform: TikHubPlatform, attempt: number) {
+    const proxies = this.getProxyPool()
+    if (proxies.length === 0) {
+      return null
+    }
+
+    const index = (this.proxyCursor + Math.max(0, attempt - 1)) % proxies.length
+    this.proxyCursor = (index + 1) % proxies.length
+    const label = proxies[index] || ''
+
+    return {
+      label,
+      agent: new ProxyAgent(label),
+    }
+  }
+
+  private resolveRetryDelayMs(attempt: number, error: unknown) {
+    const baseDelayMs = error instanceof TikHubRequestError && error.rateLimited
+      ? 2500
+      : 600
+    return baseDelayMs * attempt
+  }
+
+  private isRateLimitedResponse(statusCode: number, payload: string) {
+    if ([402, 403, 429].includes(statusCode)) {
+      return true
+    }
+
+    const normalizedPayload = payload.toLowerCase()
+    return normalizedPayload.includes('rate limit')
+      || normalizedPayload.includes('too many requests')
+      || normalizedPayload.includes('quota')
+  }
+
+  private ensureCollectorHealth(platform: TikHubPlatform) {
+    const existing = this.collectorHealth.get(platform)
+    if (existing) {
+      return existing
+    }
+
+    const initialState: TikHubCollectorHealthState = {
+      requestCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      rateLimitedCount: 0,
+      proxyRotationCount: 0,
+      consecutiveFailures: 0,
+      totalLatencyMs: 0,
+      currentProxy: null,
+      lastError: '',
+      lastSuccessAt: null,
+      lastRateLimitedAt: null,
+    }
+    this.collectorHealth.set(platform, initialState)
+    return initialState
+  }
+
+  private markCollectorSuccess(
+    platform: TikHubPlatform,
+    latencyMs: number,
+    proxyLabel: string | null,
+  ) {
+    const state = this.ensureCollectorHealth(platform)
+    state.requestCount += 1
+    state.successCount += 1
+    state.totalLatencyMs += Math.max(0, latencyMs)
+    state.consecutiveFailures = 0
+    state.currentProxy = proxyLabel
+    state.lastSuccessAt = new Date().toISOString()
+  }
+
+  private markCollectorFailure(
+    platform: TikHubPlatform,
+    latencyMs: number,
+    error: Error,
+    rateLimited: boolean,
+    rotatedProxy: boolean,
+  ) {
+    const state = this.ensureCollectorHealth(platform)
+    state.requestCount += 1
+    state.failureCount += 1
+    state.totalLatencyMs += Math.max(0, latencyMs)
+    state.consecutiveFailures += 1
+    state.lastError = error.message
+    if (rateLimited) {
+      state.rateLimitedCount += 1
+      state.lastRateLimitedAt = new Date().toISOString()
+    }
+    if (rotatedProxy) {
+      state.proxyRotationCount += 1
+    }
+  }
+
+  private serializeCollectorHealth(
+    platform: TikHubPlatform | 'all',
+    state: TikHubCollectorHealthState,
+  ): TikHubCollectorHealth {
+    return {
+      platform,
+      requestCount: state.requestCount,
+      successCount: state.successCount,
+      failureCount: state.failureCount,
+      rateLimitedCount: state.rateLimitedCount,
+      proxyRotationCount: state.proxyRotationCount,
+      consecutiveFailures: state.consecutiveFailures,
+      averageLatencyMs: state.requestCount > 0
+        ? Number((state.totalLatencyMs / state.requestCount).toFixed(2))
+        : 0,
+      currentProxy: state.currentProxy,
+      lastError: state.lastError,
+      lastSuccessAt: state.lastSuccessAt,
+      lastRateLimitedAt: state.lastRateLimitedAt,
     }
   }
 
@@ -1873,6 +2377,14 @@ export class TikHubService implements ContentProvider {
 
   private warnUnavailable(method: string) {
     this.logger.warn(`${method} unavailable because TIKHUB_API_KEY is not configured.`)
+  }
+
+  private stringifyError(error: unknown) {
+    return error instanceof Error ? error.message : String(error)
+  }
+
+  private async sleep(ms: number) {
+    await new Promise(resolve => setTimeout(resolve, ms))
   }
 
   private addDays(days: number): string {
