@@ -114,89 +114,85 @@ class ViralContentRemixHistory {
   remixedAt: Date
 }
 
-<<<<<<< Updated upstream
 @Schema({ _id: false })
 class ViralContentCommentSentiment {
   @Prop({ type: Number, default: 0 })
-  positive: number;
+  positive: number
 
   @Prop({ type: Number, default: 0 })
-  neutral: number;
+  neutral: number
 
   @Prop({ type: Number, default: 0 })
-  negative: number;
+  negative: number
 
   @Prop({ type: Number, default: 0 })
-  score: number;
+  score: number
 }
 
 @Schema({ _id: false })
 class ViralContentCreatorPersona {
-  @Prop({ type: String, default: "" })
-  segment: string;
+  @Prop({ type: String, default: '' })
+  segment: string
 
-  @Prop({ type: String, default: "" })
-  creatorArchetype: string;
+  @Prop({ type: String, default: '' })
+  creatorArchetype: string
 
-  @Prop({ type: String, default: "" })
-  engagementStyle: string;
+  @Prop({ type: String, default: '' })
+  engagementStyle: string
 
-  @Prop({ type: String, default: "" })
-  postingCadence: string;
+  @Prop({ type: String, default: '' })
+  postingCadence: string
 
   @Prop({ type: [String], default: [] })
-  audienceTags: string[];
+  audienceTags: string[]
 }
 
 @Schema({ _id: false })
 class ViralContentPublishDistribution {
-  @Prop({ type: String, default: "" })
-  bucket: string;
+  @Prop({ type: String, default: '' })
+  bucket: string
 
   @Prop({ type: Number, default: 0 })
-  peakHour: number;
+  peakHour: number
 
   @Prop({ type: [Number], default: [] })
-  hourlyDistribution: number[];
+  hourlyDistribution: number[]
 
   @Prop({ type: Object, default: {} })
-  weekdayDistribution: Record<string, number>;
+  weekdayDistribution: Record<string, number>
 }
 
 @Schema({ _id: false })
 class ViralContentAcquisitionInsight {
   @Prop({ type: Number, default: 0 })
-  completionRate: number;
+  completionRate: number
 
   @Prop({ type: ViralContentCommentSentiment, default: () => ({}) })
-  commentSentiment: ViralContentCommentSentiment;
+  commentSentiment: ViralContentCommentSentiment
 
   @Prop({ type: ViralContentCreatorPersona, default: () => ({}) })
-  creatorPersona: ViralContentCreatorPersona;
+  creatorPersona: ViralContentCreatorPersona
 
   @Prop({ type: ViralContentPublishDistribution, default: () => ({}) })
-  publishDistribution: ViralContentPublishDistribution;
+  publishDistribution: ViralContentPublishDistribution
 
   @Prop({ type: Object, default: null })
-  creatorProfile?: Record<string, unknown> | null;
+  creatorProfile?: Record<string, unknown> | null
 
   @Prop({ type: Object, default: null })
-  incrementalState?: Record<string, unknown> | null;
+  incrementalState?: Record<string, unknown> | null
 
   @Prop({ type: Object, default: null })
-  collectorHealth?: Record<string, unknown> | null;
+  collectorHealth?: Record<string, unknown> | null
 
   @Prop({ type: Object, default: null })
-  trackedAccount?: Record<string, unknown> | null;
+  trackedAccount?: Record<string, unknown> | null
 
   @Prop({ type: Date, default: null })
-  syncedAt?: Date | null;
+  syncedAt?: Date | null
 }
 
-@Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: "viral_contents" })
-=======
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'viral_contents' })
->>>>>>> Stashed changes
 export class ViralContent extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
   _id: MongooseSchema.Types.ObjectId
@@ -247,7 +243,7 @@ export class ViralContent extends WithTimestampSchema {
   thumbnailUrl: string
 
   @Prop({ type: ViralContentAcquisitionInsight, default: null })
-  acquisitionInsight?: ViralContentAcquisitionInsight | null;
+  acquisitionInsight?: ViralContentAcquisitionInsight | null
 
   @Prop({
     type: String,
