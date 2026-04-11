@@ -7,7 +7,7 @@ import {
   IsString,
 } from 'class-validator'
 import { MediaClawApiKeyGuard } from '../apikey/apikey.guard'
-import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawApiController, MediaClawDeprecatedAlias } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import { ConversationUsageService } from './conversation-usage.service'
 import { UsageService } from './usage.service'
@@ -57,6 +57,9 @@ export class UsageApiController {
     private readonly conversationUsageService: ConversationUsageService,
   ) {}
 
+  @MediaClawDeprecatedAlias('/api/v1/usage/summary', {
+    reason: '保留给历史 SDK，新的稳定接口统一使用 /summary。',
+  })
   @Get()
   async summary(
     @GetToken() user: MediaClawAuthUser,

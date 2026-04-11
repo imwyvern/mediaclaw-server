@@ -13,6 +13,11 @@ import {
 } from '@nestjs/common'
 import { of } from 'rxjs'
 import { AppException } from '../exceptions'
+import {
+  API_CONTRACT_METADATA_KEY,
+  API_CONTRACT_TYPES,
+  buildMediaClawErrorResponse,
+} from '../index'
 import { getExceptionPayload } from '../utils'
 
 export interface GlobalExceptionFilterOptions {
@@ -70,7 +75,25 @@ export class GlobalExceptionFilter<T> implements ExceptionFilter<T> {
   ) {
     const ctx = host.switchToHttp()
     const response = ctx.getResponse<Response>()
+    const executionHost = host as ArgumentsHost & {
+      getHandler?: () => unknown
+      getClass?: () => unknown
+    }
+    const handler = executionHost.getHandler?.()
+    const targetClass = executionHost.getClass?.()
+    const contract = handler && (typeof handler === 'object' || typeof handler === 'function')
+      ? Reflect.getMetadata(API_CONTRACT_METADATA_KEY, handler)
+      || (targetClass && typeof targetClass === 'function'
+        ? Reflect.getMetadata(API_CONTRACT_METADATA_KEY, targetClass)
+        : undefined)
+      : (targetClass && typeof targetClass === 'function'
+          ? Reflect.getMetadata(API_CONTRACT_METADATA_KEY, targetClass)
+          : undefined)
 
-    response.status(200).json(payload)
+    response.status(200).json(
+      contract === API_CONTRACT_TYPES.MEDIACLAW_V1
+        ? buildMediaClawErrorResponse(payload)
+        : payload,
+    )
   }
 }

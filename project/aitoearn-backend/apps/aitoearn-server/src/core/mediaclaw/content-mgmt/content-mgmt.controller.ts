@@ -11,7 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator'
 import { Response } from 'express'
-import { MediaClawApiController } from '../mediaclaw-api.decorator'
+import { MediaClawApiController, MediaClawDeprecatedAlias } from '../mediaclaw-api.decorator'
 import { ContentMgmtService } from './content-mgmt.service'
 
 class SetStylePreferencesDto {
@@ -244,6 +244,9 @@ export class ContentMgmtController {
     return this.contentMgmtService.getContent(user.orgId || user.id || '', id)
   }
 
+  @MediaClawDeprecatedAlias('/api/v1/content/:id/copy', {
+    reason: '旧版 PATCH /:id 仅支持 caption 更新，新的稳定接口改为显式 copy 子资源。',
+  })
   @Patch(':id')
   async legacyEditContent(
     @GetToken() user: { orgId?: string, id?: string },

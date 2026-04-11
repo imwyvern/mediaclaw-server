@@ -11,6 +11,11 @@ import {
 import { RENDER_METADATA, SSE_METADATA } from '@nestjs/common/constants'
 import { map } from 'rxjs'
 import { ResponseCode } from '../enums'
+import {
+  API_CONTRACT_METADATA_KEY,
+  API_CONTRACT_TYPES,
+  buildMediaClawSuccessResponse,
+} from '../index'
 
 const SKIP_RESPONSE_INTERCEPTOR_KEY = Symbol('SkipResponseInterceptor')
 
@@ -26,6 +31,8 @@ export class ResponseInterceptor implements NestInterceptor {
     const isRender = Reflect.hasMetadata(RENDER_METADATA, context.getHandler())
     const isSSE = Reflect.getMetadata(SSE_METADATA, context.getHandler())
     const skipInterceptor = Reflect.getMetadata(SKIP_RESPONSE_INTERCEPTOR_KEY, context.getHandler())
+    const contract = Reflect.getMetadata(API_CONTRACT_METADATA_KEY, context.getHandler())
+      || Reflect.getMetadata(API_CONTRACT_METADATA_KEY, context.getClass())
 
     if (type === 'http') {
       const req = context.switchToHttp().getRequest<Request>()
@@ -41,6 +48,10 @@ export class ResponseInterceptor implements NestInterceptor {
         map((data) => {
           if (data instanceof StreamableFile || isRender || skipInterceptor) {
             return data
+          }
+
+          if (contract === API_CONTRACT_TYPES.MEDIACLAW_V1) {
+            return buildMediaClawSuccessResponse(data)
           }
 
           return {

@@ -5,6 +5,9 @@ import { AppModule } from './app.module'
 import { config } from './config'
 
 startApplication(AppModule, config, {
+  setupOpenapi: builder => builder
+    .setVersion('v1')
+    .addServer('/api/v1', 'MediaClaw stable v1'),
   setupApp: (app) => {
     app.enableCors()
     app.use(helmet())
