@@ -6,11 +6,25 @@ import { ClientMgmtService } from './client-mgmt.service'
 
 vi.mock('@yikart/mongodb', () => {
   class Brand {}
+  class ClawHostInstance {}
   class Invoice {}
   class MediaClawUser {}
   class Organization {}
+  class SkillMarketplaceEntry {}
   class Subscription {}
   class VideoTask {}
+  const ClawHostDeploymentMode = {
+    MANAGED: 'managed',
+    BYOC: 'byoc',
+  }
+  const ClawHostInstanceStatus = {
+    CREATING: 'creating',
+    PENDING_MANUAL_SETUP: 'pending_manual_setup',
+    RUNNING: 'running',
+    STOPPED: 'stopped',
+    UPGRADING: 'upgrading',
+    ERROR: 'error',
+  }
   const UserRole = {
     SUPER_ADMIN: 'super_admin',
     ENTERPRISE_ADMIN: 'admin',
@@ -34,6 +48,11 @@ vi.mock('@yikart/mongodb', () => {
   const SubscriptionStatus = {
     ACTIVE: 'active',
     PAST_DUE: 'past_due',
+  }
+  const SkillMarketplaceEntryStatus = {
+    DRAFT: 'draft',
+    PUBLISHED: 'published',
+    ARCHIVED: 'archived',
   }
   const VideoTaskStatus = {
     DRAFT: 'draft',
@@ -74,9 +93,14 @@ vi.mock('@yikart/mongodb', () => {
 
   return {
     Brand,
+    ClawHostDeploymentMode,
+    ClawHostInstance,
+    ClawHostInstanceStatus,
     Invoice,
     MediaClawUser,
     Organization,
+    SkillMarketplaceEntry,
+    SkillMarketplaceEntryStatus,
     Subscription,
     VideoTask,
     OrgStatus,
@@ -114,6 +138,8 @@ describe('clientMgmtService behavior', () => {
     }
     const service = new ClientMgmtService(
       organizationModel as any,
+      {} as any,
+      {} as any,
       {} as any,
       {} as any,
       {} as any,

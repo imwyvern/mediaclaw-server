@@ -484,3 +484,20 @@
     - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过。
   - 功能自测结论：Batch 1 相关后端 `🔶` 项在当前已提交代码上持续闭环，本次 retry/retry/retry/retry/retry/retry/retry/retry 未发现新的 backend 功能缺口或新增 test failure。
 - 下一步计划：Batch 1 retry/retry/retry/retry/retry/retry/retry/retry 已满足停止条件；如需继续，应先明确当前工作树中与 Batch 1 无关的 `org/*`、`shared/*`、`schema/*` 脏改动归属，再进入下一批 gap，避免无关未提交代码污染验证结果。
+
+## 2026-04-10 20:56:57 PDT
+- 当前改动：执行 Batch 2 retry/retry/retry/retry/retry/retry/retry/retry 收口验证。针对当前工作树里真实阻塞停止条件的全量测试红点，补齐 mediaclaw 测试基建对 `LayerBillingModel`、`SkillMarketplaceEntry*`、`ClawHostInstance*`、`Organization` 等 `@yikart/mongodb` 新导出的 mock，并把 `client-mgmt`、`clawhost` 两个 behavior/spec 文件的构造参数与现有 service 依赖重新对齐。
+- 验证结果：
+  - 代码修复结论：
+    - `module-spec.factory.ts` 已补全 Batch 2 相关全局 mock：`LayerBillingModel`、`SkillMarketplaceEntryStatus`、`SkillMarketplaceVisibility`、`SkillMarketplaceEntry`、`SkillMarketplaceEntrySchema`
+    - `client-mgmt.service.behavior.spec.ts` 已补全局部 mock 并修正 `ClientMgmtService` 构造参数位次，恢复邀请/撤销行为测试
+    - `client-mgmt.service.spec.ts` 已补 `ClawHostInstanceModel`、`SkillMarketplaceEntryModel` provider，恢复模块注入测试
+    - `clawhost.service.behavior.spec.ts` 已补全 `Organization`、layer policy/clawhost config 相关导出，并修正 `ClawHostService` 构造参数位次，恢复健康检查、gateway 配置与 PG 同步行为测试
+  - 定向验证：
+    - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/org/org.service.spec.ts src/core/mediaclaw/client-mgmt/client-mgmt.service.spec.ts src/core/mediaclaw/client-mgmt/client-mgmt.service.behavior.spec.ts src/core/mediaclaw/clawhost/clawhost.service.behavior.spec.ts test/e2e/mediaclaw/control-plane.e2e-spec.ts` 通过，`5` 个测试文件、`22` 个测试全部通过
+  - 全量验证：
+    - `pnpm nx build aitoearn-server` 通过
+    - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+    - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
+  - 功能自测结论：Batch 2 原审计中的 `公开数据删除 / 合规下线通道`、`趋势预测引擎`、`企业 SSO`、`ClawHost PostgreSQL 模型` 在当前代码已持续闭环；本次第八次 retry 没有发现新的 backend 功能缺口或新增 failure，停止条件满足
+- 下一步计划：提交本次测试基线修复；如继续后续 gap 批次，应先处理当前工作树中仍未归属的 schema/controller 脏改动，避免再次污染全量验证。

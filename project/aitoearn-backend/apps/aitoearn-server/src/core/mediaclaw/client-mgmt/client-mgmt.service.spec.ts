@@ -3,9 +3,11 @@ import { getModelToken } from '@nestjs/mongoose'
 import { Test } from '@nestjs/testing'
 import {
   Brand,
+  ClawHostInstance,
   Invoice,
   MediaClawUser,
   Organization,
+  SkillMarketplaceEntry,
   Subscription,
   UserRole,
   VideoTask,
@@ -76,6 +78,8 @@ describe('clientMgmtService', () => {
   const mediaClawUserModel = createModelMock(MediaClawUser.name)
   const brandModel = createModelMock(Brand.name)
   const videoTaskModel = createModelMock(VideoTask.name)
+  const clawHostInstanceModel = createModelMock(ClawHostInstance.name)
+  const skillMarketplaceEntryModel = createModelMock(SkillMarketplaceEntry.name)
   const subscriptionModel = createModelMock(Subscription.name)
   const invoiceModel = createModelMock(Invoice.name)
   const enterpriseAuthService = {
@@ -98,6 +102,8 @@ describe('clientMgmtService', () => {
         { provide: getModelToken(MediaClawUser.name), useValue: mediaClawUserModel },
         { provide: getModelToken(Brand.name), useValue: brandModel },
         { provide: getModelToken(VideoTask.name), useValue: videoTaskModel },
+        { provide: getModelToken(ClawHostInstance.name), useValue: clawHostInstanceModel },
+        { provide: getModelToken(SkillMarketplaceEntry.name), useValue: skillMarketplaceEntryModel },
         { provide: getModelToken(Subscription.name), useValue: subscriptionModel },
         { provide: getModelToken(Invoice.name), useValue: invoiceModel },
         { provide: EnterpriseAuthService, useValue: enterpriseAuthService },

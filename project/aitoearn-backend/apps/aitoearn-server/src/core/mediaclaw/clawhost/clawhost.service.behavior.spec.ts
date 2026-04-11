@@ -4,14 +4,34 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ClawHostService } from './clawhost.service'
 
 vi.mock('@yikart/mongodb', () => {
+  class ClawHostConfigInheritance {}
+  class ClawHostInstalledSkill {}
   class ClawHostInstance {}
+  class ClawHostInstanceConfig {}
+  class ClawHostInstanceLayer {}
+  class ClawHostInstanceResourceIsolation {}
+  class ClawHostSkillComposition {}
+  class LayerBillingPolicy {}
+  class LayerPermissionPolicy {}
+  class LayerQuotaPolicy {}
+  class Organization {}
 
   return {
+    ClawHostConfigInheritance,
     ClawHostInstance,
+    ClawHostInstalledSkill,
     ClawHostDeploymentMode: {
       MANAGED: 'managed',
       BYOC: 'byoc',
     },
+    ClawHostHealthStatus: {
+      HEALTHY: 'healthy',
+      DEGRADED: 'degraded',
+      OFFLINE: 'offline',
+    },
+    ClawHostInstanceConfig,
+    ClawHostInstanceLayer,
+    ClawHostInstanceResourceIsolation,
     ClawHostInstanceStatus: {
       CREATING: 'creating',
       PENDING_MANUAL_SETUP: 'pending_manual_setup',
@@ -24,6 +44,18 @@ vi.mock('@yikart/mongodb', () => {
       DOCKER: 'docker',
       K8S: 'k8s',
     },
+    ClawHostSkillComposition,
+    LayerBillingModel: {
+      FREE: 'free',
+      QUOTA: 'quota',
+      SUBSCRIPTION: 'subscription',
+      USAGE: 'usage',
+      POSTPAID: 'postpaid',
+    },
+    LayerBillingPolicy,
+    LayerPermissionPolicy,
+    LayerQuotaPolicy,
+    Organization,
     UserRole: {
       OPERATOR: 'editor',
     },
@@ -125,6 +157,7 @@ function createManagedInstance(overrides: Record<string, unknown> = {}) {
 describe('clawHostService behavior', () => {
   let service: ClawHostService
   let clawHostInstanceModel: Record<string, any>
+  let organizationModel: Record<string, any>
   let redisService: Record<string, any>
   let apiKeyService: Record<string, any>
   let clawHostRuntimeService: Record<string, any>
@@ -139,6 +172,12 @@ describe('clawHostService behavior', () => {
       findOne: vi.fn(),
       findByIdAndUpdate: vi.fn(),
       updateOne: vi.fn(),
+    }
+    organizationModel = {
+      findById: vi.fn().mockReturnValue(createExecQuery({
+        _id: new Types.ObjectId(),
+        name: '示例企业',
+      })),
     }
     redisService = {
       get: vi.fn().mockResolvedValue(null),
@@ -174,6 +213,7 @@ describe('clawHostService behavior', () => {
 
     service = new ClawHostService(
       clawHostInstanceModel as any,
+      organizationModel as any,
       redisService as any,
       apiKeyService as any,
       clawHostRuntimeService as any,
