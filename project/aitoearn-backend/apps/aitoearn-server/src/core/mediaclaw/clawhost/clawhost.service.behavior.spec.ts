@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { BadRequestException } from '@nestjs/common'
 import { Types } from 'mongoose'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -188,6 +189,7 @@ describe('clawHostService behavior', () => {
       del: vi.fn().mockResolvedValue(1),
       setJson: vi.fn(),
       getJson: vi.fn(),
+      consumeJson: vi.fn(),
     }
     apiKeyService = {
       create: vi.fn(),
@@ -440,6 +442,75 @@ describe('clawHostService behavior', () => {
         runtimeKind: 'docker',
       }),
       { ownerUserId: '' },
+    )
+  })
+
+  it('应拒绝已被轮换的旧连接码', async () => {
+    const code = 'MC-ABCD-EFGH-JKLM'
+    const instance = createManagedInstance({
+      connectionCodeHash: createHash('sha256').update('MC-WXYZ-QRST-UVWX').digest('hex'),
+      connectionCodeExpiresAt: new Date('2099-01-01T00:10:00.000Z'),
+    })
+
+    redisService.consumeJson.mockResolvedValue({
+      orgId: instance.orgId,
+      instanceId: instance.instanceId,
+      requestedByUserId: 'user-1',
+      issuedAt: '2099-01-01T00:00:00.000Z',
+      expiresAt: '2099-01-01T00:10:00.000Z',
+    })
+    clawHostInstanceModel.findOne.mockReturnValue(createExecQuery(instance))
+
+    await expect(service.connectInstance({
+      code,
+      instanceId: instance.instanceId,
+    })).rejects.toThrow(BadRequestException)
+
+    expect(apiKeyService.create).not.toHaveBeenCalled()
+  })
+
+  it('应在绑定失败时回滚新 key 并恢复连接码', async () => {
+    const code = 'MC-ABCD-EFGH-JKLM'
+    const payload = {
+      orgId: 'org-1',
+      instanceId: 'chi-org-demo-abc123',
+      requestedByUserId: 'user-1',
+      issuedAt: '2099-01-01T00:00:00.000Z',
+      expiresAt: '2099-01-01T00:10:00.000Z',
+    }
+    const instance = createManagedInstance({
+      orgId: payload.orgId,
+      instanceId: payload.instanceId,
+      connectionCodeHash: createHash('sha256').update(code).digest('hex'),
+      connectionCodeExpiresAt: new Date(payload.expiresAt),
+      boundApiKeyId: 'api-old',
+      boundApiKeyPrefix: 'old',
+    })
+    const failingUpdate = {
+      exec: vi.fn().mockRejectedValue(new Error('mongo down')),
+    }
+
+    redisService.consumeJson.mockResolvedValue(payload)
+    clawHostInstanceModel.findOne.mockReturnValue(createExecQuery(instance))
+    clawHostInstanceModel.updateOne.mockReturnValue(failingUpdate)
+    apiKeyService.create.mockResolvedValue({
+      id: 'api-new',
+      key: 'key-new',
+      prefix: 'prefix-new',
+    })
+    apiKeyService.revokeInternal.mockResolvedValue(undefined)
+
+    await expect(service.connectInstance({
+      code,
+      instanceId: payload.instanceId,
+    })).rejects.toThrow('mongo down')
+
+    expect(apiKeyService.revokeInternal).toHaveBeenCalledTimes(1)
+    expect(apiKeyService.revokeInternal).toHaveBeenCalledWith('api-new')
+    expect(redisService.setJson).toHaveBeenCalledWith(
+      'mediaclaw:clawhost:connect:MC-ABCD-EFGH-JKLM',
+      payload,
+      expect.any(Number),
     )
   })
 

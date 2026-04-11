@@ -44,6 +44,26 @@ export class RedisService {
     return value ? JSON.parse(value) : null
   }
 
+  async consumeJson<T>(key: string): Promise<T | null> {
+    const value = await this.eval(
+      `
+        local current = redis.call('GET', KEYS[1])
+        if current then
+          redis.call('DEL', KEYS[1])
+        end
+        return current
+      `,
+      1,
+      key,
+    )
+
+    if (typeof value !== 'string' || !value) {
+      return null
+    }
+
+    return JSON.parse(value) as T
+  }
+
   /**
    * 清除值
    */

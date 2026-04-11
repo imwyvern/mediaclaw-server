@@ -585,7 +585,7 @@ export class ClawHostService {
       throw new BadRequestException('instanceId is required')
     }
 
-    const payload = await this.redisService.getJson<ConnectCodePayload>(
+    const payload = await this.redisService.consumeJson<ConnectCodePayload>(
       this.buildConnectionCodeCacheKey(code),
     )
     if (!payload) {
@@ -597,77 +597,100 @@ export class ClawHostService {
     }
 
     const instance = await this.getInstanceOrThrow(payload.orgId, payload.instanceId)
-    if (instance.boundApiKeyId) {
-      await this.apiKeyService.revokeInternal(instance.boundApiKeyId)
+    if (!this.isConnectionCodeCurrent(instance, code, payload.expiresAt)) {
+      throw new BadRequestException('连接码已失效，请在 Web 后台重新生成')
     }
 
-    const apiKey = await this.apiKeyService.create(payload.requestedByUserId, {
-      name: `${instance.clientName} OpenClaw Skill`,
-      orgId: instance.orgId,
-      permissions: ['skill:heartbeat', 'skill:deliveries', 'skill:feedback'],
-      role: UserRole.OPERATOR,
-    })
+    const previousBoundApiKeyId = instance.boundApiKeyId?.trim() || ''
+    let apiKey: Awaited<ReturnType<MediaClawApiKeyService['create']>> | null = null
 
     const now = new Date()
     const capabilities = this.normalizeCapabilities(input.capabilities)
     const nextStatus = this.buildHealthyStatus(now, 1)
-    const nextInstance = {
-      ...instance,
-      status: ClawHostInstanceStatus.RUNNING,
-      boundApiKeyId: apiKey.id,
-      boundApiKeyPrefix: apiKey.prefix,
-      boundAt: now,
-      lastHeartbeatAt: now,
-      lastClientVersion: input.clientVersion?.trim() || '',
-      lastAgentId: input.agentId?.trim() || requestedInstanceId,
-      heartbeatCapabilities: capabilities,
-      healthStatus: nextStatus,
-      connectionCodeHash: '',
-      connectionCodePreview: '',
-      connectionCodeIssuedAt: null,
-      connectionCodeExpiresAt: null,
-    } as ClawHostInstance
-
-    if (this.isControlPlaneEnabled()) {
-      await this.writeControlPlaneInstance(nextInstance, {
-        ownerUserId: payload.requestedByUserId,
-        apiToken: apiKey.key,
-        deviceId: input.agentId?.trim() || requestedInstanceId,
-        deviceApproved: true,
+    try {
+      apiKey = await this.apiKeyService.create(payload.requestedByUserId, {
+        name: `${instance.clientName} OpenClaw Skill`,
+        orgId: instance.orgId,
+        permissions: ['skill:heartbeat', 'skill:deliveries', 'skill:feedback'],
+        role: UserRole.OPERATOR,
       })
-    }
-    else {
-      await this.clawHostInstanceModel.updateOne(
-        { _id: instance._id },
-        {
-          $set: {
-            status: ClawHostInstanceStatus.RUNNING,
-            boundApiKeyId: apiKey.id,
-            boundApiKeyPrefix: apiKey.prefix,
-            boundAt: now,
-            lastHeartbeatAt: now,
-            lastClientVersion: input.clientVersion?.trim() || '',
-            lastAgentId: input.agentId?.trim() || requestedInstanceId,
-            heartbeatCapabilities: capabilities,
-            healthStatus: nextStatus,
-            connectionCodeHash: '',
-            connectionCodePreview: '',
-            connectionCodeIssuedAt: null,
-            connectionCodeExpiresAt: null,
-          },
-        },
-      ).exec()
-      await this.syncPostgresMetadata(
-        await this.getInstanceOrThrow(payload.orgId, payload.instanceId),
-        {
+
+      const nextInstance = {
+        ...instance,
+        status: ClawHostInstanceStatus.RUNNING,
+        boundApiKeyId: apiKey.id,
+        boundApiKeyPrefix: apiKey.prefix,
+        boundAt: now,
+        lastHeartbeatAt: now,
+        lastClientVersion: input.clientVersion?.trim() || '',
+        lastAgentId: input.agentId?.trim() || requestedInstanceId,
+        heartbeatCapabilities: capabilities,
+        healthStatus: nextStatus,
+        connectionCodeHash: '',
+        connectionCodePreview: '',
+        connectionCodeIssuedAt: null,
+        connectionCodeExpiresAt: null,
+      } as ClawHostInstance
+
+      if (this.isControlPlaneEnabled()) {
+        await this.writeControlPlaneInstance(nextInstance, {
           ownerUserId: payload.requestedByUserId,
           apiToken: apiKey.key,
           deviceId: input.agentId?.trim() || requestedInstanceId,
           deviceApproved: true,
-        },
-      )
+        })
+      }
+      else {
+        await this.clawHostInstanceModel.updateOne(
+          { _id: instance._id },
+          {
+            $set: {
+              status: ClawHostInstanceStatus.RUNNING,
+              boundApiKeyId: apiKey.id,
+              boundApiKeyPrefix: apiKey.prefix,
+              boundAt: now,
+              lastHeartbeatAt: now,
+              lastClientVersion: input.clientVersion?.trim() || '',
+              lastAgentId: input.agentId?.trim() || requestedInstanceId,
+              heartbeatCapabilities: capabilities,
+              healthStatus: nextStatus,
+              connectionCodeHash: '',
+              connectionCodePreview: '',
+              connectionCodeIssuedAt: null,
+              connectionCodeExpiresAt: null,
+            },
+          },
+        ).exec()
+        await this.syncPostgresMetadata(
+          await this.getInstanceOrThrow(payload.orgId, payload.instanceId),
+          {
+            ownerUserId: payload.requestedByUserId,
+            apiToken: apiKey.key,
+            deviceId: input.agentId?.trim() || requestedInstanceId,
+            deviceApproved: true,
+          },
+        )
+      }
     }
-    await this.redisService.del(this.buildConnectionCodeCacheKey(code))
+    catch (error) {
+      await this.handleFailedInstanceConnection(code, payload, apiKey?.id)
+      throw error
+    }
+
+    if (!apiKey) {
+      throw new BadRequestException('Failed to create ClawHost API key')
+    }
+
+    if (previousBoundApiKeyId && previousBoundApiKeyId !== apiKey.id) {
+      await this.apiKeyService.revokeInternal(previousBoundApiKeyId).catch((error) => {
+        this.logger.warn({
+          message: 'Failed to revoke previous ClawHost API key after rebinding',
+          instanceId: instance.instanceId,
+          apiKeyId: previousBoundApiKeyId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+    }
 
     return {
       status: 'connected',
@@ -1842,7 +1865,18 @@ export class ClawHostService {
       throw new BadRequestException('ClawHost PostgreSQL control plane is not available')
     }
 
-    await this.syncMongoCache(hydrated)
+    try {
+      await this.syncMongoCache(hydrated)
+    }
+    catch (error) {
+      this.logger.warn({
+        message: 'ClawHost Mongo cache sync failed',
+        instanceId: hydrated.instanceId,
+        orgId: hydrated.orgId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
     return hydrated
   }
 
@@ -2372,6 +2406,89 @@ export class ClawHostService {
 
   private hashValue(value: string) {
     return createHash('sha256').update(value).digest('hex')
+  }
+
+  private isConnectionCodeCurrent(
+    instance: Pick<ClawHostInstance, 'connectionCodeHash' | 'connectionCodeExpiresAt'>,
+    code: string,
+    expiresAt?: string,
+  ) {
+    const expectedHash = this.hashValue(code)
+    if (instance.connectionCodeHash !== expectedHash) {
+      return false
+    }
+
+    const persistedExpiresAt = instance.connectionCodeExpiresAt
+      ? new Date(instance.connectionCodeExpiresAt)
+      : null
+    if (!persistedExpiresAt || Number.isNaN(persistedExpiresAt.getTime())) {
+      return false
+    }
+
+    if (persistedExpiresAt.getTime() <= Date.now()) {
+      return false
+    }
+
+    if (!expiresAt) {
+      return true
+    }
+
+    const expectedExpiresAt = new Date(expiresAt)
+    if (Number.isNaN(expectedExpiresAt.getTime())) {
+      return false
+    }
+
+    return persistedExpiresAt.getTime() === expectedExpiresAt.getTime()
+  }
+
+  private async handleFailedInstanceConnection(
+    code: string,
+    payload: ConnectCodePayload,
+    apiKeyId?: string,
+  ) {
+    await this.restoreConnectionCode(code, payload)
+
+    if (!apiKeyId) {
+      return
+    }
+
+    try {
+      await this.apiKeyService.revokeInternal(apiKeyId)
+    }
+    catch (error) {
+      this.logger.warn({
+        message: 'Failed to revoke provisional ClawHost API key after connect error',
+        apiKeyId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  private async restoreConnectionCode(code: string, payload: ConnectCodePayload) {
+    const expiresAt = new Date(payload.expiresAt)
+    if (Number.isNaN(expiresAt.getTime())) {
+      return
+    }
+
+    const ttlSeconds = Math.floor((expiresAt.getTime() - Date.now()) / 1000)
+    if (ttlSeconds <= 0) {
+      return
+    }
+
+    try {
+      await this.redisService.setJson(
+        this.buildConnectionCodeCacheKey(code),
+        payload,
+        ttlSeconds,
+      )
+    }
+    catch (error) {
+      this.logger.warn({
+        message: 'Failed to restore ClawHost connection code after connect error',
+        instanceId: payload.instanceId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   private buildHealthyStatus(now: Date, latency: number): ClawHostHealthStatus {
