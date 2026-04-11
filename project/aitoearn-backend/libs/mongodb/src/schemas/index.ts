@@ -1,5 +1,13 @@
 import { AccountGroup, AccountGroupSchema } from "./account-group.schema";
 import { Account, AccountSchema } from "./account.schema";
+import {
+  AgentDefinition,
+  AgentDefinitionSchema,
+} from "./agent-definition.schema";
+import {
+  AgentInvocationLog,
+  AgentInvocationLogSchema,
+} from "./agent-invocation-log.schema";
 import { AiLog, AiLogSchema } from "./ai-log.schema";
 import { ApiKey, ApiKeySchema } from "./api-key.schema";
 import { ApiUsage, ApiUsageSchema } from "./api-usage.schema";
@@ -145,6 +153,8 @@ import { Webhook, WebhookSchema } from "./webhook.schema";
 
 export * from "./account-group.schema";
 export * from "./account.schema";
+export * from "./agent-definition.schema";
+export * from "./agent-invocation-log.schema";
 export * from "./ai-log.schema";
 export * from "./api-key.schema";
 export * from "./api-usage.schema";
@@ -222,6 +232,8 @@ export const schemas = [
   { name: EnterpriseSsoProvider.name, schema: EnterpriseSsoProviderSchema },
   { name: PointsRecord.name, schema: PointsRecordSchema },
   { name: PlatformAccount.name, schema: PlatformAccountSchema },
+  { name: AgentDefinition.name, schema: AgentDefinitionSchema },
+  { name: AgentInvocationLog.name, schema: AgentInvocationLogSchema },
   { name: AiLog.name, schema: AiLogSchema },
   { name: ApiUsage.name, schema: ApiUsageSchema },
   { name: Blog.name, schema: BlogSchema },

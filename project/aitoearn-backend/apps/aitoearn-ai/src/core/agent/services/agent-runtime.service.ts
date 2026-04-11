@@ -382,6 +382,55 @@ export class AgentRuntimeService {
     })()
   }
 
+  public async buildRuntimeResources(params: {
+    userId: string
+    userType: UserType
+    headers?: Request['headers']
+  }): Promise<{
+    mcpServers: Record<string, McpServerConfig>
+    maxBudgetUsd?: number
+  }> {
+    const { userId, userType, headers: requestHeaders } = params
+    const headers = filterHeaders(requestHeaders || {})
+    const maxBudgetUsd = await this.resolveUserBudget(userId, userType)
+
+    const mcpServers: Record<string, McpServerConfig> = {
+      [McpServerName.MediaGeneration]: this.mediaMcp.createServer(userId, userType),
+      [McpServerName.Util]: this.utilMcp.server,
+      [McpServerName.Aideo]: this.aideoMcp.createServer(userId, userType),
+      [McpServerName.VideoEdit]: this.videoEditMcp.createServer(userId, userType),
+      [McpServerName.DramaRecap]: this.dramaRecapMcp.createServer(userId, userType),
+      [McpServerName.VideoUtils]: this.videoUtilsMcp.createServer(userId, userType),
+      [McpServerName.StyleTransfer]: this.styleTransferMcp.createServer(userId, userType),
+      [McpServerName.ImageEdit]: this.imageEditMcp.createServer(userId, userType),
+      [McpServerName.Account]: {
+        type: 'http',
+        url: `${config.serverClient.baseUrl}/account/mcp`,
+        headers,
+      },
+      [McpServerName.Content]: {
+        type: 'http',
+        url: `${config.serverClient.baseUrl}/content/mcp`,
+        headers,
+      },
+      [McpServerName.Statistics]: {
+        type: 'http',
+        url: `${config.serverClient.baseUrl}/statistics/mcp`,
+        headers,
+      },
+      [McpServerName.Publish]: {
+        type: 'http',
+        url: `${config.serverClient.baseUrl}/publish/mcp`,
+        headers,
+      },
+    }
+
+    return {
+      mcpServers,
+      maxBudgetUsd,
+    }
+  }
+
   // @Cron(CronExpression.EVERY_HOUR)
   @Redlock(RedlockKey.AgentHealthCheck, 600, { throwOnFailure: false })
   @WithLoggerContext()
@@ -722,15 +771,11 @@ export class AgentRuntimeService {
     mcpServers: Record<string, McpServerConfig>
     maxBudgetUsd?: number
   }> {
-    let maxBudgetUsd: number | undefined
-    if (userType === UserType.User) {
-      const balance = await this.creditsHelper.getBalance(userId)
-      if (balance <= 0) {
-        throw new AppException(ResponseCode.UserCreditsInsufficient)
-      }
-      maxBudgetUsd = balance / 100
-      this.logger.debug({ userId, balance, maxBudgetUsd }, 'User credits available')
-    }
+    const { mcpServers, maxBudgetUsd } = await this.buildRuntimeResources({
+      userId,
+      userType,
+      headers: req.headers,
+    })
 
     let task
     let originalTask
@@ -768,40 +813,6 @@ export class AgentRuntimeService {
 
     await this.contentGenerateRepository.updateStatus(task.id, ContentGenerationTaskStatus.Running)
 
-    const headers = filterHeaders(req.headers)
-    this.logger.debug({ headers }, 'mcp headers')
-    const mcpServers: Record<string, McpServerConfig> = {
-      [McpServerName.MediaGeneration]: this.mediaMcp.createServer(userId, userType),
-      [McpServerName.Util]: this.utilMcp.server,
-      [McpServerName.Aideo]: this.aideoMcp.createServer(userId, userType),
-      [McpServerName.VideoEdit]: this.videoEditMcp.createServer(userId, userType),
-      [McpServerName.DramaRecap]: this.dramaRecapMcp.createServer(userId, userType),
-      [McpServerName.VideoUtils]: this.videoUtilsMcp.createServer(userId, userType),
-      [McpServerName.StyleTransfer]: this.styleTransferMcp.createServer(userId, userType),
-      [McpServerName.ImageEdit]: this.imageEditMcp.createServer(userId, userType),
-      // [McpServerName.Subtitle]: this.subtitleMcp.createServer(userId, userType),
-      [McpServerName.Account]: {
-        type: 'http',
-        url: `${config.serverClient.baseUrl}/account/mcp`,
-        headers,
-      },
-      [McpServerName.Content]: {
-        type: 'http',
-        url: `${config.serverClient.baseUrl}/content/mcp`,
-        headers,
-      },
-      [McpServerName.Statistics]: {
-        type: 'http',
-        url: `${config.serverClient.baseUrl}/statistics/mcp`,
-        headers,
-      },
-      [McpServerName.Publish]: {
-        type: 'http',
-        url: `${config.serverClient.baseUrl}/publish/mcp`,
-        headers,
-      },
-    }
-
     return {
       taskId: task.id,
       sessionId,
@@ -810,6 +821,21 @@ export class AgentRuntimeService {
       mcpServers,
       maxBudgetUsd,
     }
+  }
+
+  private async resolveUserBudget(userId: string, userType: UserType) {
+    if (userType !== UserType.User) {
+      return undefined
+    }
+
+    const balance = await this.creditsHelper.getBalance(userId)
+    if (balance <= 0) {
+      throw new AppException(ResponseCode.UserCreditsInsufficient)
+    }
+
+    const maxBudgetUsd = balance / 100
+    this.logger.debug({ userId, balance, maxBudgetUsd }, 'User credits available')
+    return maxBudgetUsd
   }
 
   private createMessageStream(req: AsyncGenerator<SDKMessage, void>): Observable<SDKMessage> {

@@ -1,5 +1,7 @@
 import { AccountGroupRepository } from './account-group.repository'
 import { AccountRepository } from './account.repository'
+import { AgentDefinitionRepository } from './agent-definition.repository'
+import { AgentInvocationLogRepository } from './agent-invocation-log.repository'
 import { AiLogRepository } from './ai-log.repository'
 import { ApiKeyRepository } from './api-key.repository'
 import { AssetRepository } from './asset.repository'
@@ -25,6 +27,8 @@ import { VideoTaskRepository } from './video-task.repository'
 
 export * from './account-group.repository'
 export * from './account.repository'
+export * from './agent-definition.repository'
+export * from './agent-invocation-log.repository'
 export * from './ai-log.repository'
 export * from './api-key.repository'
 export * from './asset.repository'
@@ -51,6 +55,8 @@ export * from './user.repository'
 export * from './video-task.repository'
 
 export const repositories = [
+  AgentDefinitionRepository,
+  AgentInvocationLogRepository,
   AiLogRepository,
   AssetRepository,
   BlogRepository,

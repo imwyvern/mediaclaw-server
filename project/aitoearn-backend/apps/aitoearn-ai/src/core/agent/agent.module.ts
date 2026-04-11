@@ -6,6 +6,7 @@ import { AideoModule } from '../ai/aideo'
 import { ChatModule } from '../ai/chat'
 import { ImageModule } from '../ai/image'
 import { VideoModule } from '../ai/video'
+import { AgentProductController } from './agent-product.controller'
 import { AgentTaskTimeoutScheduler } from './agent-task-timeout.scheduler'
 import { AgentController } from './agent.controller'
 import { AgentService } from './agent.service'
@@ -20,10 +21,15 @@ import { DramaRecapMcp } from './mcp/volcengine/drama-recap.mcp'
 import { StyleTransferMcp } from './mcp/volcengine/style-transfer.mcp'
 import { VideoEditMcp } from './mcp/volcengine/video-edit.mcp'
 import { AgentMemoryService } from './services/agent-memory.service'
+import { AgentObservabilityService } from './services/agent-observability.service'
 import { AgentOrchestrationService } from './services/agent-orchestration.service'
+import { AgentProductOrchestratorService } from './services/agent-product-orchestrator.service'
+import { AgentProductService } from './services/agent-product.service'
+import { AgentRegistryService } from './services/agent-registry.service'
 import { AgentRoleRegistryService } from './services/agent-role-registry.service'
 import { AgentRuntimeService } from './services/agent-runtime.service'
 import { AgentToolLayerService } from './services/agent-tool-layer.service'
+import { AgentVersioningService } from './services/agent-versioning.service'
 import { SkillInitService } from './skill-init.service'
 
 @Module({
@@ -36,9 +42,10 @@ import { SkillInitService } from './skill-init.service'
     ClaudeCodeRouterModule,
     AitoearnServerClientModule.forRoot(config.serverClient),
   ],
-  controllers: [AgentController],
+  controllers: [AgentController, AgentProductController],
   providers: [
     AgentService,
+    AgentProductService,
     MediaMcp,
     AideoMcp,
     UtilMcp,
@@ -51,9 +58,13 @@ import { SkillInitService } from './skill-init.service'
     SubtitleMcp,
     SkillInitService,
     AgentMemoryService,
+    AgentRegistryService,
+    AgentVersioningService,
+    AgentObservabilityService,
     AgentRoleRegistryService,
     AgentToolLayerService,
     AgentOrchestrationService,
+    AgentProductOrchestratorService,
     AgentRuntimeService,
   ],
   exports: [AgentService],
