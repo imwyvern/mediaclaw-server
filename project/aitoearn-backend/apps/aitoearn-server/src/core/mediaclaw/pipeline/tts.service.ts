@@ -94,7 +94,7 @@ export class TtsService {
       {
         timeout,
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
       },
