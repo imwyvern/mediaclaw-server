@@ -2,7 +2,13 @@ import { Injectable } from '@nestjs/common'
 import { DeliveryChannel } from '@yikart/mongodb'
 
 import { ImDeliveryService } from './im-delivery.service'
-import { DispatchVideoCard, ImPushContext, ImPushResult, ImPushService } from './im-push.service'
+import {
+  DispatchVideoCard,
+  ImPushContext,
+  ImPushResult,
+  ImPushService,
+  ImTemplateMessage,
+} from './im-push.service'
 
 export interface FeishuBinding {
   openId?: string
@@ -21,6 +27,24 @@ export class FeishuPushService implements ImPushService<FeishuBinding> {
   ): Promise<ImPushResult> {
     const payload = this.imDeliveryService.buildFeishuCardPayload(
       videoData,
+      context.target,
+      context.binding,
+      context.deliveryRecord,
+    )
+
+    return this.imDeliveryService.deliverViaWebhook(
+      context.deliveryRecord,
+      context.target.webhookUrl,
+      payload,
+    )
+  }
+
+  async pushTemplateMessage(
+    context: ImPushContext<FeishuBinding>,
+    message: ImTemplateMessage,
+  ): Promise<ImPushResult> {
+    const payload = this.imDeliveryService.buildFeishuTemplatePayload(
+      message,
       context.target,
       context.binding,
       context.deliveryRecord,

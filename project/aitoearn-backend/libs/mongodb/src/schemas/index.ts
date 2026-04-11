@@ -78,6 +78,7 @@ import {
   InteractionRecordSchema,
 } from './interaction-record.schema'
 import { Invoice, InvoiceSchema } from './invoice.schema'
+import { ImSession, ImSessionSchema } from './im-session.schema'
 import { IterationLog, IterationLogSchema } from './iteration-log.schema'
 import {
   MarketplaceTemplate,
@@ -188,6 +189,7 @@ export * from './enterprise-invite.schema'
 export * from './enterprise-sso-provider.schema'
 export * from './interaction-record.schema'
 export * from './invoice.schema'
+export * from './im-session.schema'
 export * from './iteration-log.schema'
 export * from './layer-policy.schema'
 export * from './marketplace-template.schema'
@@ -258,6 +260,7 @@ export const schemas = [
   { name: DiscoveryNotification.name, schema: DiscoveryNotificationSchema },
   { name: DistributionRule.name, schema: DistributionRuleSchema },
   { name: EmployeeAssignment.name, schema: EmployeeAssignmentSchema },
+  { name: ImSession.name, schema: ImSessionSchema },
   { name: Invoice.name, schema: InvoiceSchema },
   { name: PipelineTemplate.name, schema: PipelineTemplateSchema },
   { name: NotificationConfig.name, schema: NotificationConfigSchema },

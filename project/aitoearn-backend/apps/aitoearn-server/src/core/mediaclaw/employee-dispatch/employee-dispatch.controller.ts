@@ -4,21 +4,30 @@ import { GetToken } from '@yikart/aitoearn-auth'
 import { MediaClawApiController } from '../mediaclaw-api.decorator'
 import { MediaClawAuthUser } from '../mediaclaw-auth.types'
 import {
+  AppendSessionMessageDto,
   AssignmentQueryDto,
   BatchDispatchDto,
   BindImAccountDto,
   CreateEmployeeAssignmentDto,
+  CreateSessionDto,
   DeliveryPublishDto,
   DispatchStatsQueryDto,
   DispatchToEmployeeDto,
   PendingDeliveriesQueryDto,
+  StartSessionApprovalDto,
+  SubmitSessionVoteDto,
   UpdateEmployeeAssignmentDto,
+  UpsertSessionParticipantsDto,
 } from './employee-dispatch.dto'
 import { EmployeeDispatchService } from './employee-dispatch.service'
+import { ImSessionService } from './im-session.service'
 
 @MediaClawApiController('api/v1/dispatch')
 export class EmployeeDispatchController {
-  constructor(private readonly employeeDispatchService: EmployeeDispatchService) {}
+  constructor(
+    private readonly employeeDispatchService: EmployeeDispatchService,
+    private readonly imSessionService: ImSessionService,
+  ) {}
 
   @Post('assignments')
   async createAssignment(
@@ -130,5 +139,99 @@ export class EmployeeDispatchController {
       startAt: query.startAt,
       endAt: query.endAt,
     })
+  }
+
+  @Post('sessions')
+  async createSession(
+    @GetToken() user: MediaClawAuthUser,
+    @Body() body: CreateSessionDto,
+  ) {
+    return this.employeeDispatchService.createDispatchSession(
+      user.orgId || user.id || '',
+      body.deliveryRecordId,
+      {
+        conversationId: body.conversationId,
+        participants: body.participants,
+      },
+    )
+  }
+
+  @Get('sessions/:id')
+  async getSession(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+  ) {
+    return this.imSessionService.getSession(user.orgId || user.id || '', id)
+  }
+
+  @Patch('sessions/:id/participants')
+  async upsertSessionParticipants(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: UpsertSessionParticipantsDto,
+  ) {
+    return this.imSessionService.upsertParticipants(
+      user.orgId || user.id || '',
+      id,
+      body.participants,
+    )
+  }
+
+  @Post('sessions/:id/messages')
+  async appendSessionMessage(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: AppendSessionMessageDto,
+  ) {
+    return this.employeeDispatchService.appendSessionMessage(
+      user.orgId || user.id || '',
+      id,
+      body.memberId,
+      body.content,
+      body.role,
+    )
+  }
+
+  @Post('sessions/:id/approval')
+  async startSessionApproval(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: StartSessionApprovalDto,
+  ) {
+    return this.employeeDispatchService.startSessionApproval(
+      user.orgId || user.id || '',
+      id,
+      body.memberId,
+      body.requiredVotes,
+      body.hoursToExpire,
+    )
+  }
+
+  @Post('sessions/:id/votes')
+  async submitSessionVote(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: SubmitSessionVoteDto,
+  ) {
+    return this.employeeDispatchService.submitSessionVote(
+      user.orgId || user.id || '',
+      id,
+      body.memberId,
+      body.decision,
+      body.reason,
+    )
+  }
+
+  @Post('sessions/:id/published')
+  async confirmSessionPublished(
+    @GetToken() user: MediaClawAuthUser,
+    @Param('id') id: string,
+    @Body() body: DeliveryPublishDto,
+  ) {
+    return this.employeeDispatchService.confirmSessionPublished(
+      user.orgId || user.id || '',
+      id,
+      body,
+    )
   }
 }

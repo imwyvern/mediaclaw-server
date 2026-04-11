@@ -11,6 +11,7 @@ import {
   DeliveryRecordStatus,
   EmployeeAssignment,
   EmployeeAssignmentStatus,
+  ImSessionRole,
   PlatformAccount,
   VideoTask,
   VideoTaskStatus,
@@ -19,7 +20,9 @@ import { Model, Types } from 'mongoose'
 
 import { ClawHostGatewayPushService } from '../clawhost/clawhost-gateway-push.service'
 import { DistributionPublishStatus } from '../distribution/distribution.constants'
+import { DingtalkPushService } from './dingtalk-push.service'
 import { FeishuPushService } from './feishu-push.service'
+import { ImChannelRegistryService } from './im-channel-registry.service'
 import { ImDeliveryService } from './im-delivery.service'
 import {
   DispatchEmployeeTarget,
@@ -28,6 +31,8 @@ import {
   ImPushResult,
   WebhookDeliveryRecord,
 } from './im-push.service'
+import { ImSessionService } from './im-session.service'
+import { TelegramPushService } from './telegram-push.service'
 import { WecomPushService } from './wecom-push.service'
 
 type DispatchStrategy = 'round-robin' | 'category-match' | 'load-balance'
@@ -94,6 +99,14 @@ export class EmployeeDispatchService {
     private readonly imDeliveryService: ImDeliveryService,
     @Optional()
     private readonly clawHostGatewayPushService?: ClawHostGatewayPushService,
+    @Optional()
+    private readonly dingtalkPushService?: DingtalkPushService,
+    @Optional()
+    private readonly telegramPushService?: TelegramPushService,
+    @Optional()
+    private readonly imChannelRegistryService?: ImChannelRegistryService,
+    @Optional()
+    private readonly imSessionService?: ImSessionService,
   ) {}
 
   async createAssignment(orgId: string, data: Record<string, unknown>) {
@@ -211,10 +224,6 @@ export class EmployeeDispatchService {
 
   async bindImAccount(orgId: string, assignmentId: string, channel: string, binding: Record<string, unknown>) {
     const normalizedChannel = this.normalizeChannel(channel)
-    if (normalizedChannel !== DeliveryChannel.FEISHU && normalizedChannel !== DeliveryChannel.WECOM) {
-      throw new BadRequestException('channel must be feishu or wecom')
-    }
-
     const assignment = await this.getAssignmentOrFail(assignmentId, orgId)
     const normalizedBinding = this.normalizeImBinding(normalizedChannel, binding)
 
@@ -365,6 +374,7 @@ export class EmployeeDispatchService {
         deliveryRecordId,
         confirmedAt: confirmedAt.toISOString(),
       }),
+      this.imSessionService?.markDeliveryReceived(record['orgId'], record['_id'].toString()),
     ])
 
     return this.toDeliveryResponse(updated)
@@ -450,7 +460,32 @@ export class EmployeeDispatchService {
           },
         },
       }).exec(),
+      this.imSessionService?.markPublished(record['orgId'], record['_id'].toString(), {
+        publishUrl: normalizedPublishUrl,
+        publishPlatform: normalizedPlatform,
+        publishPostId: normalizedPostId,
+      }),
     ])
+
+    await this.pushSessionTemplate(
+      record['orgId'],
+      record,
+      {
+        kind: 'report-card',
+        title: '内容已确认发布',
+        summary: normalizedPlatform || '发布回传已完成',
+        body: [
+          normalizedPublishUrl ? `发布链接：${normalizedPublishUrl}` : '',
+          normalizedPostId ? `帖子 ID：${normalizedPostId}` : '',
+        ].filter(Boolean),
+        metrics: [
+          {
+            label: '状态',
+            value: DeliveryRecordStatus.PUBLISHED,
+          },
+        ],
+      },
+    )
 
     return this.toDeliveryResponse(updatedRecord)
   }
@@ -575,6 +610,7 @@ export class EmployeeDispatchService {
         expiredAt: expiredAt.toISOString(),
         reason: failReason,
       }),
+      this.imSessionService?.markExpired(record['orgId'], record['_id'].toString(), failReason),
     ])
 
     return this.toDeliveryResponse(updated)
@@ -623,6 +659,200 @@ export class EmployeeDispatchService {
         + (byStatus[DeliveryRecordStatus.RECEIVED] || 0)
         + (byStatus[DeliveryRecordStatus.DOWNLOADED] || 0),
     }
+  }
+
+  async createDispatchSession(
+    orgId: string,
+    deliveryRecordId: string,
+    options: {
+      conversationId?: string
+      participants?: Array<{
+        memberId: string
+        displayName?: string
+        role?: string
+        channelUserId?: string
+      }>
+    } = {},
+  ) {
+    if (!this.imSessionService) {
+      throw new BadRequestException('im session service is not configured')
+    }
+
+    const record = await this.getDeliveryRecordOrFail(deliveryRecordId, orgId)
+    const [assignment, task] = await Promise.all([
+      this.employeeAssignmentModel.findById(record['employeeAssignmentId']).lean().exec() as Promise<AssignmentRecord | null>,
+      this.videoTaskModel.findById(record['videoTaskId']).lean().exec() as Promise<VideoTaskRecord | null>,
+    ])
+
+    if (!task) {
+      throw new NotFoundException('video task not found')
+    }
+
+    const seedParticipant = assignment
+      ? {
+          memberId: this.normalizeOptionalString(assignment['employeeUserId'])
+            || this.normalizeOptionalString(assignment['employeePhone'])
+            || assignment['_id'].toString(),
+          displayName: this.normalizeOptionalString(assignment['employeeName']),
+          role: ImSessionRole.EDITOR,
+          channelUserId:
+            this.normalizeOptionalString(assignment['imBinding']?.['feishu']?.['openId'])
+            || this.normalizeOptionalString(assignment['imBinding']?.['wecom']?.['userId'])
+            || this.normalizeOptionalString(assignment['imBinding']?.['telegram']?.['chatId'])
+            || this.normalizeOptionalString(assignment['imBinding']?.['dingtalk']?.['chatId']),
+        }
+      : null
+
+    const session = await this.imSessionService.ensureDispatchSession({
+      orgId,
+      videoTaskId: record['videoTaskId'],
+      deliveryRecordId: record['_id'].toString(),
+      employeeAssignmentId: record['employeeAssignmentId'],
+      channel: record['deliveryChannel'],
+      conversationId: options.conversationId || this.resolveConversationId(assignment || {}),
+      title: this.normalizeOptionalString(this.asRecord(task['copy'])?.['title']) || record['videoTaskId'],
+      summary: this.normalizeOptionalString(task['outputVideoUrl']) || '待协作发布内容',
+      initialMessage: '已创建群协作会话，等待审批与发布确认。',
+      participant: seedParticipant,
+    })
+    if (!session) {
+      throw new BadRequestException('failed to create dispatch session')
+    }
+
+    if (options.participants && options.participants.length > 0) {
+      return this.imSessionService.upsertParticipants(orgId, session.id, options.participants)
+    }
+
+    return session
+  }
+
+  async confirmSessionPublished(orgId: string, sessionId: string, publishData: PublishData = {}) {
+    if (!this.imSessionService) {
+      throw new BadRequestException('im session service is not configured')
+    }
+
+    const session = await this.imSessionService.getSession(orgId, sessionId)
+    if (!session) {
+      throw new NotFoundException('dispatch session not found')
+    }
+    return this.markPublished(orgId, session.deliveryRecordId, publishData)
+  }
+
+  async appendSessionMessage(orgId: string, sessionId: string, memberId: string, content: string, role?: string) {
+    if (!this.imSessionService) {
+      throw new BadRequestException('im session service is not configured')
+    }
+
+    return this.imSessionService.appendMessage(orgId, sessionId, {
+      memberId,
+      content,
+      role,
+    })
+  }
+
+  async startSessionApproval(
+    orgId: string,
+    sessionId: string,
+    memberId: string,
+    requiredVotes = 1,
+    hoursToExpire = 24,
+  ) {
+    if (!this.imSessionService) {
+      throw new BadRequestException('im session service is not configured')
+    }
+
+    const session = await this.imSessionService.startApproval(
+      orgId,
+      sessionId,
+      memberId,
+      requiredVotes,
+      hoursToExpire,
+    )
+    if (!session) {
+      throw new NotFoundException('dispatch session not found')
+    }
+
+    await this.pushSessionTemplateBySessionId(orgId, sessionId, {
+      kind: 'approval-card',
+      title: session.deliverySnapshot?.title || '内容审批',
+      summary: '群内审批已开启',
+      body: [
+        session.deliverySnapshot?.summary || '',
+        `所需票数：${session.approval?.requiredVotes || requiredVotes}`,
+        session.approval?.expiresAt ? `截止时间：${session.approval.expiresAt}` : '',
+      ].filter(Boolean),
+      actions: [
+        {
+          key: 'approve',
+          text: '通过',
+          value: 'approve',
+        },
+        {
+          key: 'reject',
+          text: '驳回',
+          value: 'reject',
+        },
+      ],
+    })
+
+    return session
+  }
+
+  async submitSessionVote(
+    orgId: string,
+    sessionId: string,
+    memberId: string,
+    decision: string,
+    reason?: string,
+  ) {
+    if (!this.imSessionService) {
+      throw new BadRequestException('im session service is not configured')
+    }
+
+    const session = await this.imSessionService.submitVote(
+      orgId,
+      sessionId,
+      memberId,
+      decision,
+      reason,
+    )
+    if (!session) {
+      throw new NotFoundException('dispatch session not found')
+    }
+
+    const approvedVotes = Array.isArray(session.approval?.votes)
+      ? session.approval.votes.filter((item: Record<string, unknown>) => item['decision'] === 'approve').length
+      : 0
+    const nextMessage = session.state === 'confirmed'
+      ? {
+          kind: 'report-card' as const,
+          title: '审批通过',
+          summary: '群内审批已完成，可确认发布',
+          body: [
+            reason ? `备注：${reason}` : '',
+          ].filter(Boolean),
+        }
+      : session.state === 'rejected'
+        ? {
+            kind: 'report-card' as const,
+            title: '审批驳回',
+            summary: '群内审批未通过',
+            body: [
+              reason ? `原因：${reason}` : '',
+            ].filter(Boolean),
+          }
+        : {
+            kind: 'approval-card' as const,
+            title: '审批投票进行中',
+            summary: '审批尚未结束',
+            body: [
+              `当前赞成票：${approvedVotes}/${session.approval?.requiredVotes || 1}`,
+              reason ? `本次备注：${reason}` : '',
+            ].filter(Boolean),
+          }
+
+    await this.pushSessionTemplateBySessionId(orgId, sessionId, nextMessage)
+    return session
   }
 
   async confirmPublished(orgId: string, videoTaskId: string, publishData: PublishData = {}) {
@@ -786,6 +1016,28 @@ export class EmployeeDispatchService {
           title: this.normalizeOptionalString(this.asRecord(task['copy'])?.['title']),
         },
       })
+
+      if (this.imSessionService && this.supportsSessionChannel(deliveryChannel)) {
+        await this.imSessionService.ensureDispatchSession({
+          orgId: taskOrgId,
+          videoTaskId: task['_id'].toString(),
+          deliveryRecordId: created._id.toString(),
+          employeeAssignmentId: assignment['_id'].toString(),
+          channel: deliveryChannel,
+          conversationId: this.resolveConversationId(assignment, deliveryChannel),
+          title: videoData.title,
+          summary: videoData.description || videoData.publishGuide || videoData.outputVideoUrl,
+          initialMessage: '已生成群协作分发会话，请在群内完成审批与发布。',
+          participant: {
+            memberId: this.normalizeOptionalString(assignment['employeeUserId'])
+              || this.normalizeOptionalString(assignment['employeePhone'])
+              || assignment['_id'].toString(),
+            displayName: this.normalizeOptionalString(assignment['employeeName']),
+            role: ImSessionRole.EDITOR,
+            channelUserId: this.resolveConversationId(assignment, deliveryChannel),
+          },
+        })
+      }
     }
     else {
       await this.videoTaskModel.findByIdAndUpdate(task['_id'], {
@@ -997,10 +1249,23 @@ export class EmployeeDispatchService {
       return this.buildManualPickupResult(channel, videoData)
     }
 
+    const channelBinding = this.resolveChannelBinding(assignment, channel)
+    const registryResult = await this.imChannelRegistryService?.pushVideoCard(
+      channel,
+      {
+        binding: channelBinding,
+        target,
+        deliveryRecord,
+      },
+      videoData,
+    )
+    if (registryResult) {
+      return registryResult
+    }
+
     if (channel === DeliveryChannel.FEISHU) {
-      const binding = assignment['imBinding']?.['feishu'] || {}
       const context: ImPushContext<Record<string, unknown>> = {
-        binding,
+        binding: channelBinding,
         target,
         deliveryRecord,
       }
@@ -1008,9 +1273,8 @@ export class EmployeeDispatchService {
     }
 
     if (channel === DeliveryChannel.WECOM) {
-      const binding = assignment['imBinding']?.['wecom'] || {}
       const context: ImPushContext<Record<string, unknown>> = {
-        binding,
+        binding: channelBinding,
         target,
         deliveryRecord,
       }
@@ -1032,6 +1296,12 @@ export class EmployeeDispatchService {
     if (assignment['imBinding']?.['wecom']?.['userId'] || assignment['imBinding']?.['wecom']?.['chatId']) {
       return DeliveryChannel.WECOM
     }
+    if (assignment['imBinding']?.['dingtalk']?.['chatId']) {
+      return DeliveryChannel.DINGTALK
+    }
+    if (assignment['imBinding']?.['telegram']?.['chatId']) {
+      return DeliveryChannel.TELEGRAM
+    }
 
     const webhookUrl = this.normalizeOptionalString(assignment['webhookUrl'])
     if (webhookUrl) {
@@ -1041,6 +1311,12 @@ export class EmployeeDispatchService {
       }
       if (host.includes('qyapi.weixin.qq.com') || host.includes('wecom') || host.includes('weixin.qq.com')) {
         return DeliveryChannel.WECOM
+      }
+      if (host.includes('dingtalk.com') || host.includes('aliyuncs.com')) {
+        return DeliveryChannel.DINGTALK
+      }
+      if (host.includes('telegram.org') || host.includes('t.me')) {
+        return DeliveryChannel.TELEGRAM
       }
       return DeliveryChannel.WEBHOOK
     }
@@ -1151,6 +1427,8 @@ export class EmployeeDispatchService {
     return {
       feishu: source?.['feishu'] ? this.normalizeImBinding(DeliveryChannel.FEISHU, source['feishu']) : undefined,
       wecom: source?.['wecom'] ? this.normalizeImBinding(DeliveryChannel.WECOM, source['wecom']) : undefined,
+      dingtalk: source?.['dingtalk'] ? this.normalizeImBinding(DeliveryChannel.DINGTALK, source['dingtalk']) : undefined,
+      telegram: source?.['telegram'] ? this.normalizeImBinding(DeliveryChannel.TELEGRAM, source['telegram']) : undefined,
     }
   }
 
@@ -1167,8 +1445,14 @@ export class EmployeeDispatchService {
       }
     }
 
+    if (channel === DeliveryChannel.WECOM) {
+      return {
+        userId: this.normalizeOptionalString(source['userId']),
+        chatId: this.normalizeOptionalString(source['chatId']),
+      }
+    }
+
     return {
-      userId: this.normalizeOptionalString(source['userId']),
       chatId: this.normalizeOptionalString(source['chatId']),
     }
   }
@@ -1530,7 +1814,19 @@ export class EmployeeDispatchService {
   }
 
   private normalizeChannel(value: unknown) {
-    return this.normalizeOptionalString(value).toLowerCase()
+    const normalized = this.normalizeOptionalString(value).toLowerCase()
+    switch (normalized) {
+      case DeliveryChannel.FEISHU:
+        return DeliveryChannel.FEISHU
+      case DeliveryChannel.WECOM:
+        return DeliveryChannel.WECOM
+      case DeliveryChannel.DINGTALK:
+        return DeliveryChannel.DINGTALK
+      case DeliveryChannel.TELEGRAM:
+        return DeliveryChannel.TELEGRAM
+      default:
+        throw new BadRequestException('channel must be feishu, wecom, dingtalk or telegram')
+    }
   }
 
   private normalizeRequiredString(value: unknown, field: string, fallback?: unknown) {
@@ -1666,6 +1962,110 @@ export class EmployeeDispatchService {
       employeePhone: assignment['employeePhone'] || '',
       webhookUrl: this.normalizeOptionalString(assignment['webhookUrl']),
     }
+  }
+
+  private resolveChannelBinding(assignment: AssignmentRecord, channel: DeliveryChannel) {
+    const imBinding = this.asRecord(assignment['imBinding']) || {}
+    switch (channel) {
+      case DeliveryChannel.FEISHU:
+        return this.asRecord(imBinding['feishu']) || {}
+      case DeliveryChannel.WECOM:
+        return this.asRecord(imBinding['wecom']) || {}
+      case DeliveryChannel.DINGTALK:
+        return this.asRecord(imBinding['dingtalk']) || {}
+      case DeliveryChannel.TELEGRAM:
+        return this.asRecord(imBinding['telegram']) || {}
+      default:
+        return {}
+    }
+  }
+
+  private resolveConversationId(assignment: AssignmentRecord, channel?: DeliveryChannel) {
+    const bindingChannel = channel || this.resolveDeliveryChannel(assignment)
+    const binding = this.resolveChannelBinding(assignment, bindingChannel)
+    return this.normalizeOptionalString(
+      binding['chatId']
+      || binding['openId']
+      || binding['userId']
+      || assignment['employeeUserId']
+      || assignment['employeePhone'],
+    )
+  }
+
+  private supportsSessionChannel(channel: DeliveryChannel) {
+    return [
+      DeliveryChannel.FEISHU,
+      DeliveryChannel.WECOM,
+      DeliveryChannel.DINGTALK,
+      DeliveryChannel.TELEGRAM,
+    ].includes(channel)
+  }
+
+  private async pushSessionTemplateBySessionId(
+    orgId: string,
+    sessionId: string,
+    message: {
+      kind: 'approval-card' | 'report-card'
+      title: string
+      summary: string
+      body: string[]
+      actions?: Array<{ key: string, text: string, value?: string, url?: string }>
+      metrics?: Array<{ label: string, value: string }>
+    },
+  ) {
+    if (!this.imSessionService) {
+      return null
+    }
+
+    const session = await this.imSessionService.getSession(orgId, sessionId)
+    if (!session) {
+      throw new NotFoundException('dispatch session not found')
+    }
+    const record = await this.getDeliveryRecordOrFail(session.deliveryRecordId, orgId)
+    return this.pushSessionTemplate(orgId, record, message)
+  }
+
+  private async pushSessionTemplate(
+    orgId: string,
+    record: DeliveryRecordDocument,
+    message: {
+      kind: 'approval-card' | 'report-card'
+      title: string
+      summary: string
+      body: string[]
+      actions?: Array<{ key: string, text: string, value?: string, url?: string }>
+      metrics?: Array<{ label: string, value: string }>
+    },
+  ) {
+    if (!this.imChannelRegistryService) {
+      return null
+    }
+
+    const assignment = await this.employeeAssignmentModel.findById(record['employeeAssignmentId']).lean().exec() as AssignmentRecord | null
+    if (!assignment) {
+      return null
+    }
+
+    const channel = record['deliveryChannel'] as DeliveryChannel
+    if (!this.supportsSessionChannel(channel)) {
+      return null
+    }
+
+    const deliveryRecord = this.toWebhookDeliveryRecord(record as unknown as DeliveryRecord, channel)
+    const target = this.buildDispatchTarget(assignment)
+    if (!target.webhookUrl) {
+      return null
+    }
+
+    return await this.imChannelRegistryService.pushTemplateMessage(
+      channel,
+      {
+        binding: this.resolveChannelBinding(assignment, channel),
+        target,
+        deliveryRecord,
+      },
+      message,
+    )
   }
 
   private buildManualPickupResult(channel: DeliveryChannel, videoData: DispatchVideoCard): ImPushResult {

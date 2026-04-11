@@ -12,6 +12,7 @@ import {
   DispatchEmployeeTarget,
   DispatchVideoCard,
   ImPushResult,
+  ImTemplateMessage,
   WebhookDeliveryRecord,
 } from './im-push.service'
 
@@ -152,6 +153,174 @@ export class ImDeliveryService {
     )
   }
 
+  buildFeishuTemplatePayload(
+    message: ImTemplateMessage,
+    target: DispatchEmployeeTarget,
+    binding: { openId?: string, chatId?: string } = {},
+    deliveryRecord?: WebhookDeliveryRecord,
+  ) {
+    const basePayload = this.buildTemplateBasePayload(
+      message,
+      target,
+      deliveryRecord,
+      DeliveryChannel.FEISHU,
+    )
+
+    return {
+      ...basePayload,
+      messageType: 'feishu/interactive-card',
+      receiver: {
+        openId: binding.openId || '',
+        chatId: binding.chatId || '',
+      },
+      card: {
+        header: {
+          title: message.title,
+          subtitle: message.summary,
+          template: message.kind === 'approval-card' ? 'orange' : message.kind === 'report-card' ? 'green' : 'blue',
+        },
+        sections: message.body.map(item => ({
+          type: 'markdown',
+          text: item,
+        })),
+        metrics: message.metrics || [],
+        actions: (message.actions || []).map(action => ({
+          type: action.url ? 'link' : 'value',
+          text: action.text,
+          url: action.url || '',
+          value: action.value || action.key,
+        })),
+      },
+    }
+  }
+
+  buildWecomTemplatePayload(
+    message: ImTemplateMessage,
+    target: DispatchEmployeeTarget,
+    binding: { userId?: string, chatId?: string } = {},
+    deliveryRecord?: WebhookDeliveryRecord,
+  ) {
+    const basePayload = this.buildTemplateBasePayload(
+      message,
+      target,
+      deliveryRecord,
+      DeliveryChannel.WECOM,
+    )
+
+    return {
+      ...basePayload,
+      msgtype: 'template_card',
+      receiver: {
+        userId: binding.userId || '',
+        chatId: binding.chatId || '',
+      },
+      template_card: {
+        card_type: 'text_notice',
+        source: {
+          desc: message.summary,
+        },
+        main_title: {
+          title: message.title,
+          desc: message.summary,
+        },
+        horizontal_content_list: (message.metrics || []).map(metric => ({
+          keyname: metric.label,
+          value: metric.value,
+        })),
+        sub_title_text: message.body.join('\n'),
+        action_menu: {
+          desc: '操作',
+          action_list: (message.actions || []).map(action => ({
+            text: action.text,
+            key: action.key,
+          })),
+        },
+        jump_list: (message.actions || [])
+          .filter(action => Boolean(action.url))
+          .map(action => ({
+            type: 1,
+            title: action.text,
+            url: action.url,
+          })),
+      },
+    }
+  }
+
+  buildDingtalkTemplatePayload(
+    message: ImTemplateMessage,
+    target: DispatchEmployeeTarget,
+    deliveryRecord?: WebhookDeliveryRecord,
+  ) {
+    const basePayload = this.buildTemplateBasePayload(
+      message,
+      target,
+      deliveryRecord,
+      DeliveryChannel.DINGTALK,
+    )
+
+    return {
+      ...basePayload,
+      msgtype: 'actionCard',
+      actionCard: {
+        title: message.title,
+        text: [message.summary, ...message.body].join('\n\n'),
+        btnOrientation: '0',
+        btns: (message.actions || []).map(action => ({
+          title: action.text,
+          actionURL: action.url || this.buildConfirmUrl(deliveryRecord?.id || ''),
+        })),
+      },
+    }
+  }
+
+  buildTelegramTemplatePayload(
+    message: ImTemplateMessage,
+    target: DispatchEmployeeTarget,
+    binding: { chatId?: string } = {},
+    deliveryRecord?: WebhookDeliveryRecord,
+  ) {
+    const basePayload = this.buildTemplateBasePayload(
+      message,
+      target,
+      deliveryRecord,
+      DeliveryChannel.TELEGRAM,
+    )
+
+    return {
+      ...basePayload,
+      chat_id: binding.chatId || '',
+      text: [
+        `*${message.title}*`,
+        message.summary,
+        ...message.body,
+        ...(message.metrics || []).map(metric => `${metric.label}: ${metric.value}`),
+      ].filter(Boolean).join('\n'),
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: (message.actions || []).map(action => ([
+          {
+            text: action.text,
+            url: action.url || this.buildConfirmUrl(deliveryRecord?.id || ''),
+            callback_data: action.value || action.key,
+          },
+        ])),
+      },
+    }
+  }
+
+  buildGenericTemplatePayload(
+    message: ImTemplateMessage,
+    target: DispatchEmployeeTarget,
+    deliveryRecord?: WebhookDeliveryRecord,
+  ) {
+    return this.buildTemplateBasePayload(
+      message,
+      target,
+      deliveryRecord,
+      DeliveryChannel.WEBHOOK,
+    )
+  }
+
   async deliverViaWebhook(
     deliveryRecord: WebhookDeliveryRecord,
     webhookUrl: string,
@@ -268,6 +437,27 @@ export class ImDeliveryService {
       confirmUrl: this.buildConfirmUrl(deliveryRecord?.id || ''),
       tags: videoData.tags,
       deliveryChannel: channel,
+    }
+  }
+
+  private buildTemplateBasePayload(
+    message: ImTemplateMessage,
+    target: DispatchEmployeeTarget,
+    deliveryRecord: WebhookDeliveryRecord | undefined,
+    channel: DeliveryChannel,
+  ) {
+    return {
+      deliveryRecordId: deliveryRecord?.id || '',
+      assignmentId: target.assignmentId,
+      assignedTo: this.buildAssignedTo(target),
+      deliveryChannel: channel,
+      title: message.title,
+      summary: message.summary,
+      templateType: message.kind,
+      body: message.body,
+      metrics: message.metrics || [],
+      metadata: message.metadata || null,
+      actions: message.actions || [],
     }
   }
 

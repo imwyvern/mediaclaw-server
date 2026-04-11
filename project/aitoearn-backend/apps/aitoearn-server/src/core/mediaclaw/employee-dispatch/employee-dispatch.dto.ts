@@ -70,6 +70,16 @@ export class EmployeeImBindingDto {
   @ValidateNested()
   @Type(() => EmployeeImChannelBindingDto)
   wecom?: EmployeeImChannelBindingDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EmployeeImChannelBindingDto)
+  dingtalk?: EmployeeImChannelBindingDto
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EmployeeImChannelBindingDto)
+  telegram?: EmployeeImChannelBindingDto
 }
 
 export class CreateEmployeeAssignmentDto {
@@ -172,9 +182,9 @@ export class AssignmentQueryDto {
 }
 
 export class BindImAccountDto {
-  @IsString()
+  @IsEnum(DeliveryChannel)
   @IsNotEmpty()
-  channel: string
+  channel: DeliveryChannel
 
   @IsOptional()
   @IsString()
@@ -187,6 +197,93 @@ export class BindImAccountDto {
   @IsOptional()
   @IsString()
   chatId?: string
+}
+
+export class SessionParticipantDto {
+  @IsString()
+  @IsNotEmpty()
+  memberId: string
+
+  @IsOptional()
+  @IsString()
+  displayName?: string
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  role?: string
+
+  @IsOptional()
+  @IsString()
+  channelUserId?: string
+}
+
+export class UpsertSessionParticipantsDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SessionParticipantDto)
+  participants: SessionParticipantDto[]
+}
+
+export class CreateSessionDto {
+  @IsMongoId()
+  deliveryRecordId: string
+
+  @IsOptional()
+  @IsString()
+  conversationId?: string
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SessionParticipantDto)
+  participants?: SessionParticipantDto[]
+}
+
+export class AppendSessionMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  memberId: string
+
+  @IsOptional()
+  @IsString()
+  role?: string
+
+  @IsString()
+  @IsNotEmpty()
+  content: string
+}
+
+export class StartSessionApprovalDto {
+  @IsString()
+  @IsNotEmpty()
+  memberId: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  requiredVotes?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  hoursToExpire?: number
+}
+
+export class SubmitSessionVoteDto {
+  @IsString()
+  @IsNotEmpty()
+  memberId: string
+
+  @IsString()
+  @IsNotEmpty()
+  decision: string
+
+  @IsOptional()
+  @IsString()
+  reason?: string
 }
 
 export class DispatchToEmployeeDto {

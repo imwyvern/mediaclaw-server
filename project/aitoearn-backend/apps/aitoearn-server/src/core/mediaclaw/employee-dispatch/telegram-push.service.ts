@@ -10,23 +10,36 @@ import {
   ImTemplateMessage,
 } from './im-push.service'
 
-export interface WecomBinding {
-  userId?: string
+export interface TelegramBinding {
   chatId?: string
 }
 
 @Injectable()
-export class WecomPushService implements ImPushService<WecomBinding> {
-  readonly channel = DeliveryChannel.WECOM
+export class TelegramPushService implements ImPushService<TelegramBinding> {
+  readonly channel = DeliveryChannel.TELEGRAM
 
   constructor(private readonly imDeliveryService: ImDeliveryService) {}
 
   async pushVideoCard(
-    context: ImPushContext<WecomBinding>,
+    context: ImPushContext<TelegramBinding>,
     videoData: DispatchVideoCard,
   ): Promise<ImPushResult> {
-    const payload = this.imDeliveryService.buildWecomCardPayload(
-      videoData,
+    const payload = this.imDeliveryService.buildTelegramTemplatePayload(
+      {
+        kind: 'video-card',
+        title: videoData.title,
+        summary: videoData.publishGuide,
+        body: [
+          videoData.description,
+          `平台：${videoData.primaryPlatform || videoData.publishPlatforms.join(', ')}`,
+        ].filter(Boolean),
+        actions: [
+          {
+            key: 'confirm_publish',
+            text: '确认发布',
+          },
+        ],
+      },
       context.target,
       context.binding,
       context.deliveryRecord,
@@ -40,10 +53,10 @@ export class WecomPushService implements ImPushService<WecomBinding> {
   }
 
   async pushTemplateMessage(
-    context: ImPushContext<WecomBinding>,
+    context: ImPushContext<TelegramBinding>,
     message: ImTemplateMessage,
   ): Promise<ImPushResult> {
-    const payload = this.imDeliveryService.buildWecomTemplatePayload(
+    const payload = this.imDeliveryService.buildTelegramTemplatePayload(
       message,
       context.target,
       context.binding,

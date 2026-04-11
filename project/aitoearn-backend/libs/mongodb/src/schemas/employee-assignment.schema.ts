@@ -31,6 +31,12 @@ class EmployeeImBinding {
 
   @Prop({ type: EmployeeImChannelBinding, default: undefined })
   wecom?: EmployeeImChannelBinding
+
+  @Prop({ type: EmployeeImChannelBinding, default: undefined })
+  dingtalk?: EmployeeImChannelBinding
+
+  @Prop({ type: EmployeeImChannelBinding, default: undefined })
+  telegram?: EmployeeImChannelBinding
 }
 
 @Schema({ _id: false })
