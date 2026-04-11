@@ -157,6 +157,62 @@ class PublishContentDto {
   publishUrl: string
 }
 
+class CalendarQueryDto {
+  @IsOptional()
+  @IsString()
+  startDate?: string
+
+  @IsOptional()
+  @IsString()
+  endDate?: string
+
+  @IsOptional()
+  @IsString()
+  month?: string
+
+  @IsOptional()
+  @IsString()
+  status?: string
+
+  @IsOptional()
+  @IsString()
+  platform?: string
+}
+
+class ScheduleContentDto {
+  @IsString()
+  scheduledAt: string
+
+  @IsOptional()
+  @IsString()
+  platform?: string
+
+  @IsOptional()
+  @IsString()
+  note?: string
+}
+
+class BatchScheduleContentDto {
+  @IsArray()
+  @IsString({ each: true })
+  ids: string[]
+
+  @IsString()
+  startDate: string
+
+  @IsOptional()
+  @IsString()
+  time?: string
+
+  @IsOptional()
+  @IsString()
+  platform?: string
+
+  @IsOptional()
+  @IsIn(['daily', 'weekdays'])
+  strategy?: 'daily' | 'weekdays'
+}
+
 @MediaClawApiController('api/v1/content')
 export class ContentMgmtController {
   constructor(private readonly contentMgmtService: ContentMgmtService) {}
@@ -204,6 +260,14 @@ export class ContentMgmtController {
       user.orgId || user.id || '',
       user.id || '',
     )
+  }
+
+  @Get('calendar')
+  async listCalendar(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Query() query: CalendarQueryDto,
+  ) {
+    return this.contentMgmtService.listCalendar(user.orgId || user.id || '', query)
   }
 
   @Post('batch-edit')
@@ -295,6 +359,32 @@ export class ContentMgmtController {
       body.ids,
       user.id || '',
       body.comment,
+    )
+  }
+
+  @Post('calendar/batch-schedule')
+  async batchScheduleContent(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Body() body: BatchScheduleContentDto,
+  ) {
+    return this.contentMgmtService.batchScheduleCalendar(
+      user.orgId || user.id || '',
+      user.id || '',
+      body,
+    )
+  }
+
+  @Patch(':id/schedule')
+  async scheduleContent(
+    @GetToken() user: { orgId?: string, id?: string },
+    @Param('id') id: string,
+    @Body() body: ScheduleContentDto,
+  ) {
+    return this.contentMgmtService.scheduleContent(
+      user.orgId || user.id || '',
+      id,
+      user.id || '',
+      body,
     )
   }
 

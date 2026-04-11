@@ -385,6 +385,7 @@ export class VideoTask extends WithTimestampSchema {
 
 export const VideoTaskSchema = SchemaFactory.createForClass(VideoTask)
 VideoTaskSchema.index({ orgId: 1, status: 1, createdAt: -1 })
+VideoTaskSchema.index({ orgId: 1, 'metadata.contentCalendar.scheduledAtDate': 1 })
 VideoTaskSchema.index({ pipelineId: 1, status: 1 })
 VideoTaskSchema.index({ batchId: 1, status: 1, createdAt: -1 })
 VideoTaskSchema.index({ batchId: 1, batchIndex: 1 })

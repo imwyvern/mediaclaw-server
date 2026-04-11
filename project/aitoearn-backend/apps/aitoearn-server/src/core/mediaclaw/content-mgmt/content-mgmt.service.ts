@@ -41,6 +41,14 @@ interface PaginationInput {
   limit?: number
 }
 
+interface CalendarFilters {
+  startDate?: string
+  endDate?: string
+  month?: string
+  status?: string
+  platform?: string
+}
+
 interface BatchUpdateInput {
   ids: string[]
   caption?: string
@@ -74,6 +82,44 @@ interface ReviewerContext {
   id: string
   name: string
   role: UserRole
+}
+
+interface CalendarScheduleInput {
+  scheduledAt: string
+  platform?: string
+  note?: string
+}
+
+interface CalendarBatchScheduleInput {
+  ids: string[]
+  startDate: string
+  time?: string
+  platform?: string
+  strategy?: 'daily' | 'weekdays'
+}
+
+interface CalendarRange {
+  start: Date
+  end: Date
+}
+
+interface CalendarRow {
+  id: string
+  detailId: string
+  title: string
+  brand: string
+  status: string
+  rawStatus: string
+  scheduledAt: string
+  platform: string
+  publishStatus: string
+  outputVideoUrl: string
+  canApprove: boolean
+  approvalStatus: string | null
+  note: string
+  conflict: boolean
+  conflictCount: number
+  conflictIds: string[]
 }
 
 @Injectable()
@@ -518,6 +564,129 @@ export class ContentMgmtService {
     }
   }
 
+  async listCalendar(orgId: string, filters: CalendarFilters = {}) {
+    const range = this.resolveCalendarRange(filters)
+    const query = this.buildCalendarQuery(orgId, filters, range)
+    const tasks = await this.videoTaskModel.find(query)
+      .sort({
+        'metadata.contentCalendar.scheduledAtDate': 1,
+        'publishedAt': 1,
+        'createdAt': -1,
+      })
+      .limit(500)
+      .lean()
+      .exec()
+
+    const items = this.annotateCalendarConflicts(
+      tasks
+        .map(task => this.toCalendarRow(task))
+        .filter((item) => {
+          const scheduledAt = new Date(item.scheduledAt)
+          if (Number.isNaN(scheduledAt.getTime())) {
+            return false
+          }
+          if (scheduledAt < range.start || scheduledAt > range.end) {
+            return false
+          }
+          if (filters.platform && filters.platform !== 'all' && item.platform !== filters.platform) {
+            return false
+          }
+          return true
+        }),
+    )
+
+    return {
+      items,
+      total: items.length,
+      conflictCount: items.filter(item => item.conflict).length,
+      range: {
+        start: range.start.toISOString(),
+        end: range.end.toISOString(),
+      },
+    }
+  }
+
+  async scheduleContent(
+    orgId: string,
+    contentId: string,
+    schedulerId: string,
+    input: CalendarScheduleInput,
+  ) {
+    const task = await this.getTaskOrFail(orgId, contentId)
+    if (task.status === VideoTaskStatus.PUBLISHED) {
+      throw new BadRequestException('Published content cannot be rescheduled')
+    }
+
+    const updated = await this.applyScheduleUpdate(task, schedulerId, input)
+    return this.resolveCalendarRowWithConflicts(
+      orgId,
+      updated,
+      this.resolveCalendarDayRange(this.resolveCalendarScheduledAt(updated)),
+    )
+  }
+
+  async batchScheduleCalendar(
+    orgId: string,
+    schedulerId: string,
+    input: CalendarBatchScheduleInput,
+  ) {
+    const ids = Array.from(
+      new Set(
+        (input.ids || [])
+          .map(item => String(item || '').trim())
+          .filter(Boolean),
+      ),
+    )
+
+    if (ids.length === 0) {
+      throw new BadRequestException('ids is required')
+    }
+
+    const strategy = this.normalizeCalendarStrategy(input.strategy)
+    const scheduledItems: CalendarRow[] = []
+    const failures: Array<{ id: string, error: string }> = []
+    let cursor = this.normalizeBatchScheduleDate(input.startDate, input.time)
+
+    for (const id of ids) {
+      if (strategy === 'weekdays') {
+        cursor = this.skipWeekend(cursor)
+      }
+
+      try {
+        const task = await this.getTaskOrFail(orgId, id)
+        if (task.status === VideoTaskStatus.PUBLISHED) {
+          throw new BadRequestException('Published content cannot be rescheduled')
+        }
+
+        const updated = await this.applyScheduleUpdate(task, schedulerId, {
+          scheduledAt: cursor.toISOString(),
+          platform: input.platform,
+          note: `batch:${strategy}`,
+        })
+        scheduledItems.push(this.toCalendarRow(updated))
+      }
+      catch (error) {
+        failures.push({
+          id,
+          error: error instanceof Error ? error.message : 'batch_schedule_failed',
+        })
+      }
+
+      cursor = this.advanceCalendarCursor(cursor, strategy)
+    }
+
+    const items = this.annotateCalendarConflicts(scheduledItems)
+
+    return {
+      total: ids.length,
+      successCount: items.length,
+      failureCount: failures.length,
+      conflictCount: items.filter(item => item.conflict).length,
+      items,
+      failures,
+    }
+  }
+
   async batchEditCopy(orgId: string, contentIds: string[], updates: CopyUpdateInput) {
     if (!Array.isArray(contentIds) || contentIds.length === 0) {
       throw new BadRequestException('contentIds is required')
@@ -888,6 +1057,43 @@ export class ContentMgmtService {
     return query
   }
 
+  private buildCalendarQuery(
+    orgId: string,
+    filters: CalendarFilters,
+    range: CalendarRange,
+  ) {
+    const query: Record<string, unknown> = {
+      orgId: this.toObjectId(orgId, 'orgId'),
+    }
+
+    if (filters.status && filters.status !== 'all') {
+      query['status'] = filters.status
+    }
+
+    query['$or'] = [
+      {
+        'metadata.contentCalendar.scheduledAtDate': {
+          $gte: range.start,
+          $lte: range.end,
+        },
+      },
+      {
+        publishedAt: {
+          $gte: range.start,
+          $lte: range.end,
+        },
+      },
+      {
+        createdAt: {
+          $gte: range.start,
+          $lte: range.end,
+        },
+      },
+    ]
+
+    return query
+  }
+
   private extractStylePreferences(organization: Record<string, any>) {
     return organization['settings']?.['contentManagement']?.['stylePreferences'] || {}
   }
@@ -920,6 +1126,312 @@ export class ContentMgmtService {
       completedAt: task['completedAt'] || null,
       publishedAt: task['publishedAt'] || task['metadata']?.['publishedAt'] || null,
     }
+  }
+
+  private toCalendarRow(task: Record<string, any>): CalendarRow {
+    const id = task['_id']?.toString() || ''
+    const status = String(task['status'] || '').trim()
+    const scheduledAt = this.resolveCalendarScheduledAt(task)
+    const platform = this.resolveCalendarPlatform(task)
+
+    return {
+      id,
+      detailId: id,
+      title: this.resolveCalendarTitle(task, id),
+      brand: this.resolveCalendarBrand(task),
+      status,
+      rawStatus: status,
+      scheduledAt,
+      platform,
+      publishStatus: String(
+        task['metadata']?.['distribution']?.['publishStatus']
+        || (status === VideoTaskStatus.PUBLISHED ? 'published' : 'scheduled'),
+      ),
+      outputVideoUrl: String(task['outputVideoUrl'] || ''),
+      canApprove: status === VideoTaskStatus.PENDING_REVIEW,
+      approvalStatus: task['approval']?.['lastAction'] || null,
+      note: String(task['metadata']?.['contentCalendar']?.['note'] || ''),
+      conflict: false,
+      conflictCount: 0,
+      conflictIds: [],
+    }
+  }
+
+  private annotateCalendarConflicts(items: CalendarRow[]) {
+    const buckets = new Map<string, string[]>()
+    for (const item of items) {
+      const bucketKey = this.buildCalendarConflictBucket(item.platform, item.scheduledAt)
+      if (!bucketKey) {
+        continue
+      }
+      const bucket = buckets.get(bucketKey) || []
+      bucket.push(item.id)
+      buckets.set(bucketKey, bucket)
+    }
+
+    return items.map((item) => {
+      const bucketKey = this.buildCalendarConflictBucket(item.platform, item.scheduledAt)
+      const bucket = bucketKey ? buckets.get(bucketKey) || [] : []
+      const conflictIds = bucket.filter(id => id !== item.id)
+      return {
+        ...item,
+        conflict: conflictIds.length > 0,
+        conflictCount: conflictIds.length,
+        conflictIds,
+      }
+    })
+  }
+
+  private buildCalendarConflictBucket(platform: string, scheduledAt: string) {
+    if (!scheduledAt) {
+      return null
+    }
+    const scheduledDate = new Date(scheduledAt)
+    if (Number.isNaN(scheduledDate.getTime())) {
+      return null
+    }
+
+    return [
+      platform || 'unspecified',
+      scheduledDate.getUTCFullYear(),
+      String(scheduledDate.getUTCMonth() + 1).padStart(2, '0'),
+      String(scheduledDate.getUTCDate()).padStart(2, '0'),
+      String(scheduledDate.getUTCHours()).padStart(2, '0'),
+    ].join(':')
+  }
+
+  private resolveCalendarTitle(task: Record<string, any>, id: string) {
+    return String(
+      task['copy']?.['title']
+      || task['copy']?.['subtitle']
+      || task['metadata']?.['title']
+      || `内容 ${id.slice(-6)}`,
+    )
+  }
+
+  private resolveCalendarBrand(task: Record<string, any>) {
+    return String(
+      task['metadata']?.['brandName']
+      || task['metadata']?.['brand']?.['name']
+      || task['brandName']
+      || '',
+    )
+  }
+
+  private resolveCalendarPlatform(task: Record<string, any>) {
+    return String(
+      task['metadata']?.['contentCalendar']?.['platform']
+      || task['metadata']?.['publishInfo']?.['platform']
+      || 'unspecified',
+    )
+  }
+
+  private resolveCalendarScheduledAt(task: Record<string, any>) {
+    const scheduledAt = task['metadata']?.['contentCalendar']?.['scheduledAt']
+      || task['publishedAt']
+      || task['metadata']?.['publishedAt']
+      || task['createdAt']
+
+    const normalized = new Date(scheduledAt)
+    if (Number.isNaN(normalized.getTime())) {
+      return new Date().toISOString()
+    }
+
+    return normalized.toISOString()
+  }
+
+  private resolveCalendarRange(filters: CalendarFilters): CalendarRange {
+    if (filters.startDate || filters.endDate) {
+      const start = filters.startDate
+        ? this.parseCalendarBoundary(filters.startDate, 'start')
+        : this.parseCalendarBoundary(new Date().toISOString(), 'start')
+      const end = filters.endDate
+        ? this.parseCalendarBoundary(filters.endDate, 'end')
+        : this.parseCalendarBoundary(start.toISOString(), 'end')
+      return { start, end }
+    }
+
+    if (filters.month) {
+      const [yearText, monthText] = String(filters.month).split('-')
+      const year = Number(yearText)
+      const month = Number(monthText)
+      if (Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12) {
+        return {
+          start: new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0)),
+          end: new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)),
+        }
+      }
+    }
+
+    const current = new Date()
+    return {
+      start: new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1, 0, 0, 0, 0)),
+      end: new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 1, 0, 23, 59, 59, 999)),
+    }
+  }
+
+  private resolveCalendarDayRange(scheduledAt: string): CalendarRange {
+    const target = new Date(scheduledAt)
+    const start = new Date(Date.UTC(
+      target.getUTCFullYear(),
+      target.getUTCMonth(),
+      target.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    ))
+    const end = new Date(Date.UTC(
+      target.getUTCFullYear(),
+      target.getUTCMonth(),
+      target.getUTCDate(),
+      23,
+      59,
+      59,
+      999,
+    ))
+    return {
+      start,
+      end,
+    }
+  }
+
+  private async resolveCalendarRowWithConflicts(
+    orgId: string,
+    task: Record<string, any>,
+    range: CalendarRange,
+  ) {
+    const query = this.buildCalendarQuery(orgId, {}, range)
+    const related = await this.videoTaskModel.find(query).lean().exec()
+    const items = this.annotateCalendarConflicts(related.map(item => this.toCalendarRow(item)))
+    return items.find(item => item.id === task['_id']?.toString()) || this.toCalendarRow(task)
+  }
+
+  private async applyScheduleUpdate(
+    task: Record<string, any>,
+    schedulerId: string,
+    input: CalendarScheduleInput,
+  ) {
+    const scheduledAt = this.normalizeCalendarScheduleTimestamp(input.scheduledAt)
+    const scheduleDate = new Date(scheduledAt)
+    const platform = String(input.platform || this.resolveCalendarPlatform(task)).trim() || 'unspecified'
+    const note = String(input.note || '').trim()
+    const scheduledBy = schedulerId || task['userId'] || ''
+    const now = new Date()
+    const existingTimeline = Array.isArray(task['metadata']?.['timeline'])
+      ? task['metadata']['timeline']
+      : []
+
+    const updated = await this.videoTaskModel.findByIdAndUpdate(
+      task['_id'],
+      {
+        $set: {
+          'metadata.contentCalendar': {
+            scheduledAt,
+            scheduledAtDate: scheduleDate,
+            platform,
+            note,
+            lastScheduledAt: now.toISOString(),
+            lastScheduledBy: scheduledBy,
+          },
+          'metadata.distribution.publishStatus': task['status'] === VideoTaskStatus.PUBLISHED
+            ? 'published'
+            : (task['metadata']?.['distribution']?.['publishStatus'] || 'scheduled'),
+        },
+        $push: {
+          'metadata.timeline': this.createTimelineEntry(
+            'scheduled',
+            now,
+            `Content scheduled for ${platform}`,
+            task['status'],
+          ),
+          'iterationLog': createStatusTransitionIterationEntry(task['iterationLog'] as Array<Record<string, any>> || [], {
+            fromStatus: task['status'],
+            toStatus: task['status'],
+            timestamp: now,
+            detail: {
+              source: 'content-calendar',
+              action: 'schedule',
+              scheduledAt,
+              platform,
+              timelineSize: existingTimeline.length + 1,
+            },
+          }),
+        },
+      },
+      { new: true },
+    ).lean().exec()
+
+    if (!updated) {
+      throw new NotFoundException('Content not found')
+    }
+
+    return updated
+  }
+
+  private normalizeCalendarScheduleTimestamp(value: string) {
+    const normalized = new Date(value)
+    if (Number.isNaN(normalized.getTime())) {
+      throw new BadRequestException('scheduledAt is invalid')
+    }
+    return normalized.toISOString()
+  }
+
+  private normalizeBatchScheduleDate(dateText: string, timeText?: string) {
+    const rawDate = String(dateText || '').trim()
+    if (!rawDate) {
+      throw new BadRequestException('startDate is required')
+    }
+
+    const normalizedTime = String(timeText || '10:00').trim() || '10:00'
+    const combined = rawDate.includes('T') ? rawDate : `${rawDate}T${normalizedTime}:00.000Z`
+    const normalized = new Date(combined)
+    if (Number.isNaN(normalized.getTime())) {
+      throw new BadRequestException('startDate is invalid')
+    }
+    return normalized
+  }
+
+  private normalizeCalendarStrategy(strategy?: string) {
+    return strategy === 'weekdays' ? 'weekdays' : 'daily'
+  }
+
+  private parseCalendarBoundary(value: string, boundary: 'start' | 'end') {
+    const text = String(value || '').trim()
+    const dateOnlyMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (dateOnlyMatch) {
+      const [, yearText, monthText, dayText] = dateOnlyMatch
+      return new Date(Date.UTC(
+        Number(yearText),
+        Number(monthText) - 1,
+        Number(dayText),
+        boundary === 'start' ? 0 : 23,
+        boundary === 'start' ? 0 : 59,
+        boundary === 'start' ? 0 : 59,
+        boundary === 'start' ? 0 : 999,
+      ))
+    }
+
+    const normalized = new Date(text)
+    if (Number.isNaN(normalized.getTime())) {
+      throw new BadRequestException(`${boundary === 'start' ? 'startDate' : 'endDate'} is invalid`)
+    }
+
+    return normalized
+  }
+
+  private skipWeekend(date: Date) {
+    const next = new Date(date)
+    while (next.getUTCDay() === 0 || next.getUTCDay() === 6) {
+      next.setUTCDate(next.getUTCDate() + 1)
+    }
+    return next
+  }
+
+  private advanceCalendarCursor(date: Date, strategy: 'daily' | 'weekdays') {
+    const next = new Date(date)
+    next.setUTCDate(next.getUTCDate() + 1)
+    return strategy === 'weekdays' ? this.skipWeekend(next) : next
   }
 
   private toCsv(rows: Array<Record<string, any>>) {
