@@ -1,268 +1,268 @@
-import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { Schema as MongooseSchema } from "mongoose";
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
+import { Schema as MongooseSchema } from 'mongoose'
 
-import { DEFAULT_SCHEMA_OPTIONS } from "../mongodb.constants";
-import { WithTimestampSchema } from "./timestamp.schema";
+import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
+import { WithTimestampSchema } from './timestamp.schema'
 
 export enum PipelineType {
-  SEEDING = "seeding",
-  REVIEW = "review",
-  NEW_PRODUCT = "new_product",
-  BRAND_STORY = "brand_story",
-  PROMO = "promo",
-  CUSTOM = "custom",
+  SEEDING = 'seeding',
+  REVIEW = 'review',
+  NEW_PRODUCT = 'new_product',
+  BRAND_STORY = 'brand_story',
+  PROMO = 'promo',
+  CUSTOM = 'custom',
 }
 
 export enum PipelineStatus {
-  ACTIVE = "active",
-  PAUSED = "paused",
-  ARCHIVED = "archived",
+  ACTIVE = 'active',
+  PAUSED = 'paused',
+  ARCHIVED = 'archived',
 }
 
 @Schema({ _id: false })
 class PipelineBrandAssets {
-  @Prop({ type: String, default: "" })
-  logo: string;
+  @Prop({ type: String, default: '' })
+  logo: string
 
   @Prop({ type: [String], default: [] })
-  colors: string[];
+  colors: string[]
 
   @Prop({ type: [String], default: [] })
-  fonts: string[];
+  fonts: string[]
 }
 
 @Schema({ _id: false })
 class PipelineStyleRewriteConfig {
   @Prop({ type: Boolean, default: false })
-  enabled: boolean;
+  enabled: boolean
 
-  @Prop({ type: String, default: "shared" })
-  scope: string;
-
-  @Prop({ type: Boolean, default: true })
-  preserveComposition: boolean;
+  @Prop({ type: String, default: 'shared' })
+  scope: string
 
   @Prop({ type: Boolean, default: true })
-  preserveProductPlacement: boolean;
+  preserveComposition: boolean
+
+  @Prop({ type: Boolean, default: true })
+  preserveProductPlacement: boolean
 
   @Prop({ type: [String], default: [] })
-  mutationDomains: string[];
+  mutationDomains: string[]
 }
 
 @Schema({ _id: false })
 class PipelineStyleConfig {
   @Prop({ type: Number, default: 15 })
-  duration: number;
+  duration: number
 
-  @Prop({ type: String, default: "9:16" })
-  aspectRatio: string;
+  @Prop({ type: String, default: '9:16' })
+  aspectRatio: string
 
-  @Prop({ type: String, default: "" })
-  tone: string;
+  @Prop({ type: String, default: '' })
+  tone: string
 
-  @Prop({ type: String, default: "" })
-  visualStyle: string;
+  @Prop({ type: String, default: '' })
+  visualStyle: string
 
   @Prop({ type: [String], default: [] })
-  platforms: string[];
+  platforms: string[]
 
   @Prop({ type: PipelineBrandAssets, default: () => ({}) })
-  brandAssets: PipelineBrandAssets;
+  brandAssets: PipelineBrandAssets
 
   @Prop({ type: PipelineStyleRewriteConfig, default: () => ({}) })
-  styleRewrite: PipelineStyleRewriteConfig;
+  styleRewrite: PipelineStyleRewriteConfig
 }
 
 @Schema({ _id: false })
 class PipelinePreferences {
   @Prop({ type: [String], default: [] })
-  preferredStyles: string[];
+  preferredStyles: string[]
 
   @Prop({ type: [String], default: [] })
-  avoidStyles: string[];
+  avoidStyles: string[]
 
   @Prop({ type: Number, default: 15 })
-  preferredDuration: number;
+  preferredDuration: number
 
-  @Prop({ type: String, default: "9:16" })
-  aspectRatio: string;
-
-  @Prop({ type: Object, default: {} })
-  subtitlePreferences: Record<string, any>;
+  @Prop({ type: String, default: '9:16' })
+  aspectRatio: string
 
   @Prop({ type: Object, default: {} })
-  remixInsights: Record<string, any>;
+  subtitlePreferences: Record<string, any>
+
+  @Prop({ type: Object, default: {} })
+  remixInsights: Record<string, any>
 
   @Prop({ type: [Object], default: [] })
-  feedbackLog: Record<string, any>[];
+  feedbackLog: Record<string, any>[]
 
   @Prop({ type: Object, default: {} })
-  preferenceLearning: Record<string, any>;
+  preferenceLearning: Record<string, any>
 
   @Prop({ type: Date, default: null })
-  lastFeedbackAt?: Date | null;
+  lastFeedbackAt?: Date | null
 
   @Prop({ type: Number, default: 0 })
-  feedbackCount: number;
+  feedbackCount: number
 }
 
 @Schema({ _id: false })
 class ScheduleConfig {
   @Prop({ type: Boolean, default: false })
-  enabled: boolean;
+  enabled: boolean
 
-  @Prop({ type: String, default: "0 9 * * 1-5" })
-  cron: string;
+  @Prop({ type: String, default: '0 9 * * 1-5' })
+  cron: string
 
   @Prop({ type: Number, default: 1 })
-  videosPerRun: number;
+  videosPerRun: number
 
-  @Prop({ type: String, default: "Asia/Shanghai" })
-  timezone: string;
+  @Prop({ type: String, default: 'Asia/Shanghai' })
+  timezone: string
 }
 
 @Schema({ _id: false })
 class PipelineDistributionTarget {
-  @Prop({ type: String, default: "" })
-  employeeName: string;
+  @Prop({ type: String, default: '' })
+  employeeName: string
 
-  @Prop({ type: String, default: "" })
-  assignmentId: string;
+  @Prop({ type: String, default: '' })
+  assignmentId: string
 
-  @Prop({ type: String, default: "" })
-  imChannel: string;
+  @Prop({ type: String, default: '' })
+  imChannel: string
 
-  @Prop({ type: String, default: "" })
-  imUserId: string;
-
-  @Prop({ type: [String], default: [] })
-  targetPlatforms: string[];
+  @Prop({ type: String, default: '' })
+  imUserId: string
 
   @Prop({ type: [String], default: [] })
-  preferredTimeSlots: string[];
+  targetPlatforms: string[]
+
+  @Prop({ type: [String], default: [] })
+  preferredTimeSlots: string[]
 
   @Prop({ type: Object, default: {} })
-  outputConfig: Record<string, any>;
+  outputConfig: Record<string, any>
 }
 
 @Schema({ _id: false })
 class PipelineDispatchRules {
   @Prop({ type: [String], default: [] })
-  assignmentIds: string[];
+  assignmentIds: string[]
 
   @Prop({ type: [String], default: [] })
-  preferredPlatforms: string[];
+  preferredPlatforms: string[]
 
   @Prop({ type: [String], default: [] })
-  preferredCategories: string[];
+  preferredCategories: string[]
 
   @Prop({ type: [String], default: [] })
-  templateIds: string[];
+  templateIds: string[]
 
   @Prop({ type: [String], default: [] })
-  accountTypes: string[];
+  accountTypes: string[]
 
   @Prop({ type: [String], default: [] })
-  platformAccountIds: string[];
+  platformAccountIds: string[]
 
-  @Prop({ type: String, default: "round-robin" })
-  strategy: string;
+  @Prop({ type: String, default: 'round-robin' })
+  strategy: string
 
   @Prop({ type: [PipelineDistributionTarget], default: [] })
-  targets: PipelineDistributionTarget[];
+  targets: PipelineDistributionTarget[]
 }
 
 @Schema({ _id: false })
 export class PipelineModelOverrides {
-  @Prop({ type: String, default: "" })
-  copy?: string;
+  @Prop({ type: String, default: '' })
+  copy?: string
 
-  @Prop({ type: String, default: "" })
-  frameEdit?: string;
+  @Prop({ type: String, default: '' })
+  frameEdit?: string
 
-  @Prop({ type: String, default: "" })
-  videoGen?: string;
+  @Prop({ type: String, default: '' })
+  videoGen?: string
 }
 
 @Schema({ _id: false })
 class PipelineGroupBinding {
-  @Prop({ type: String, default: "" })
-  channel: string;
+  @Prop({ type: String, default: '' })
+  channel: string
 
-  @Prop({ type: String, default: "" })
-  groupId: string;
+  @Prop({ type: String, default: '' })
+  groupId: string
 
-  @Prop({ type: String, default: "" })
-  groupName: string;
+  @Prop({ type: String, default: '' })
+  groupName: string
 
   @Prop({ type: Date, default: null })
-  boundAt?: Date | null;
+  boundAt?: Date | null
 
-  @Prop({ type: String, default: "" })
-  boundBy: string;
+  @Prop({ type: String, default: '' })
+  boundBy: string
 }
 
 @Schema({ _id: false })
 class PipelineTrainingPreference {
-  @Prop({ type: String, default: "" })
-  source: string;
+  @Prop({ type: String, default: '' })
+  source: string
 
-  @Prop({ type: String, default: "custom" })
-  sourceType: string;
+  @Prop({ type: String, default: 'custom' })
+  sourceType: string
 
-  @Prop({ type: String, default: "" })
-  preference: string;
+  @Prop({ type: String, default: '' })
+  preference: string
 
   @Prop({ type: Boolean, default: true })
-  applied: boolean;
+  applied: boolean
 
   @Prop({ type: Number, default: 0 })
-  priority: number;
+  priority: number
 
   @Prop({ type: Number, default: null })
-  score?: number | null;
+  score?: number | null
 
-  @Prop({ type: String, default: "" })
-  notes: string;
+  @Prop({ type: String, default: '' })
+  notes: string
 
   @Prop({ type: Object, default: {} })
-  metadata: Record<string, any>;
+  metadata: Record<string, any>
 
   @Prop({ type: Date, default: Date.now })
-  createdAt: Date;
+  createdAt: Date
 }
 
 @Schema({ _id: false })
 class PipelineWarmUpState {
   @Prop({ type: Boolean, default: true })
-  required: boolean;
+  required: boolean
 
-  @Prop({ type: String, default: "idle" })
-  status: string;
+  @Prop({ type: String, default: 'idle' })
+  status: string
 
   @Prop({ type: Date, default: null })
-  lastTriggeredAt?: Date | null;
+  lastTriggeredAt?: Date | null
 
   @Prop({ type: [String], default: [] })
-  queuedTaskIds: string[];
+  queuedTaskIds: string[]
 }
 
-@Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: "pipelines" })
+@Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'pipelines' })
 export class Pipeline extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
-  _id: MongooseSchema.Types.ObjectId;
+  _id: MongooseSchema.Types.ObjectId
 
   @Prop({ required: true, type: MongooseSchema.Types.ObjectId, index: true })
-  orgId: MongooseSchema.Types.ObjectId;
+  orgId: MongooseSchema.Types.ObjectId
 
   @Prop({ required: true, type: MongooseSchema.Types.ObjectId, index: true })
-  brandId: MongooseSchema.Types.ObjectId;
+  brandId: MongooseSchema.Types.ObjectId
 
   @Prop({ required: true, type: String })
-  name: string;
+  name: string
 
   @Prop({ type: String, enum: Object.values(PipelineType), default: PipelineType.SEEDING })
-  type: PipelineType;
+  type: PipelineType
 
   @Prop({
     type: String,
@@ -270,53 +270,53 @@ export class Pipeline extends WithTimestampSchema {
     default: PipelineStatus.ACTIVE,
     index: true,
   })
-  status: PipelineStatus;
+  status: PipelineStatus
 
-  @Prop({ type: String, default: "" })
-  description: string;
+  @Prop({ type: String, default: '' })
+  description: string
 
-  @Prop({ type: String, default: "", index: true })
-  templateId: string;
+  @Prop({ type: String, default: '', index: true })
+  templateId: string
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: "DistributionRule", default: null, index: true })
-  routingConfigId?: MongooseSchema.Types.ObjectId | null;
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'DistributionRule', default: null, index: true })
+  routingConfigId?: MongooseSchema.Types.ObjectId | null
 
-  @Prop({ type: String, default: "" })
-  imGroupId: string;
+  @Prop({ type: String, default: '' })
+  imGroupId: string
 
   @Prop({ type: PipelineGroupBinding, default: () => ({}) })
-  groupBinding: PipelineGroupBinding;
+  groupBinding: PipelineGroupBinding
 
   @Prop({ type: PipelineStyleConfig, default: () => ({}) })
-  styleConfig: PipelineStyleConfig;
+  styleConfig: PipelineStyleConfig
 
   @Prop({ type: PipelinePreferences, default: () => ({}) })
-  preferences: PipelinePreferences;
+  preferences: PipelinePreferences
 
   @Prop({ type: ScheduleConfig, default: () => ({}) })
-  schedule: ScheduleConfig;
+  schedule: ScheduleConfig
 
   @Prop({ type: PipelineDispatchRules, default: () => ({}) })
-  distributionRules: PipelineDispatchRules;
+  distributionRules: PipelineDispatchRules
 
   @Prop({ type: PipelineModelOverrides, default: () => ({}) })
-  modelOverrides: PipelineModelOverrides;
+  modelOverrides: PipelineModelOverrides
 
   @Prop({ type: [PipelineTrainingPreference], default: [] })
-  trainingPreferences: PipelineTrainingPreference[];
+  trainingPreferences: PipelineTrainingPreference[]
 
   @Prop({ type: PipelineWarmUpState, default: () => ({}) })
-  warmUp: PipelineWarmUpState;
+  warmUp: PipelineWarmUpState
 
   @Prop({ type: Number, default: 0 })
-  totalVideosProduced: number;
+  totalVideosProduced: number
 
   @Prop({ type: Number, default: 0 })
-  totalVideosPublished: number;
+  totalVideosPublished: number
 }
 
-export const PipelineSchema = SchemaFactory.createForClass(Pipeline);
-PipelineSchema.index({ orgId: 1, brandId: 1 });
-PipelineSchema.index({ orgId: 1, status: 1, updatedAt: -1 });
-PipelineSchema.index({ orgId: 1, templateId: 1 });
-PipelineSchema.index({ "groupBinding.groupId": 1 }, { sparse: true });
+export const PipelineSchema = SchemaFactory.createForClass(Pipeline)
+PipelineSchema.index({ orgId: 1, brandId: 1 })
+PipelineSchema.index({ orgId: 1, status: 1, updatedAt: -1 })
+PipelineSchema.index({ orgId: 1, templateId: 1 })
+PipelineSchema.index({ 'groupBinding.groupId': 1 }, { sparse: true })

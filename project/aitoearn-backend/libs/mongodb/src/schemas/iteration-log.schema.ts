@@ -1,80 +1,80 @@
-import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { Schema as MongooseSchema } from "mongoose";
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
+import { Schema as MongooseSchema } from 'mongoose'
 
-import { DEFAULT_SCHEMA_OPTIONS } from "../mongodb.constants";
-import { WithTimestampSchema } from "./timestamp.schema";
+import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
+import { WithTimestampSchema } from './timestamp.schema'
 
 export const ITERATION_LOG_STAGES = [
-  "frame_edit",
-  "i2v_generate",
-  "subtitle",
-  "quality_check",
-  "copy_generate",
-] as const;
+  'frame_edit',
+  'i2v_generate',
+  'subtitle',
+  'quality_check',
+  'copy_generate',
+] as const
 
-export type IterationLogStage = (typeof ITERATION_LOG_STAGES)[number];
+export type IterationLogStage = (typeof ITERATION_LOG_STAGES)[number]
 
 export const ITERATION_LOG_STATUSES = [
-  "success",
-  "failed",
-  "retried",
-  "skipped",
-] as const;
+  'success',
+  'failed',
+  'retried',
+  'skipped',
+] as const
 
-export type IterationLogStatus = (typeof ITERATION_LOG_STATUSES)[number];
+export type IterationLogStatus = (typeof ITERATION_LOG_STATUSES)[number]
 
 export const ITERATION_FAIL_CATEGORIES = [
-  "quality",
-  "content",
-  "technical",
-  "brand_mismatch",
-] as const;
+  'quality',
+  'content',
+  'technical',
+  'brand_mismatch',
+] as const
 
-export type IterationFailureCategory = (typeof ITERATION_FAIL_CATEGORIES)[number];
+export type IterationFailureCategory = (typeof ITERATION_FAIL_CATEGORIES)[number]
 
 @Schema({ _id: false })
 class IterationFailureAnalysis {
-  @Prop({ type: String, default: "" })
-  failReason: string;
+  @Prop({ type: String, default: '' })
+  failReason: string
 
-  @Prop({ type: String, enum: ITERATION_FAIL_CATEGORIES, default: "quality" })
-  failCategory: IterationFailureCategory;
+  @Prop({ type: String, enum: ITERATION_FAIL_CATEGORIES, default: 'quality' })
+  failCategory: IterationFailureCategory
 
   @Prop({ type: [String], default: [] })
-  suggestedFixes: string[];
+  suggestedFixes: string[]
 
   @Prop({ type: Number, default: 0 })
-  confidence: number;
+  confidence: number
 }
 
 @Schema({ _id: false })
 class IterationQualityScore {
   @Prop({ type: Number, default: 0 })
-  total: number;
+  total: number
 
   @Prop({ type: Number, default: 0 })
-  production: number;
+  production: number
 
   @Prop({ type: Number, default: 0 })
-  virality: number;
+  virality: number
 
   @Prop({ type: Object, default: {} })
-  dimensions: Record<string, number>;
+  dimensions: Record<string, number>
 }
 
-@Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: "iteration_logs" })
+@Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'iteration_logs' })
 export class IterationLog extends WithTimestampSchema {
   @Prop({ type: MongooseSchema.Types.ObjectId, auto: true })
-  _id: MongooseSchema.Types.ObjectId;
+  _id: MongooseSchema.Types.ObjectId
 
   @Prop({ required: true, type: String, index: true })
-  videoTaskId: string;
+  videoTaskId: string
 
-  @Prop({ type: String, default: "", index: true })
-  batchId?: string;
+  @Prop({ type: String, default: '', index: true })
+  batchId?: string
 
   @Prop({ required: true, type: Number })
-  iteration: number;
+  iteration: number
 
   @Prop({
     required: true,
@@ -82,7 +82,7 @@ export class IterationLog extends WithTimestampSchema {
     enum: ITERATION_LOG_STAGES,
     index: true,
   })
-  stage: IterationLogStage;
+  stage: IterationLogStage
 
   @Prop({
     required: true,
@@ -90,35 +90,35 @@ export class IterationLog extends WithTimestampSchema {
     enum: ITERATION_LOG_STATUSES,
     index: true,
   })
-  status: IterationLogStatus;
+  status: IterationLogStatus
 
-  @Prop({ type: String, default: "" })
-  originalPrompt?: string;
+  @Prop({ type: String, default: '' })
+  originalPrompt?: string
 
-  @Prop({ type: String, default: "" })
-  optimizedPrompt?: string;
+  @Prop({ type: String, default: '' })
+  optimizedPrompt?: string
 
   @Prop({ type: IterationFailureAnalysis, default: null })
-  failureAnalysis?: IterationFailureAnalysis | null;
+  failureAnalysis?: IterationFailureAnalysis | null
 
   @Prop({ type: IterationQualityScore, default: null })
-  qualityScore?: IterationQualityScore | null;
+  qualityScore?: IterationQualityScore | null
 
   @Prop({ type: Number, default: 0 })
-  costCredits?: number;
+  costCredits?: number
 
   @Prop({ type: Number, default: 0 })
-  durationMs?: number;
+  durationMs?: number
 
-  @Prop({ type: String, default: "default" })
-  strategyUsed?: string;
+  @Prop({ type: String, default: 'default' })
+  strategyUsed?: string
 
   @Prop({ type: Object, default: {} })
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown>
 }
 
-export const IterationLogSchema = SchemaFactory.createForClass(IterationLog);
+export const IterationLogSchema = SchemaFactory.createForClass(IterationLog)
 
-IterationLogSchema.index({ videoTaskId: 1, iteration: -1 });
-IterationLogSchema.index({ batchId: 1, createdAt: -1 });
-IterationLogSchema.index({ stage: 1, status: 1, createdAt: -1 });
+IterationLogSchema.index({ videoTaskId: 1, iteration: -1 })
+IterationLogSchema.index({ batchId: 1, createdAt: -1 })
+IterationLogSchema.index({ stage: 1, status: 1, createdAt: -1 })

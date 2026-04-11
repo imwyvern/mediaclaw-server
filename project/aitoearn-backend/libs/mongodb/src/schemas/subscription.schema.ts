@@ -2,6 +2,9 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Schema as MongooseSchema } from 'mongoose'
 
 import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
+// BillingMode is exported from organization.schema.ts
+import { BillingMode } from './organization.schema'
+
 import { WithTimestampSchema } from './timestamp.schema'
 
 export enum SubscriptionPlan {
@@ -16,9 +19,6 @@ export enum SubscriptionStatus {
   CANCELLED = 'cancelled',
   EXPIRED = 'expired',
 }
-
-// BillingMode is exported from organization.schema.ts
-import { BillingMode } from './organization.schema'
 export { BillingMode as SubBillingMode } from './organization.schema'
 
 @Schema({ ...DEFAULT_SCHEMA_OPTIONS, collection: 'subscriptions' })

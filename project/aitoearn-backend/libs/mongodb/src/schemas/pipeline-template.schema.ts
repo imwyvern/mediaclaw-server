@@ -2,8 +2,8 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Schema as MongooseSchema } from 'mongoose'
 
 import { DEFAULT_SCHEMA_OPTIONS } from '../mongodb.constants'
-import { WithTimestampSchema } from './timestamp.schema'
 import { PipelineType } from './pipeline.schema'
+import { WithTimestampSchema } from './timestamp.schema'
 
 export enum PipelineTemplateStatus {
   ACTIVE = 'active',
