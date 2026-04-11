@@ -533,3 +533,18 @@
     - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
   - 功能自测结论：Batch 1 相关后端 `🔶` 项在当前代码已持续闭环，本次第十次 retry 没有发现新的 backend 功能缺口或新增 failure，停止条件满足
 - 下一步计划：提交本次 Batch 1 验证记录；如继续后续 gap 批次，应继续保持只提交 iteration 记录，不把当前工作树中未归属的 `libs/mongodb/*`、`tts.service.ts`、`clawhost/migrations` 脏改动混入。
+
+## 2026-04-10 23:14:32 PDT
+- 当前改动：执行 Batch 2 retry/retry/retry/retry/retry/retry/retry/retry/retry 复核。全量测试初次失败后，定位到 IM 群协作链路新增 `ImSession` 实体，但共享 `@yikart/mongodb` 测试 mock 未导出 `ImSession/ImSessionSchema`，同时 `ImChannelRegistryService.register()` 在测试 bootstrap 场景下对空 adapter 缺少防御。已在 `module-spec.factory.ts` 补齐 `ImSession` 相关 mock、扩充 `DeliveryChannel` mock 枚举，并在 `im-channel-registry.service.ts` 增加空 adapter 保护，避免 employee-dispatch 初始化污染无关模块测试。
+- 验证结果：
+  - 首轮失败分析：
+    - `pnpm nx test aitoearn-server -- --run` 失败，根因是 `No "ImSession" export is defined on the "@yikart/mongodb" mock`
+    - 补齐 mock 后继续回归，发现 `ImChannelRegistryService` 在测试注入空值时会注册失败，已增加 `adapter?.channel` 防御
+  - 修复后定向回归：
+    - `pnpm nx test aitoearn-server -- --run src/core/mediaclaw/billing/billing.service.spec.ts src/core/mediaclaw/content-mgmt/content-mgmt.service.spec.ts src/core/mediaclaw/payment/xorpay.service.spec.ts src/core/mediaclaw/skill/skill.service.spec.ts src/core/mediaclaw/worker/video-worker.spec.ts` 通过，`5` 个测试文件、`27` 个测试全部通过
+  - 当前工作树全量验证：
+    - `pnpm nx build aitoearn-server` 通过
+    - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+    - `pnpm nx test aitoearn-server -- --run` 通过，`125` 个测试文件、`397` 个测试全部通过
+  - 功能自测结论：Batch 2 原审计中的 `公开数据删除 / 合规下线通道`、`趋势预测引擎`、`企业 SSO`、`ClawHost PostgreSQL 模型` 在当前代码已持续闭环；本轮只修复测试基线与 IM 注册鲁棒性问题，没有引入新的 backend 功能缺口或新增 failure，停止条件满足
+- 下一步计划：提交本轮测试基线修复与迭代记录两个原子提交；若继续后续 gap 批次，应继续隔离当前工作树中的 `tts.service.ts`、`.tmp-vitest/`、`clawhost/migrations` 等无关残留，避免污染验证结论。
