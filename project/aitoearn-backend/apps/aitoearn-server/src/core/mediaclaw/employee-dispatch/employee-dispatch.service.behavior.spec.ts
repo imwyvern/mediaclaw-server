@@ -90,6 +90,7 @@ describe('employeeDispatchService', () => {
   beforeEach(() => {
     employeeAssignmentModel = {
       find: vi.fn(),
+      countDocuments: vi.fn().mockResolvedValue(0),
       findById: vi.fn().mockReturnValue(createQuery(null)),
       findOneAndUpdate: vi.fn().mockReturnValue(createQuery(null)),
       findByIdAndUpdate: vi.fn().mockReturnValue(createQuery(null)),
@@ -171,6 +172,28 @@ describe('employeeDispatchService', () => {
       imChannelRegistryService as any,
       imSessionService as any,
     )
+  })
+
+  it('应对员工搜索关键字做正则转义', async () => {
+    const orgId = new Types.ObjectId().toString()
+    employeeAssignmentModel.find.mockReturnValue(createQuery([]))
+
+    await service.listAssignments(orgId, { keyword: '1380+(vip).*' }, { page: 1, limit: 20 })
+
+    expect(employeeAssignmentModel.find).toHaveBeenCalledWith({
+      orgId,
+      $or: [
+        { employeeName: { $regex: '1380\\+\\(vip\\)\\.\\*', $options: 'i' } },
+        { employeePhone: { $regex: '1380\\+\\(vip\\)\\.\\*', $options: 'i' } },
+      ],
+    })
+    expect(employeeAssignmentModel.countDocuments).toHaveBeenCalledWith({
+      orgId,
+      $or: [
+        { employeeName: { $regex: '1380\\+\\(vip\\)\\.\\*', $options: 'i' } },
+        { employeePhone: { $regex: '1380\\+\\(vip\\)\\.\\*', $options: 'i' } },
+      ],
+    })
   })
 
   it('应按模板与账号类型筛选员工并支持单账号覆盖', async () => {

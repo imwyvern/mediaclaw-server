@@ -113,6 +113,48 @@ vi.mock('@yikart/mongodb', () => {
 })
 
 describe('clientMgmtService behavior', () => {
+  it('应对机构搜索关键字做正则转义', async () => {
+    const query = {
+      sort: vi.fn(),
+      skip: vi.fn(),
+      limit: vi.fn(),
+      lean: vi.fn(),
+      exec: vi.fn().mockResolvedValue([]),
+    }
+    query.sort.mockReturnValue(query)
+    query.skip.mockReturnValue(query)
+    query.limit.mockReturnValue(query)
+    query.lean.mockReturnValue(query)
+
+    const organizationModel = {
+      find: vi.fn().mockReturnValue(query),
+      countDocuments: vi.fn().mockResolvedValue(0),
+    }
+    const service = new ClientMgmtService(
+      organizationModel as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    )
+
+    await service.listOrgs({ keyword: '3C+(test).*' }, { page: 1, limit: 20 })
+
+    expect(organizationModel.find).toHaveBeenCalledWith({
+      $or: [
+        { name: { $regex: '3C\\+\\(test\\)\\.\\*', $options: 'i' } },
+        { contactName: { $regex: '3C\\+\\(test\\)\\.\\*', $options: 'i' } },
+        { contactPhone: { $regex: '3C\\+\\(test\\)\\.\\*', $options: 'i' } },
+        { contactEmail: { $regex: '3C\\+\\(test\\)\\.\\*', $options: 'i' } },
+      ],
+    })
+  })
+
   it('应支持管理员查看和撤销待处理邀请', async () => {
     const orgId = new Types.ObjectId().toString()
     const organizationModel = {

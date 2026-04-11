@@ -20,6 +20,7 @@ import { Model, Types } from 'mongoose'
 
 import { ClawHostGatewayPushService } from '../clawhost/clawhost-gateway-push.service'
 import { DistributionPublishStatus } from '../distribution/distribution.constants'
+import { escapeMongoRegex } from '../shared/query.utils'
 import { DingtalkPushService } from './dingtalk-push.service'
 import { FeishuPushService } from './feishu-push.service'
 import { ImChannelRegistryService } from './im-channel-registry.service'
@@ -198,9 +199,10 @@ export class EmployeeDispatchService {
 
     const keyword = this.normalizeOptionalString(filters.keyword)
     if (keyword) {
+      const escapedKeyword = escapeMongoRegex(keyword)
       query['$or'] = [
-        { employeeName: { $regex: keyword, $options: 'i' } },
-        { employeePhone: { $regex: keyword, $options: 'i' } },
+        { employeeName: { $regex: escapedKeyword, $options: 'i' } },
+        { employeePhone: { $regex: escapedKeyword, $options: 'i' } },
       ]
     }
 

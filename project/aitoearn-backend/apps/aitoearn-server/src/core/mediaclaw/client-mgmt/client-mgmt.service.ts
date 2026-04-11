@@ -27,6 +27,7 @@ import {
 import { Model, Types } from 'mongoose'
 import { EnterpriseAuthService } from '../auth/enterprise-auth.service'
 import { OrgMemberAdminService } from '../org/org-member-admin.service'
+import { escapeMongoRegex } from '../shared/query.utils'
 import {
   MEDIACLAW_PENDING_TASK_STATUSES,
   MEDIACLAW_SUCCESS_STATUSES,
@@ -526,11 +527,12 @@ export class ClientMgmtService {
 
     const keyword = filters.keyword?.trim()
     if (keyword) {
+      const escapedKeyword = escapeMongoRegex(keyword)
       query['$or'] = [
-        { name: { $regex: keyword, $options: 'i' } },
-        { contactName: { $regex: keyword, $options: 'i' } },
-        { contactPhone: { $regex: keyword, $options: 'i' } },
-        { contactEmail: { $regex: keyword, $options: 'i' } },
+        { name: { $regex: escapedKeyword, $options: 'i' } },
+        { contactName: { $regex: escapedKeyword, $options: 'i' } },
+        { contactPhone: { $regex: escapedKeyword, $options: 'i' } },
+        { contactEmail: { $regex: escapedKeyword, $options: 'i' } },
       ]
     }
 

@@ -23,6 +23,7 @@ import {
   normalizeLayerQuotaPolicy,
   normalizeStringList,
 } from '../shared/layer-policy.utils'
+import { escapeMongoRegex } from '../shared/query.utils'
 
 interface SkillMarketplaceFilters {
   search?: string
@@ -312,12 +313,13 @@ export class SkillMarketplaceService {
       : null
 
     if (filters.search?.trim()) {
+      const searchPattern = new RegExp(escapeMongoRegex(filters.search.trim()), 'i')
       andConditions.push({
         $or: [
-          { name: new RegExp(filters.search.trim(), 'i') },
-          { summary: new RegExp(filters.search.trim(), 'i') },
-          { description: new RegExp(filters.search.trim(), 'i') },
-          { skillId: new RegExp(filters.search.trim(), 'i') },
+          { name: searchPattern },
+          { summary: searchPattern },
+          { description: searchPattern },
+          { skillId: searchPattern },
         ],
       })
     }
