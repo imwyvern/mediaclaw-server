@@ -48,6 +48,10 @@ export class ImChannelRegistryService {
   }
 
   private register(adapter: ImPushService<Record<string, unknown>>) {
+    if (!adapter?.channel) {
+      return
+    }
+
     this.registry.set(adapter.channel, adapter)
   }
 }
