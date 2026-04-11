@@ -501,3 +501,17 @@
     - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
   - 功能自测结论：Batch 2 原审计中的 `公开数据删除 / 合规下线通道`、`趋势预测引擎`、`企业 SSO`、`ClawHost PostgreSQL 模型` 在当前代码已持续闭环；本次第八次 retry 没有发现新的 backend 功能缺口或新增 failure，停止条件满足
 - 下一步计划：提交本次测试基线修复；如继续后续 gap 批次，应先处理当前工作树中仍未归属的 schema/controller 脏改动，避免再次污染全量验证。
+
+## 2026-04-10 21:05:04 PDT
+- 当前改动：执行 Batch 3 retry/retry/retry/retry/retry/retry/retry/retry 复核。逐项核对 `ClawHost Docker/K8s runtime 抽象`、`OpenTelemetry tracing + Mongo 慢查询`、`OSS 生命周期与存储健康治理` 三项架构升级能力是否仍保持 service/runtime-driver/schema/test 闭环，并直接在当前工作树执行 `build/lint/test` 做停止条件验证。
+- 验证结果：
+  - 代码复核结论：
+    - `clawhost-runtime.service.ts + clawhost-docker-runtime.driver.ts + clawhost-k8s-runtime.driver.ts + clawhost-runtime.service.behavior.spec.ts` 仍提供 Docker/K8s 双 runtime 抽象、按 `runtimeKind` 分派以及运行时行为测试闭环
+    - `monitoring-tracing.service.ts + mongo-slow-query-observer.service.ts + monitoring-tracing.service.behavior.spec.ts` 仍提供 OpenTelemetry tracing 初始化、trace 传播和 Mongo 慢查询观测能力
+    - `storage-lifecycle.service.ts + storage-lifecycle.service.behavior.spec.ts + health-check.service.ts` 仍提供 OSS 生命周期同步、漂移检测和存储健康治理闭环
+  - 当前工作树验证：
+    - `pnpm nx build aitoearn-server` 通过
+    - `pnpm nx lint aitoearn-server` 通过，无新增 warning
+    - `pnpm nx test aitoearn-server -- --run` 通过，`123` 个测试文件、`387` 个测试全部通过
+  - 功能自测结论：Batch 3 相关架构升级项在当前代码已持续闭环，本次第九次 retry 没有发现新的 backend 架构缺口或新增 failure，停止条件满足
+- 下一步计划：提交本次 Batch 3 验证记录；如继续后续 gap 批次，应先梳理当前工作树里仍未归属的 `libs/mongodb/*` 与 `clawhost/migrations` 脏改动，避免把不同主题混入下一轮提交。
