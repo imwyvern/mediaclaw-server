@@ -9,6 +9,7 @@ import { MongodbModule } from '@yikart/mongodb'
 import { RedlockModule } from '@yikart/redlock'
 import { config } from './config'
 import { AgentModule } from './core/agent/agent.module'
+import { MediaclawModule } from './core/mediaclaw/mediaclaw.module'
 import { AiModule } from './core/ai/ai.module'
 import { DraftGenerationModule } from './core/draft-generation'
 import { InternalModule } from './core/internal'
@@ -29,6 +30,7 @@ import { MaterialAdaptationModule } from './core/material-adaptation'
     HelpersModule,
     AiModule,
     AgentModule,
+    MediaclawModule,
     InternalModule,
     MaterialAdaptationModule,
     DraftGenerationModule,
