@@ -53,4 +53,4 @@ local.config.js
 # local docker
 docker-compose.yml
 nginx/
-vitest.config.*.timestamp*
+vitest.config.*.timestamp*.env.mediaclaw
