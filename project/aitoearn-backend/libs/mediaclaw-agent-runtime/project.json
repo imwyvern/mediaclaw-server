@@ -1,0 +1,55 @@
+{
+  "name": "mediaclaw-agent-runtime",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/mediaclaw-agent-runtime/src",
+  "projectType": "library",
+  "release": {
+    "version": {
+      "manifestRootsToUpdate": ["dist/{projectRoot}"],
+      "currentVersionResolver": "git-tag",
+      "fallbackCurrentVersionResolver": "disk"
+    }
+  },
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/mediaclaw-agent-runtime",
+        "tsConfig": "libs/mediaclaw-agent-runtime/tsconfig.lib.json",
+        "packageJson": "libs/mediaclaw-agent-runtime/package.json",
+        "main": "libs/mediaclaw-agent-runtime/src/index.ts",
+        "assets": ["libs/mediaclaw-agent-runtime/*.md"]
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "outputs": [
+        "{options.outputFile}"
+      ],
+      "options": {
+        "fix": true
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "libs/mediaclaw-agent-runtime",
+        "command": "vitest run"
+      },
+      "outputs": ["{workspaceRoot}/coverage/libs/mediaclaw-agent-runtime"],
+      "inputs": [
+        "default",
+        "^production",
+        {
+          "externalDependencies": ["vitest"]
+        },
+        {
+          "env": "CI"
+        }
+      ],
+      "cache": true
+    }
+  }
+}
