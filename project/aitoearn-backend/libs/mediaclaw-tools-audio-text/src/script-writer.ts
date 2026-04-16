@@ -13,37 +13,10 @@ export async function scriptWriter(
 ): Promise<ScriptWriterOutput> {
   const startMs = Date.now()
   const maxChars = input.maxCharsPerLine ?? 15
-  const apiKey = process.env['GEMINI_API_KEY'] ?? process.env['OPENAI_API_KEY']
-  if (!apiKey) throw new Error('GEMINI_API_KEY 或 OPENAI_API_KEY 未配置')
-
   const prompt = buildPrompt(input, maxChars)
-  const baseUrl = process.env['GEMINI_API_KEY']
-    ? 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
-    : 'https://api.openai.com/v1/chat/completions'
 
-  const resp = await fetch(baseUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(process.env['GEMINI_API_KEY']
-        ? { 'x-goog-api-key': apiKey }
-        : { 'Authorization': `Bearer ${apiKey}` }),
-    },
-    body: JSON.stringify(
-      process.env['GEMINI_API_KEY']
-        ? { contents: [{ parts: [{ text: prompt }] }] }
-        : { model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }] },
-    ),
-  })
-
-  if (!resp.ok) {
-    throw Object.assign(new Error(`LLM API ${resp.status}`), {
-      meta: { errorCode: 'API_DOWN', retryable: true },
-    })
-  }
-
-  const data = await resp.json() as Record<string, unknown>
-  const rawText = extractText(data)
+  // 优先级：DeepSeek > Gemini > OpenAI（参考 copy-engine.service.ts）
+  const rawText = await callLlm(prompt)
   const lines = parseLines(rawText, maxChars)
 
   const meta: ToolResponseMeta = {
@@ -73,6 +46,73 @@ function extractText(data: Record<string, unknown>): string {
   const choices = (data as { choices?: Array<{ message?: { content?: string } }> }).choices
   if (choices?.[0]?.message?.content) return choices[0].message.content
   return ''
+}
+
+/** 多 provider LLM 调用（参考 copy-engine.service.ts） */
+async function callLlm(prompt: string): Promise<string> {
+  // 1. DeepSeek（默认，成本最低）
+  const deepseekKey = process.env['MEDIACLAW_DEEPSEEK_API_KEY'] ?? process.env['DEEPSEEK_API_KEY']
+  if (deepseekKey) {
+    const baseUrl = (process.env['MEDIACLAW_DEEPSEEK_BASE_URL'] ?? 'https://api.deepseek.com').replace(/\/+$/, '')
+    const model = process.env['MEDIACLAW_DEEPSEEK_MODEL'] ?? process.env['DEEPSEEK_MODEL'] ?? 'deepseek-chat'
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${deepseekKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: 'Return plain text only.' }, { role: 'user', content: prompt }],
+        temperature: 0.8,
+      }),
+    })
+    if (resp.ok) {
+      const data = await resp.json() as Record<string, unknown>
+      const text = extractText(data)
+      if (text) return text
+    }
+  }
+
+  // 2. Gemini
+  const geminiKey = process.env['MEDIACLAW_GEMINI_API_KEY'] ?? process.env['GEMINI_API_KEY']
+  if (geminiKey) {
+    const baseUrl = (process.env['MEDIACLAW_GEMINI_BASE_URL'] ?? 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, '')
+    const model = process.env['MEDIACLAW_GEMINI_MODEL'] ?? process.env['GEMINI_MODEL'] ?? 'gemini-2.5-flash'
+    const resp = await fetch(`${baseUrl}/models/${model}:generateContent?key=${geminiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.8 },
+      }),
+    })
+    if (resp.ok) {
+      const data = await resp.json() as Record<string, unknown>
+      const text = extractText(data)
+      if (text) return text
+    }
+  }
+
+  // 3. OpenAI
+  const openaiKey = process.env['MEDIACLAW_OPENAI_API_KEY'] ?? process.env['OPENAI_API_KEY']
+  if (openaiKey) {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: process.env['MEDIACLAW_OPENAI_MODEL'] ?? 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.8,
+      }),
+    })
+    if (resp.ok) {
+      const data = await resp.json() as Record<string, unknown>
+      const text = extractText(data)
+      if (text) return text
+    }
+  }
+
+  throw Object.assign(new Error('无可用 LLM API Key（需配置 DEEPSEEK_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY）'), {
+    meta: { errorCode: 'API_DOWN', retryable: false },
+  })
 }
 
 function parseLines(text: string, maxChars: number): ScriptLine[] {

@@ -8,37 +8,81 @@ import type {
   RouteProvider,
 } from '@yikart/mediaclaw-shared-kernel'
 
-/** 运行时读取环境变量（避免模块顶层缓存导致测试 env 失效） */
-function getVceBaseUrl(): string {
-  return process.env['VCE_BASE_URL'] ?? 'https://api.vectorengine.cn'
-}
-function getAkcBaseUrl(): string {
-  return process.env['APIKEYCLAW_BASE_URL'] ?? ''
-}
-
 /**
  * 品牌替换 Tool
  *
- * 调用 VCE inpainting API 把视频帧里的旧品牌区域替换为新品牌素材。
- * 优先走 VCE 直连，失败回退 APIKeyClaw 代理。
+ * 调用 VCE Gemini Image Edit API（参考 brand-edit.service.ts）
+ * 支持 VCE → APIKeyClaw 路由回退。
  */
 export async function brandReplacer(
   input: BrandReplacerInput,
 ): Promise<BrandReplacerOutput> {
   const startMs = Date.now()
 
-  // 确定路由顺序
+  const apiKey = process.env['VCE_API_KEY'] ?? process.env['MEDIACLAW_VCE_API_KEY']
+  const akcKey = process.env['APIKEYCLAW_TOKEN']
+  if (!apiKey && !akcKey) throw new Error('VCE_API_KEY 或 APIKEYCLAW_TOKEN 未配置')
+
   const routes: RouteProvider[] = input.routePolicy ?? ['vce', 'apikeyclaw']
+  const prompt = buildInpaintingPrompt(input)
+
   let lastError: Error | undefined
 
   for (const route of routes) {
+    const routeApiKey = route === 'apikeyclaw' ? akcKey : apiKey
+    if (!routeApiKey) continue
+
+    const routeBaseUrl = route === 'apikeyclaw'
+      ? (process.env['APIKEYCLAW_BASE_URL'] ?? '').replace(/\/+$/, '')
+      : (process.env['VCE_GEMINI_BASE_URL'] ?? process.env['MEDIACLAW_VCE_BASE_URL'] ?? 'https://api.vectorengine.cn').replace(/\/+$/, '')
+    if (!routeBaseUrl) continue
+
+    const editPath = process.env['VCE_GEMINI_EDIT_PATH'] ?? '/v1/images/edits'
+    const model = process.env['VCE_GEMINI_IMAGE_MODEL'] ?? 'gemini-2.5-flash-image'
+
     try {
-      const result = await callInpaintingApi(input, route)
+      const resp = await fetch(`${routeBaseUrl}${editPath}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${routeApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          image_url: input.sourceFrame.url ?? input.sourceFrame.storageKey,
+          response_format: 'url',
+        }),
+      })
+
+      if (!resp.ok) {
+        throw new Error(`${route} API ${resp.status}: ${resp.statusText}`)
+      }
+
+      const data = (await resp.json()) as {
+        data?: { url?: string; artifacts?: string[] }
+      }
+
+      const outputUrl = data.data?.url
+      if (!outputUrl) throw new Error(`${route} 返回无图片 URL`)
+
+      const artifactHints = data.data?.artifacts ?? []
+      const sha256 = createHash('sha256').update(outputUrl).digest('hex')
+      const frame: ImageAssetRef = {
+        assetId: `brand_${Date.now()}`,
+        storageKey: outputUrl,
+        url: outputUrl,
+        sha256,
+        mimeType: 'image/png',
+        width: input.sourceFrame.width,
+        height: input.sourceFrame.height,
+      }
+
       return {
-        replacedFrame: result.frame,
+        replacedFrame: frame,
         routeUsed: route,
-        artifactHints: result.artifactHints,
-        meta: buildMeta('success', 'NONE', result.artifactHints.length > 0, 0.3, startMs),
+        artifactHints,
+        meta: buildMeta('success', 'NONE', artifactHints.length > 0, 0.3, startMs),
       }
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
@@ -51,66 +95,6 @@ export async function brandReplacer(
   )
 }
 
-/** 调用 inpainting API */
-async function callInpaintingApi(
-  input: BrandReplacerInput,
-  route: RouteProvider,
-): Promise<{ frame: ImageAssetRef; artifactHints: string[] }> {
-  const baseUrl = route === 'apikeyclaw' ? getAkcBaseUrl() : getVceBaseUrl()
-  const apiKey = route === 'apikeyclaw'
-    ? process.env['APIKEYCLAW_TOKEN']
-    : process.env['VCE_API_KEY']
-
-  if (!apiKey) throw new Error(`${route} API key 未配置`)
-  if (!baseUrl) throw new Error(`${route} base URL 未配置`)
-
-  // 构建 inpainting prompt
-  const prompt = buildInpaintingPrompt(input)
-
-  const resp = await fetch(`${baseUrl}/v1/images/edits`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gemini-2.0-flash-exp',
-      image_url: input.sourceFrame.url ?? input.sourceFrame.storageKey,
-      prompt,
-      brand_region: input.brandRegionHint,
-      preserve_rules: input.preserveRules ?? [],
-    }),
-  })
-
-  if (!resp.ok) {
-    throw new Error(`${route} API ${resp.status}: ${resp.statusText}`)
-  }
-
-  const data = (await resp.json()) as {
-    data?: { url?: string; artifacts?: string[] }
-  }
-
-  const outputUrl = data.data?.url
-  if (!outputUrl) throw new Error(`${route} 返回无图片 URL`)
-
-  const artifactHints = data.data?.artifacts ?? []
-
-  // 构建 ImageAssetRef
-  const sha256 = createHash('sha256').update(outputUrl).digest('hex')
-  const frame: ImageAssetRef = {
-    assetId: `brand_${Date.now()}`,
-    storageKey: outputUrl,
-    url: outputUrl,
-    sha256,
-    mimeType: 'image/png',
-    width: input.sourceFrame.width,
-    height: input.sourceFrame.height,
-  }
-
-  return { frame, artifactHints }
-}
-
-/** 构建 inpainting prompt */
 function buildInpaintingPrompt(input: BrandReplacerInput): string {
   const brand = input.targetBrand
   const product = input.targetProduct
@@ -123,7 +107,6 @@ function buildInpaintingPrompt(input: BrandReplacerInput): string {
     `Output high quality, photorealistic result.`
 }
 
-/** 构建 ToolResponseMeta */
 function buildMeta(
   status: 'success' | 'failed' | 'partial',
   errorCode: string,

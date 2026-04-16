@@ -57,14 +57,25 @@ async function downloadViaTikhub(sourceUrl: string): Promise<{ filePath: string 
   const apiKey = process.env['TIKHUB_API_KEY']
   if (!apiKey) throw new Error('TIKHUB_API_KEY 未配置')
 
-  const endpoint = `${TIKHUB_BASE_URL}/api/v1/tiktok/app/v3/fetch_one_video`
-  const resp = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ url: sourceUrl }),
+  // 按平台选择端点（参考 aitoearn-server/acquisition/tikhub.service.ts）
+  const platform = detectPlatform(sourceUrl)
+  const endpoint = platform === 'douyin'
+    ? `${TIKHUB_BASE_URL}/api/v1/douyin/web/fetch_one_video_by_share_url`
+    : platform === 'xhs'
+      ? `${TIKHUB_BASE_URL}/api/v1/xiaohongshu/app/get_video_note_info`
+      : platform === 'kuaishou'
+        ? `${TIKHUB_BASE_URL}/api/v1/kuaishou/web/get_video_info`
+        : `${TIKHUB_BASE_URL}/api/v1/bilibili/web/fetch_one_video`
+
+  const queryParam = platform === 'douyin' ? 'share_url'
+    : platform === 'xhs' ? 'share_text'
+    : platform === 'kuaishou' ? 'share_url'
+    : 'bv_id'
+
+  const url = `${endpoint}?${queryParam}=${encodeURIComponent(sourceUrl)}`
+  const resp = await fetch(url, {
+    method: 'GET',
+    headers: { 'Authorization': `Bearer ${apiKey}` },
   })
 
   if (!resp.ok) {
@@ -72,9 +83,9 @@ async function downloadViaTikhub(sourceUrl: string): Promise<{ filePath: string 
   }
 
   const data = (await resp.json()) as Record<string, unknown>
-  const videoData = data['data'] as Record<string, unknown> | undefined
-  const videoUrl = videoData?.['video_url'] as string | undefined
-    ?? videoData?.['play_url'] as string | undefined
+  const videoData = (data['data'] ?? data) as Record<string, unknown>
+  // 尝试多种字段名提取视频 URL
+  const videoUrl = extractVideoUrl(videoData)
 
   if (!videoUrl) {
     throw new Error('TikHub 返回无视频链接')
@@ -90,6 +101,42 @@ async function downloadViaTikhub(sourceUrl: string): Promise<{ filePath: string 
   await writeFile(filePath, buffer)
 
   return { filePath }
+}
+
+/** 检测平台 */
+function detectPlatform(url: string): 'douyin' | 'xhs' | 'kuaishou' | 'bilibili' {
+  if (url.includes('douyin') || url.includes('iesdouyin')) return 'douyin'
+  if (url.includes('xiaohongshu') || url.includes('xhslink')) return 'xhs'
+  if (url.includes('kuaishou') || url.includes('gifshow')) return 'kuaishou'
+  return 'bilibili'
+}
+
+/** 从响应中提取视频 URL（兼容多平台格式） */
+function extractVideoUrl(data: Record<string, unknown>): string | undefined {
+  // 直接字段
+  if (typeof data['video_url'] === 'string') return data['video_url']
+  if (typeof data['play_url'] === 'string') return data['play_url']
+  if (typeof data['content_url'] === 'string') return data['content_url']
+
+  // 嵌套结构
+  const video = data['video'] as Record<string, unknown> | undefined
+  if (video) {
+    if (typeof video['play_addr'] === 'string') return video['play_addr']
+    const playAddr = video['play_addr'] as Record<string, unknown> | undefined
+    const urlList = playAddr?.['url_list'] as string[] | undefined
+    if (urlList?.[0]) return urlList[0]
+  }
+
+  // 深度搜索
+  for (const key of Object.keys(data)) {
+    const val = data[key]
+    if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+      const nested = extractVideoUrl(val as Record<string, unknown>)
+      if (nested) return nested
+    }
+  }
+
+  return undefined
 }
 
 /** 通过 yt-dlp 命令行下载 */

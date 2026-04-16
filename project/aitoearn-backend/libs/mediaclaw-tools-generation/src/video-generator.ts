@@ -87,10 +87,13 @@ async function submitTask(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      image_url: input.firstFrame.url ?? input.firstFrame.storageKey,
+      model: resolveModelName(input.model),
+      image: input.firstFrame.url ?? input.firstFrame.storageKey,
       prompt: input.motionPrompt,
-      duration: input.durationSec,
-      seed: input.seed,
+      duration: Number(input.durationSec.toFixed(1)),
+      width: input.firstFrame.width || 1080,
+      height: input.firstFrame.height || 1920,
+      ...(input.seed != null && { seed: input.seed }),
     }),
   })
 
@@ -101,8 +104,9 @@ async function submitTask(
     )
   }
 
-  const data = (await resp.json()) as { data?: { task_id?: string } }
-  const taskId = data.data?.task_id
+  const data = (await resp.json()) as { data?: { task_id?: string; id?: string }; task_id?: string; id?: string }
+  // 兼容多种响应格式（参考 video-gen.service.ts pickStringCandidate）
+  const taskId = data.data?.task_id ?? data.data?.id ?? data.task_id ?? data.id
   if (!taskId) throw new Error('生成任务返回无 task_id')
 
   return taskId
@@ -154,10 +158,20 @@ async function pollTask(
   )
 }
 
-/** 根据模型选择 endpoint */
+/** 根据模型选择 endpoint（参考 video-gen.service.ts resolveRuntimeConfig） */
 function resolveEndpoint(baseUrl: string, model: VideoModel): string {
-  // Seedance 和 Kling 都走 VCE 代理
-  return `${baseUrl}/kling/v1/videos/omni-video`
+  return `${baseUrl.replace(/\/+$/, '')}/kling/v1/videos/omni-video`
+}
+
+/** 模型名映射（参考 model-resolver DEFAULT_MODEL_PREFERENCES） */
+function resolveModelName(model: VideoModel): string {
+  switch (model) {
+    case 'seedance-2.0': return 'kling-v3-omni'
+    case 'seedance-1.5': return 'kling-v2-master'
+    case 'kling': return 'kling-v3-omni'
+    case 'remotion': return 'kling-v3-omni'
+    default: return 'kling-v3-omni'
+  }
 }
 
 function sleep(ms: number): Promise<void> {
