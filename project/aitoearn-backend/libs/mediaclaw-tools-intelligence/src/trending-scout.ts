@@ -47,7 +47,7 @@ async function discoverTrending(input: TrendingScoutInput): Promise<TrendingScou
   const platform = input.platform ?? 'douyin'
   const limit = input.limit ?? 20
   const baseUrl = (process.env['TIKHUB_BASE_URL'] ?? 'https://api.tikhub.io').replace(/\/+$/, '')
-  const keyword = input.keyword ?? input.category ?? '热门'
+  const keyword = input.category ?? '热门'
 
   const config = PLATFORM_SEARCH_ENDPOINTS[platform] ?? PLATFORM_SEARCH_ENDPOINTS['douyin']
   const headers: Record<string, string> = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
