@@ -31,6 +31,25 @@
       "options": {
         "fix": true
       }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "libs/mediaclaw-shared-kernel",
+        "command": "vitest run"
+      },
+      "outputs": ["{workspaceRoot}/coverage/libs/mediaclaw-shared-kernel"],
+      "inputs": [
+        "default",
+        "^production",
+        {
+          "externalDependencies": ["vitest"]
+        },
+        {
+          "env": "CI"
+        }
+      ],
+      "cache": true
     }
   }
 }
