@@ -1,0 +1,26 @@
+{
+  "name": "mediaclaw-tools-compose",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/mediaclaw-tools-compose/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/mediaclaw-tools-compose",
+        "tsConfig": "libs/mediaclaw-tools-compose/tsconfig.lib.json",
+        "packageJson": "libs/mediaclaw-tools-compose/package.json",
+        "main": "libs/mediaclaw-tools-compose/src/index.ts",
+        "assets": ["libs/mediaclaw-tools-compose/*.md"]
+      }
+    },
+    "lint": { "executor": "@nx/eslint:lint", "outputs": ["{options.outputFile}"], "options": { "fix": true } },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "libs/mediaclaw-tools-compose", "command": "vitest run" },
+      "cache": true
+    }
+  }
+}

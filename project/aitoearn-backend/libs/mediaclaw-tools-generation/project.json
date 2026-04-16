@@ -1,0 +1,26 @@
+{
+  "name": "mediaclaw-tools-generation",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/mediaclaw-tools-generation/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/mediaclaw-tools-generation",
+        "tsConfig": "libs/mediaclaw-tools-generation/tsconfig.lib.json",
+        "packageJson": "libs/mediaclaw-tools-generation/package.json",
+        "main": "libs/mediaclaw-tools-generation/src/index.ts",
+        "assets": ["libs/mediaclaw-tools-generation/*.md"]
+      }
+    },
+    "lint": { "executor": "@nx/eslint:lint", "outputs": ["{options.outputFile}"], "options": { "fix": true } },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "libs/mediaclaw-tools-generation", "command": "vitest run" },
+      "cache": true
+    }
+  }
+}

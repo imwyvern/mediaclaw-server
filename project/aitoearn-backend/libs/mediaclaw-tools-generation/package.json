@@ -1,0 +1,8 @@
+{
+  "name": "@yikart/mediaclaw-tools-generation",
+  "type": "commonjs",
+  "version": "0.0.1",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "peerDependencies": { "@nx/vite": "^22.4.4", "tslib": "^2.3.0", "vitest": "^4.0.8" }
+}
