@@ -1,0 +1,49 @@
+{
+  "name": "mediaclaw-tools-intelligence",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/mediaclaw-tools-intelligence/src",
+  "projectType": "library",
+  "release": {
+    "version": {
+      "manifestRootsToUpdate": ["dist/{projectRoot}"],
+      "currentVersionResolver": "git-tag",
+      "fallbackCurrentVersionResolver": "disk"
+    }
+  },
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/mediaclaw-tools-intelligence",
+        "tsConfig": "libs/mediaclaw-tools-intelligence/tsconfig.lib.json",
+        "packageJson": "libs/mediaclaw-tools-intelligence/package.json",
+        "main": "libs/mediaclaw-tools-intelligence/src/index.ts",
+        "assets": ["libs/mediaclaw-tools-intelligence/*.md"]
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "outputs": ["{options.outputFile}"],
+      "options": {
+        "fix": true
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "libs/mediaclaw-tools-intelligence",
+        "command": "vitest run"
+      },
+      "outputs": ["{workspaceRoot}/coverage/libs/mediaclaw-tools-intelligence"],
+      "inputs": [
+        "default",
+        "^production",
+        { "externalDependencies": ["vitest"] },
+        { "env": "CI" }
+      ],
+      "cache": true
+    }
+  }
+}
