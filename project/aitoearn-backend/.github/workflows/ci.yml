@@ -53,6 +53,10 @@ jobs:
       - name: Run ai tests
         run: pnpm nx test aitoearn-ai --skip-nx-cache -- --run
 
+      - name: Run MediaClaw lib tests
+        run: |
+          pnpm nx run-many --target=test --projects=mediaclaw-shared-kernel,mediaclaw-tools-ingest,mediaclaw-tools-branding,mediaclaw-tools-generation,mediaclaw-tools-audio-text,mediaclaw-tools-compose,mediaclaw-tools-quality,mediaclaw-tools-intelligence,mediaclaw-tools-platform,mediaclaw-tools-strategy,mediaclaw-agent-runtime --skip-nx-cache -- --run
+
   docker:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
