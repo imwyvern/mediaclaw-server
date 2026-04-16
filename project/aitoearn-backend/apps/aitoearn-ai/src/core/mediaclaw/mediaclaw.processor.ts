@@ -21,6 +21,13 @@ export class MediaclawProcessor extends WorkerHost {
 
       let result: unknown
 
+      const onProgress = async (stepPercent: number, message: string) => {
+        try {
+          await job.updateProgress(Math.min(99, Math.round(stepPercent)))
+          this.logger.debug(`[${taskId}] progress ${stepPercent}%: ${message}`)
+        } catch { /* best-effort */ }
+      }
+
       switch (pipelineType) {
         case 'product-showcase':
           result = await this.mediaclawService.runProductShowcase(input)
@@ -39,7 +46,9 @@ export class MediaclawProcessor extends WorkerHost {
       this.logger.log(`Pipeline ${pipelineType} completed: ${taskId}`)
       return result
     } catch (error) {
-      this.logger.error(`Pipeline ${pipelineType} failed: ${taskId}`, error)
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error(`Pipeline ${pipelineType} failed: ${taskId} — ${message}`)
+      await job.log(`Pipeline failed: ${message}`).catch(() => {})
       throw error
     }
   }
