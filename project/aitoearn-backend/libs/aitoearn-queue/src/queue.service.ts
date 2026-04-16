@@ -6,6 +6,7 @@ import type {
   DraftGenerationData,
   EngagementReplyToCommentData,
   EngagementTaskDistributionData,
+  MediaclawPipelineData,
   NotificationData,
   PostMediaTaskData,
   PostPublishData,
@@ -47,6 +48,8 @@ export class QueueService {
     private notificationQueue: Queue,
     @InjectQueue(QueueName.DraftGeneration)
     private draftGenerationQueue: Queue,
+    @InjectQueue(QueueName.MediaclawPipeline)
+    private mediaclawPipelineQueue: Queue,
   ) {
     this.defaultOptions = config.jobOptions || {
       removeOnComplete: { age: 30, count: 1000 },
@@ -138,5 +141,17 @@ export class QueueService {
       ...this.defaultOptions,
       ...options,
     })
+  }
+
+  async addMediaclawPipelineJob(data: MediaclawPipelineData, options?: JobsOptions) {
+    return await this.mediaclawPipelineQueue.add('pipeline', data, {
+      ...this.defaultOptions,
+      jobId: data.taskId,
+      ...options,
+    })
+  }
+
+  async getMediaclawPipelineJob(jobId: string): Promise<Job<MediaclawPipelineData> | undefined> {
+    return await this.mediaclawPipelineQueue.getJob(jobId)
   }
 }

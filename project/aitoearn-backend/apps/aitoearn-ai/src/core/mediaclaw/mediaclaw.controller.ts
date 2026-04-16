@@ -2,6 +2,8 @@ import { Body, Controller, Get, Logger, Param, Post, Query } from '@nestjs/commo
 import { ApiTags } from '@nestjs/swagger'
 import { Public } from '@yikart/aitoearn-auth'
 import { ApiDoc } from '@yikart/common'
+import { QueueService } from '@yikart/aitoearn-queue'
+import { randomUUID } from 'node:crypto'
 import {
   ProductShowcaseDto,
   AiLiveDto,
@@ -26,110 +28,129 @@ import {
 export class MediaclawController {
   private readonly logger = new Logger(MediaclawController.name)
 
-  constructor(private readonly mediaclawService: MediaclawService) {}
+  constructor(
+    private readonly mediaclawService: MediaclawService,
+    private readonly queueService: QueueService,
+  ) {}
+
+  // === 管线端点（异步，走队列） ===
 
   @Post('pipeline/product-showcase')
   @Public()
-  @ApiDoc({
-    summary: '启动种草管线',
-    response: PipelineResultVo,
-  })
+  @ApiDoc({ summary: '启动种草管线（异步）' })
   async runProductShowcase(@Body() dto: ProductShowcaseDto) {
     this.logger.log('POST /mediaclaw/pipeline/product-showcase')
-    return await this.mediaclawService.runProductShowcase(dto)
+    const taskId = randomUUID()
+    await this.queueService.addMediaclawPipelineJob({
+      pipelineType: 'product-showcase',
+      input: dto as any,
+      userId: 'system', // TODO: 从 token 获取
+      orgId: 'default',
+      taskId,
+      createdAt: new Date().toISOString(),
+    })
+    return { taskId, status: 'queued', pipelineType: 'product-showcase' }
   }
 
   @Post('pipeline/ai-live')
   @Public()
-  @ApiDoc({
-    summary: '启动 AI 微动管线',
-    response: PipelineResultVo,
-  })
+  @ApiDoc({ summary: '启动 AI 微动管线（异步）' })
   async runAiLive(@Body() dto: AiLiveDto) {
     this.logger.log('POST /mediaclaw/pipeline/ai-live')
-    return await this.mediaclawService.runAiLive(dto)
+    const taskId = randomUUID()
+    await this.queueService.addMediaclawPipelineJob({
+      pipelineType: 'ai-live',
+      input: dto as any,
+      userId: 'system',
+      orgId: 'default',
+      taskId,
+      createdAt: new Date().toISOString(),
+    })
+    return { taskId, status: 'queued', pipelineType: 'ai-live' }
   }
 
   @Post('pipeline/explainer')
   @Public()
-  @ApiDoc({
-    summary: '启动讲解视频管线',
-    response: PipelineResultVo,
-  })
+  @ApiDoc({ summary: '启动讲解视频管线（异步）' })
   async runExplainer(@Body() dto: ExplainerDto) {
     this.logger.log('POST /mediaclaw/pipeline/explainer')
-    return await this.mediaclawService.runExplainer(dto)
+    const taskId = randomUUID()
+    await this.queueService.addMediaclawPipelineJob({
+      pipelineType: 'explainer',
+      input: dto as any,
+      userId: 'system',
+      orgId: 'default',
+      taskId,
+      createdAt: new Date().toISOString(),
+    })
+    return { taskId, status: 'queued', pipelineType: 'explainer' }
   }
+
+  // === 任务状态查询 ===
+
+  @Get('tasks/:taskId')
+  @Public()
+  @ApiDoc({ summary: '查询管线任务状态' })
+  async getTaskStatus(@Param('taskId') taskId: string) {
+    this.logger.log(`GET /mediaclaw/tasks/${taskId}`)
+    const job = await this.queueService.getMediaclawPipelineJob(taskId)
+    if (!job) {
+      return { taskId, status: 'not_found' }
+    }
+    const state = await job.getState()
+    const progress = job.progress
+    const result = job.returnvalue
+    const failedReason = job.failedReason
+    return { taskId, status: state, progress, result, failedReason }
+  }
+
+  // === Tool 端点（同步） ===
 
   @Post('tools/remix-brief')
   @Public()
-  @ApiDoc({
-    summary: '复刻拆解',
-    response: RemixBriefVo,
-  })
+  @ApiDoc({ summary: '复刻拆解', response: RemixBriefVo })
   async createRemixBrief(@Body() dto: RemixBriefDto) {
-    this.logger.log('POST /mediaclaw/tools/remix-brief')
     return await this.mediaclawService.createRemixBrief(dto)
   }
 
   @Post('tools/trending-scout')
   @Public()
-  @ApiDoc({
-    summary: '趋势发现',
-    response: TrendingScoutVo,
-  })
+  @ApiDoc({ summary: '趋势发现', response: TrendingScoutVo })
   async scoutTrending(@Body() dto: TrendingScoutDto) {
-    this.logger.log('POST /mediaclaw/tools/trending-scout')
     return await this.mediaclawService.scoutTrending(dto)
   }
 
   @Post('tools/content-planner')
   @Public()
-  @ApiDoc({
-    summary: '内容策划',
-    response: ContentPlannerVo,
-  })
+  @ApiDoc({ summary: '内容策划', response: ContentPlannerVo })
   async planContent(@Body() dto: ContentPlannerDto) {
-    this.logger.log('POST /mediaclaw/tools/content-planner')
     return await this.mediaclawService.planContent(dto)
   }
 
   @Post('tools/platform-packager')
   @Public()
-  @ApiDoc({
-    summary: '平台包装',
-    response: PlatformPackagerVo,
-  })
+  @ApiDoc({ summary: '平台包装', response: PlatformPackagerVo })
   async packageForPlatform(@Body() dto: PlatformPackagerDto) {
-    this.logger.log('POST /mediaclaw/tools/platform-packager')
     return await this.mediaclawService.packageForPlatform(dto)
   }
 
   @Get('insights/:videoId')
   @Public()
-  @ApiDoc({
-    summary: '实时效果查询',
-    response: PerformanceInsightVo,
-  })
+  @ApiDoc({ summary: '实时效果查询', response: PerformanceInsightVo })
   async getInsight(
     @Param('videoId') videoId: string,
     @Query('platform') platform: string = 'douyin',
   ) {
-    this.logger.log(`GET /mediaclaw/insights/${videoId}`)
     return await this.mediaclawService.getInsight(videoId, platform)
   }
 
   @Get('insights/monthly/:orgId')
   @Public()
-  @ApiDoc({
-    summary: '月度报告',
-    response: PerformanceInsightVo,
-  })
+  @ApiDoc({ summary: '月度报告', response: PerformanceInsightVo })
   async getMonthlyInsight(
     @Param('orgId') orgId: string,
     @Query('period') period: string,
   ) {
-    this.logger.log(`GET /mediaclaw/insights/monthly/${orgId}`)
     return await this.mediaclawService.getMonthlyInsight(orgId, period)
   }
 }

@@ -35,4 +35,7 @@ export enum QueueName {
 
   /** DraftGeneration 生成队列 */
   DraftGeneration = 'place_draft_generation',
+
+  /** MediaClaw 管线执行队列 */
+  MediaclawPipeline = 'mediaclaw_pipeline',
 }
