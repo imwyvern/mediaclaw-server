@@ -1,0 +1,36 @@
+{
+  "name": "mediaclaw-shared-kernel",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/mediaclaw-shared-kernel/src",
+  "projectType": "library",
+  "release": {
+    "version": {
+      "manifestRootsToUpdate": ["dist/{projectRoot}"],
+      "currentVersionResolver": "git-tag",
+      "fallbackCurrentVersionResolver": "disk"
+    }
+  },
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/mediaclaw-shared-kernel",
+        "tsConfig": "libs/mediaclaw-shared-kernel/tsconfig.lib.json",
+        "packageJson": "libs/mediaclaw-shared-kernel/package.json",
+        "main": "libs/mediaclaw-shared-kernel/src/index.ts",
+        "assets": ["libs/mediaclaw-shared-kernel/*.md"]
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "outputs": [
+        "{options.outputFile}"
+      ],
+      "options": {
+        "fix": true
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@yikart/mediaclaw-shared-kernel",
+  "type": "commonjs",
+  "version": "0.0.1",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yikart/aitoearn-monorepo.git"
+  },
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "peerDependencies": {
+    "tslib": "^2.3.0"
+  }
+}
