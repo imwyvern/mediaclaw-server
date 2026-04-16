@@ -12,6 +12,8 @@
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
   "peerDependencies": {
-    "tslib": "^2.3.0"
+    "@nx/vite": "^22.4.4",
+    "tslib": "^2.3.0",
+    "vitest": "^4.0.8"
   }
 }
