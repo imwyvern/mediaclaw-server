@@ -1,0 +1,49 @@
+{
+  "name": "mediaclaw-tools-ingest",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/mediaclaw-tools-ingest/src",
+  "projectType": "library",
+  "release": {
+    "version": {
+      "manifestRootsToUpdate": ["dist/{projectRoot}"],
+      "currentVersionResolver": "git-tag",
+      "fallbackCurrentVersionResolver": "disk"
+    }
+  },
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/mediaclaw-tools-ingest",
+        "tsConfig": "libs/mediaclaw-tools-ingest/tsconfig.lib.json",
+        "packageJson": "libs/mediaclaw-tools-ingest/package.json",
+        "main": "libs/mediaclaw-tools-ingest/src/index.ts",
+        "assets": ["libs/mediaclaw-tools-ingest/*.md"]
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "outputs": ["{options.outputFile}"],
+      "options": {
+        "fix": true
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "libs/mediaclaw-tools-ingest",
+        "command": "vitest run"
+      },
+      "outputs": ["{workspaceRoot}/coverage/libs/mediaclaw-tools-ingest"],
+      "inputs": [
+        "default",
+        "^production",
+        { "externalDependencies": ["vitest"] },
+        { "env": "CI" }
+      ],
+      "cache": true
+    }
+  }
+}
