@@ -1,9 +1,10 @@
 import { createZodDto } from '@yikart/common'
 import { z } from 'zod'
+import { ImageRefSchema, MediaclawPlatformSchema, RemixBriefSchema } from './mediaclaw.dto'
 
 // === 通用 schemas ===
 
-const VideoAssetRefSchema = z.object({
+export const VideoAssetRefSchema = z.object({
   assetId: z.string(),
   storageKey: z.string(),
   url: z.string().optional(),
@@ -16,7 +17,7 @@ const VideoAssetRefSchema = z.object({
   hasAudio: z.boolean(),
 })
 
-const CostBreakdownSchema = z.object({
+export const CostBreakdownSchema = z.object({
   replacement: z.number().optional(),
   generation: z.number().optional(),
   tts: z.number().optional(),
@@ -24,14 +25,16 @@ const CostBreakdownSchema = z.object({
   total: z.number(),
 })
 
-const QualityReportSchema = z.object({
+export const QualityReportSchema = z.object({
   qaScore: z.number(),
   passed: z.boolean(),
-  issues: z.array(z.object({
-    type: z.string(),
-    message: z.string(),
-    severity: z.enum(['low', 'medium', 'high']),
-  })),
+  issues: z.array(
+    z.object({
+      type: z.string(),
+      message: z.string(),
+      severity: z.enum(['low', 'medium', 'high']),
+    }),
+  ),
 })
 
 // === Pipeline VOs ===
@@ -43,56 +46,67 @@ export const PipelineResultVoSchema = z.object({
   state: z.enum(['PRODUCING', 'QA_PASSED', 'SUSPENDED']),
 })
 export class PipelineResultVo extends createZodDto(PipelineResultVoSchema) {}
+export type PipelineResultVoData = z.infer<typeof PipelineResultVoSchema>
 
 // === Tool VOs ===
 
 export const RemixBriefVoSchema = z.object({
-  brief: z.object({
-    totalDurationSec: z.number(),
-    cuts: z.array(z.any()),
-    script: z.array(z.any()),
-    modelAllocation: z.array(z.any()),
-    estimatedCostYuan: z.number(),
-    estimatedTimeMin: z.number(),
-  }),
+  brief: RemixBriefSchema,
 })
 export class RemixBriefVo extends createZodDto(RemixBriefVoSchema) {}
+export type RemixBriefVoData = z.infer<typeof RemixBriefVoSchema>
 
 export const TrendingScoutVoSchema = z.object({
-  videos: z.array(z.object({
-    url: z.string(),
-    title: z.string(),
-    likes: z.number().optional(),
-    shares: z.number().optional(),
-    styleTags: z.array(z.string()).optional(),
-  })).optional(),
-  competitorReport: z.object({
-    newVideos: z.array(z.any()),
-    styleTrends: z.array(z.string()),
-    opportunity: z.string(),
-  }).optional(),
+  videos: z
+    .array(
+      z.object({
+        url: z.string(),
+        title: z.string(),
+        likes: z.number().optional(),
+        shares: z.number().optional(),
+        styleTags: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
+  competitorReport: z
+    .object({
+      newVideos: z.array(
+        z.object({
+          url: z.string(),
+          postedAt: z.string(),
+          performance: z.object({
+            views: z.number().optional(),
+            likes: z.number().optional(),
+            comments: z.number().optional(),
+          }),
+        }),
+      ),
+      styleTrends: z.array(z.string()),
+      opportunity: z.string(),
+    })
+    .optional(),
 })
 export class TrendingScoutVo extends createZodDto(TrendingScoutVoSchema) {}
+export type TrendingScoutVoData = z.infer<typeof TrendingScoutVoSchema>
 
 export const ContentPlannerVoSchema = z.object({
-  weeklyPlan: z.array(z.object({
-    day: z.string(),
-    contentType: z.string(),
-    platform: z.string(),
-    reason: z.string(),
-    referenceUrl: z.string().optional(),
-  })),
+  weeklyPlan: z.array(
+    z.object({
+      day: z.string(),
+      contentType: z.string(),
+      platform: MediaclawPlatformSchema,
+      reason: z.string(),
+      referenceUrl: z.string().optional(),
+    }),
+  ),
   monthlyCalendarSummary: z.string().optional(),
 })
 export class ContentPlannerVo extends createZodDto(ContentPlannerVoSchema) {}
+export type ContentPlannerVoData = z.infer<typeof ContentPlannerVoSchema>
 
 export const PlatformPackagerVoSchema = z.object({
   title: z.string(),
-  coverImage: z.object({
-    assetId: z.string(),
-    storageKey: z.string(),
-    url: z.string().optional(),
-  }),
+  coverImage: ImageRefSchema,
   hashtags: z.array(z.string()),
   description: z.string(),
   complianceCheck: z.object({
@@ -102,28 +116,34 @@ export const PlatformPackagerVoSchema = z.object({
   }),
 })
 export class PlatformPackagerVo extends createZodDto(PlatformPackagerVoSchema) {}
+export type PlatformPackagerVoData = z.infer<typeof PlatformPackagerVoSchema>
 
 export const PerformanceInsightVoSchema = z.object({
-  realtime: z.object({
-    videoId: z.string(),
-    platform: z.string(),
-    metrics: z.object({
-      views: z.number(),
-      likes: z.number(),
-      comments: z.number(),
-      shares: z.number(),
-      saves: z.number().optional(),
-    }),
-    benchmark: z.string(),
-    diagnosis: z.string(),
-    actionSuggestion: z.string(),
-  }).optional(),
-  monthly: z.object({
-    period: z.string(),
-    summary: z.string(),
-    savings: z.string(),
-    bestType: z.string(),
-    recommendation: z.string(),
-  }).optional(),
+  realtime: z
+    .object({
+      videoId: z.string(),
+      platform: MediaclawPlatformSchema,
+      metrics: z.object({
+        views: z.number(),
+        likes: z.number(),
+        comments: z.number(),
+        shares: z.number(),
+        saves: z.number().optional(),
+      }),
+      benchmark: z.string(),
+      diagnosis: z.string(),
+      actionSuggestion: z.string(),
+    })
+    .optional(),
+  monthly: z
+    .object({
+      period: z.string(),
+      summary: z.string(),
+      savings: z.string(),
+      bestType: z.string(),
+      recommendation: z.string(),
+    })
+    .optional(),
 })
 export class PerformanceInsightVo extends createZodDto(PerformanceInsightVoSchema) {}
+export type PerformanceInsightVoData = z.infer<typeof PerformanceInsightVoSchema>
