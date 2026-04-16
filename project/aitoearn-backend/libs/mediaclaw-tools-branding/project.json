@@ -1,0 +1,26 @@
+{
+  "name": "mediaclaw-tools-branding",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/mediaclaw-tools-branding/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/mediaclaw-tools-branding",
+        "tsConfig": "libs/mediaclaw-tools-branding/tsconfig.lib.json",
+        "packageJson": "libs/mediaclaw-tools-branding/package.json",
+        "main": "libs/mediaclaw-tools-branding/src/index.ts",
+        "assets": ["libs/mediaclaw-tools-branding/*.md"]
+      }
+    },
+    "lint": { "executor": "@nx/eslint:lint", "outputs": ["{options.outputFile}"], "options": { "fix": true } },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "libs/mediaclaw-tools-branding", "command": "vitest run" },
+      "cache": true
+    }
+  }
+}

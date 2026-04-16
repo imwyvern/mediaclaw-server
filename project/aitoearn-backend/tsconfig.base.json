@@ -23,6 +23,7 @@
       "@yikart/mediaclaw-agent-runtime": ["libs/mediaclaw-agent-runtime/src/index.ts"],
       "@yikart/mediaclaw-shared-kernel": ["libs/mediaclaw-shared-kernel/src/index.ts"],
       "@yikart/mediaclaw-tools-ingest": ["libs/mediaclaw-tools-ingest/src/index.ts"],
+      "@yikart/mediaclaw-tools-branding": ["libs/mediaclaw-tools-branding/src/index.ts"],
       "@yikart/mongodb": ["libs/mongodb/src/index.ts"],
       "@yikart/nest-mcp": ["libs/nest-mcp/src/index.ts"],
       "@yikart/redis": ["libs/redis/src/index.ts"],
