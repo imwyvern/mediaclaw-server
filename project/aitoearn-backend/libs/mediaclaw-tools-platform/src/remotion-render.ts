@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { existsSync } from 'node:fs'
+import * as path from 'node:path'
 
 import type {
   RemotionRenderInput,
@@ -7,55 +11,55 @@ import type {
   ToolResponseMeta,
 } from '@yikart/mediaclaw-shared-kernel'
 
+const execFileAsync = promisify(execFile)
+
 /**
- * Remotion 渲染 Tool — 调用 Remotion Lambda/API 渲染模板视频
+ * Remotion 渲染 Tool — 本地 CLI 渲染模板视频
+ *
+ * 依赖：npx remotion render
+ * 不需要 API Key，Remotion 是自部署/本地工具
+ *
+ * 环境变量：
+ *   REMOTION_COMPOSITIONS_DIR  — compositions 目录（默认 ./remotion）
+ *   MEDIA_TEMP_DIR             — 渲染输出目录（默认 /tmp/mediaclaw）
  */
 export async function remotionRender(
   input: RemotionRenderInput,
 ): Promise<RemotionRenderOutput> {
   const startMs = Date.now()
-  const apiKey = process.env['REMOTION_API_KEY']
-  if (!apiKey) throw new Error('REMOTION_API_KEY 未配置')
 
-  const baseUrl = process.env['REMOTION_BASE_URL'] ?? 'https://api.remotion.dev'
+  const compositionsDir = process.env['REMOTION_COMPOSITIONS_DIR'] ?? './remotion'
+  const tempDir = process.env['MEDIA_TEMP_DIR'] ?? '/tmp/mediaclaw'
+  const outputPath = path.join(tempDir, `remotion_${Date.now()}.mp4`)
 
-  // 提交渲染任务
-  const renderResp = await fetch(`${baseUrl}/v1/render`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      composition: input.templateId,
-      inputProps: {
-        product: input.product,
-        durationSec: input.durationSec,
-        brandTheme: input.brandTheme,
-      },
-      codec: 'h264',
-      imageFormat: 'jpeg',
-    }),
-  })
-
-  if (!renderResp.ok) {
-    throw Object.assign(new Error(`Remotion API ${renderResp.status}`), {
-      meta: { errorCode: 'API_DOWN', retryable: true } as Partial<ToolResponseMeta>,
-    })
+  if (!existsSync(compositionsDir)) {
+    throw new Error(`Remotion compositions 目录不存在: ${compositionsDir}`)
   }
 
-  const renderData = (await renderResp.json()) as { renderId?: string }
-  const renderId = renderData.renderId
-  if (!renderId) throw new Error('Remotion 返回无 renderId')
+  const inputPropsJson = JSON.stringify({
+    product: input.product,
+    durationSec: input.durationSec,
+    brandTheme: input.brandTheme,
+  })
 
-  // 轮询等待完成
-  const videoUrl = await pollRender(baseUrl, apiKey, renderId)
+  await execFileAsync('npx', [
+    'remotion', 'render',
+    compositionsDir,
+    input.templateId,
+    outputPath,
+    '--props', inputPropsJson,
+    '--codec', 'h264',
+    '--image-format', 'jpeg',
+    '--log', 'error',
+  ], {
+    timeout: 180_000, // 3min
+  })
 
-  const sha256 = createHash('sha256').update(videoUrl).digest('hex')
+  const sha256 = createHash('sha256').update(outputPath).digest('hex')
 
   const video: VideoAssetRef = {
     assetId: `remotion_${Date.now()}`,
-    storageKey: videoUrl,
+    storageKey: outputPath,
     sha256,
     mimeType: 'video/mp4',
     durationSec: input.durationSec,
@@ -70,40 +74,10 @@ export async function remotionRender(
     errorCode: 'NONE',
     retryable: false,
     confidence: 0.95,
-    costYuan: 0.5,
+    costYuan: 0,
     humanReviewRequired: false,
     sideEffects: [`耗时 ${((Date.now() - startMs) / 1000).toFixed(1)}s`],
   }
 
-  return { video, renderJobId: renderId, meta }
-}
-
-async function pollRender(baseUrl: string, apiKey: string, renderId: string): Promise<string> {
-  const deadline = Date.now() + 180_000 // 3 min timeout
-
-  while (Date.now() < deadline) {
-    await sleep(5000)
-
-    const resp = await fetch(`${baseUrl}/v1/render/${renderId}`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-    })
-
-    if (!resp.ok) continue
-
-    const data = (await resp.json()) as { status?: string; outputUrl?: string }
-
-    if (data.status === 'done' && data.outputUrl) {
-      return data.outputUrl
-    }
-
-    if (data.status === 'error') {
-      throw new Error('Remotion 渲染失败')
-    }
-  }
-
-  throw new Error('Remotion 渲染超时')
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
+  return { video, renderJobId: outputPath, meta }
 }
