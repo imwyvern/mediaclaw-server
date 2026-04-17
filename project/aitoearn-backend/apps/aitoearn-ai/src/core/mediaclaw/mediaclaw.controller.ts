@@ -43,7 +43,7 @@ export class MediaclawController {
     const taskId = randomUUID()
     await this.queueService.addMediaclawPipelineJob({
       pipelineType: 'product-showcase',
-      input: dto as any,
+      input: { ...dto } as Record<string, unknown>,
       userId: 'system', // TODO: 从 token 获取
       orgId: 'default',
       taskId,
@@ -60,7 +60,7 @@ export class MediaclawController {
     const taskId = randomUUID()
     await this.queueService.addMediaclawPipelineJob({
       pipelineType: 'ai-live',
-      input: dto as any,
+      input: { ...dto } as Record<string, unknown>,
       userId: 'system',
       orgId: 'default',
       taskId,
@@ -77,7 +77,7 @@ export class MediaclawController {
     const taskId = randomUUID()
     await this.queueService.addMediaclawPipelineJob({
       pipelineType: 'explainer',
-      input: dto as any,
+      input: { ...dto } as Record<string, unknown>,
       userId: 'system',
       orgId: 'default',
       taskId,
