@@ -1,6 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
-import { Cron } from '@nestjs/schedule'
 import {
   VideoAnalytics,
   VideoAnalyticsDataSource,
@@ -59,7 +58,7 @@ export class AnalyticsCollectorService {
     private readonly acquisitionService: AcquisitionService,
   ) {}
 
-  @Cron('0 3 * * *')
+  // Cron disabled — on-demand only. Call collectDailySnapshots() manually via API or admin action.
   async collectDailySnapshots() {
     return this.runDailyCollection()
   }
