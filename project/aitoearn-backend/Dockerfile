@@ -1,4 +1,4 @@
-FROM node:20-slim AS deps
+FROM node:22-slim AS deps
 
 WORKDIR /app
 
@@ -17,10 +17,11 @@ COPY deps/libs ./libs
 
 RUN pnpm install --prod --frozen-lockfile
 
-FROM node:20-slim AS production
+FROM node:22-slim AS production
 
 WORKDIR /app
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--experimental-require-module"
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
