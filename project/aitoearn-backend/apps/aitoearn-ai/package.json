@@ -39,6 +39,7 @@
     "data-urls": "^5.0.0",
     "dayjs": "^1.11.14",
     "express": "5.1.0",
+    "execa": "^5.1.1",
     "image-size": "^1.1.1",
     "ioredis": "5.9.3",
     "js-yaml": "^4.1.0",

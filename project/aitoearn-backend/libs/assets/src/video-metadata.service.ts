@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { UserType } from '@yikart/common'
 import { Asset, AssetRepository, AssetStatus, AssetType } from '@yikart/mongodb'
-import { execa } from 'execa'
+import execa from 'execa'
 import { StorageProvider } from './storage-provider'
 import { generateAssetPath, PathGeneratorOptions } from './utils/path-generator'
 
@@ -76,7 +76,7 @@ export class VideoMetadataService {
       '-',
     ], {
       timeout: 60000,
-      encoding: 'buffer',
+      encoding: null,
     })
 
     return Buffer.from(stdout)
