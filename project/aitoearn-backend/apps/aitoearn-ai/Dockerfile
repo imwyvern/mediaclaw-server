@@ -1,28 +1,47 @@
-FROM node:24-alpine AS deps
-
-RUN npm install -g pnpm
+FROM node:20-slim AS deps
 
 WORKDIR /app
 
-COPY deps/ ./
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --prod
+RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
 
-FROM node:24-alpine AS production
+COPY deps/package.json ./package.json
+COPY deps/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY deps/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY deps/.npmrc ./.npmrc
+COPY deps/apps ./apps
+COPY deps/libs ./libs
 
-ARG APP_NAME
+RUN pnpm install --prod --frozen-lockfile
 
-RUN apk add --no-cache curl ffmpeg
+FROM node:20-slim AS production
 
 WORKDIR /app
-
-COPY assets/ ./
-COPY --from=deps /app/ ./
-
-COPY apps/ ./apps/
-COPY libs/ ./libs/
-
 ENV NODE_ENV=production
-ENV APP_NAME=$APP_NAME
 
-CMD ["sh", "-c", "echo 'nameserver 8.8.8.8' >> /etc/resolv.conf && echo 'nameserver 1.1.1.1' >> /etc/resolv.conf && node apps/${APP_NAME}/src/main.js -c config.js"]
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    fontconfig \
+    libfreetype6 \
+    fonts-noto-cjk \
+    python3 \
+  && fc-cache -f \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json ./
+COPY config.js ./config.js
+COPY docker-runtime.cjs ./docker-runtime.cjs
+COPY assets ./assets
+COPY apps ./apps
+COPY libs ./libs
+
+EXPOSE 3010
+
+CMD ["node", "docker-runtime.cjs", "apps/aitoearn-ai/src/main.js"]

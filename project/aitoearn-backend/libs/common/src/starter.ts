@@ -92,7 +92,7 @@ export async function startApplication(Module: Type<unknown>, config: BaseConfig
       pinoHttp: [
         {
           level: 'trace',
-          genReqId: (req, res) => {
+          genReqId: (req: Request, res: Response) => {
             const requestId = req.headers['x-request-id'] || reqIdGenerator()
             req.headers['x-request-id'] = requestId
             if (!res.headersSent) {

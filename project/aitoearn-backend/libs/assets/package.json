@@ -22,7 +22,7 @@
     "@yikart/mongodb": "workspace:*",
     "@yikart/redlock": "workspace:*",
     "dayjs": "^1.11.13",
-    "nanoid": "^5.1.6",
+    "nanoid": "^3.3.11",
     "tslib": "^2.3.0",
     "zod": "^4.3.5"
   },

@@ -31,7 +31,7 @@
     "accept-language-parser": "^1.5.0",
     "art-template": "^4.13.4",
     "commander": "^14.0.0",
-    "nanoid": "^5.1.6",
+    "nanoid": "^3.3.11",
     "nest-typed-config": "^2.10.1",
     "nestjs-pino": "^4.6.1",
     "pino": "^10.3.1",
